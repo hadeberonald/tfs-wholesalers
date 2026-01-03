@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import clientPromise from '@/lib/mongodb';
-import { generateOrderNumber } from '@/lib/utils';
+import clientPromise from '../../../lib/mongodb';
+import { generateOrderNumber } from '../../../lib/utils';
 
 export async function GET(request: NextRequest) {
   try {

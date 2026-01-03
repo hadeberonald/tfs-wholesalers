@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { CartItem, Cart } from '@/types';
+import { CartItem, Cart } from '../types';
 
 interface CartState extends Cart {
   addItem: (item: CartItem) => void;

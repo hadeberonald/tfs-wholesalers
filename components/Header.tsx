@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ShoppingCart, User, Menu, X, Search, LogOut } from 'lucide-react';
-import { useCartStore } from '@/lib/store';
-import { useAuth } from '@/lib/auth-context';
+import { useCartStore } from '../lib/store';
+import { useAuth } from '../lib/auth-context';
 
 export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);

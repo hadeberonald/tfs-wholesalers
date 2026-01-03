@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import ProductCard from '@/components/ProductCard';
+import ProductCard from '../../components/ProductCard';
 
 export default function FeaturedProducts() {
   const [products, setProducts] = useState([]);

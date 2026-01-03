@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { ShoppingCart, Heart } from 'lucide-react';
-import { useCartStore } from '@/lib/store';
+import { useCartStore } from '../lib/store';
 import toast from 'react-hot-toast';
 
 interface ProductCardProps {

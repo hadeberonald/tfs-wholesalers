@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import clientPromise from '@/lib/mongodb';
-import { hashPassword } from '@/lib/utils';
+import clientPromise from '../../../../lib/mongodb';
+import { hashPassword } from '../../../../lib/utils';
 import { cookies } from 'next/headers';
 import jwt from 'jsonwebtoken';
 
