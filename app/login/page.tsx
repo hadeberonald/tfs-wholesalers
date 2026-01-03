@@ -1,14 +1,13 @@
 'use client';
-export const dynamic = 'force-dynamic';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useAuth } from '../../lib/auth-context';
+import { useAuth } from '@/lib/auth-context';
 import { Lock, Mail, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-export default function LoginPage() {
+function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -19,7 +18,6 @@ export default function LoginPage() {
   const redirect = searchParams.get('redirect') || '/';
 
   useEffect(() => {
-    // If already logged in, redirect
     if (user) {
       router.push(redirect);
     }
@@ -44,7 +42,6 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center px-4 py-12">
       <div className="max-w-md w-full">
-        {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-brand-orange rounded-2xl mb-4">
             <span className="text-white font-bold text-2xl">TFS</span>
@@ -53,7 +50,6 @@ export default function LoginPage() {
           <p className="text-gray-600">Sign in to your TFS Wholesalers account</p>
         </div>
 
-        {/* Login Form */}
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <form onSubmit={handleSubmit} className="space-y-6">
             {error && (
@@ -131,7 +127,6 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Demo Credentials */}
         <div className="mt-6 bg-blue-50 border border-blue-200 rounded-xl p-4">
           <p className="text-sm font-semibold text-blue-900 mb-2">Demo Credentials:</p>
           <div className="text-xs text-blue-800 space-y-1">
@@ -142,5 +137,22 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-brand-orange rounded-2xl mb-4 animate-pulse">
+            <span className="text-white font-bold text-2xl">TFS</span>
+          </div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    }>
+      <LoginForm />
+    </Suspense>
   );
 }
