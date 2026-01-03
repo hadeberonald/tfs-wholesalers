@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useAuth } from '@/lib/auth-context';
+import { useAuth } from '../../lib/auth-context';
 import { Lock, Mail, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCartStore } from '@/lib/store';
+import { useCartStore } from '../../lib/store';
 import Link from 'next/link';
 import { Minus, Plus, Trash2, ShoppingBag } from 'lucide-react';
 import toast from 'react-hot-toast';
