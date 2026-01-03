@@ -1,8 +1,8 @@
-import HeroSection from '@/components/home/HeroSection';
-import SpecialsSection from '@/components/home/SpecialsSection';
-import CategoriesSection from '@/components/home/CategoriesSection';
-import FeaturedProducts from '@/components/home/FeaturedProducts';
-import WhyChooseUs from '@/components/home/WhyChooseUs';
+import HeroSection from '../components/home/HeroSection';
+import SpecialsSection from '../components/home/SpecialsSection';
+import CategoriesSection from '../components/home/CategoriesSection';
+import FeaturedProducts from '../components/home/FeaturedProducts';
+import WhyChooseUs from '../components/home/WhyChooseUs';
 
 export default function Home() {
   return (

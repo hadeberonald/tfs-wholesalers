@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import jwt from 'jsonwebtoken';
-import clientPromise from '@/lib/mongodb';
+import clientPromise from '../../../../lib/mongodb';
 import { ObjectId } from 'mongodb';
 
 const JWT_SECRET = process.env.NEXTAUTH_SECRET || 'your-secret-key-change-in-production';

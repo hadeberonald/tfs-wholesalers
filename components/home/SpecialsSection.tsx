@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Tag } from 'lucide-react';
-import ProductCard from '@/components/ProductCard';
+import ProductCard from '../../components/ProductCard';
 
 interface Product {
   _id: string;
