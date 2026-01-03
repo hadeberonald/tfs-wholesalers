@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useCartStore } from '@/lib/store';
+import { useCartStore } from '../../lib/store';
 import { MapPin, CreditCard } from 'lucide-react';
 import toast from 'react-hot-toast';
 
