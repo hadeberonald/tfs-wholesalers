@@ -1,11 +1,17 @@
-import { MongoClient } from 'mongodb';
+import { MongoClient, ServerApiVersion } from 'mongodb';
 
 if (!process.env.MONGODB_URI) {
-  throw new Error('Please add your Mongo URI to .env.local');
+  throw new Error('Please add your Mongo URI to .env');
 }
 
 const uri = process.env.MONGODB_URI;
-const options = {};
+
+const options = {
+  tls: true,
+  tlsAllowInvalidCertificates: true,
+  serverSelectionTimeoutMS: 30000,
+  socketTimeoutMS: 45000,
+};
 
 let client: MongoClient;
 let clientPromise: Promise<MongoClient>;
