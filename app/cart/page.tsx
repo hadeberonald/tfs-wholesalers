@@ -1,4 +1,5 @@
 'use client';
+export const dynamic = 'force-dynamic';
 
 import { useCartStore } from '../../lib/store';
 import Link from 'next/link';
