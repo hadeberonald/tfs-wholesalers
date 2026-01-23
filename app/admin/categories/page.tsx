@@ -1,4 +1,3 @@
-'use client'
 import { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, ChevronRight, ChevronDown, Star, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -316,7 +315,7 @@ export default function AdminCategoriesPage() {
 
         {hasChildren && isExpanded && (
           <div>
-            {category.children.map(child => renderCategory(child, level + 1))}
+            {category.children?.map(child => renderCategory(child, level + 1))}
           </div>
         )}
       </div>
