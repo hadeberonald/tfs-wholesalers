@@ -1,3 +1,4 @@
+"use client"
 import { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, ChevronRight, ChevronDown, Star, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
