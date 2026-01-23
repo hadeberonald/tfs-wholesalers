@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
             packageNumber,
             totalPackages,
           }
-        }
+        } as any
       }
     );
     
