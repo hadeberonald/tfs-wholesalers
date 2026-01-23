@@ -1,108 +1,79 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { Loader2, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
-import Link from 'next/link';
+import { useEffect, useState, Suspense } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { CheckCircle, XCircle, Loader2 } from 'lucide-react';
 
-export default function PaymentCallbackPage() {
-  const router = useRouter();
+function PaymentCallbackContent() {
   const searchParams = useSearchParams();
-  const [status, setStatus] = useState<'loading' | 'success' | 'error' | 'cancelled'>('loading');
-  const [orderId, setOrderId] = useState<string | null>(null);
+  const router = useRouter();
+  const [status, setStatus] = useState<'loading' | 'success' | 'failed'>('loading');
+  const [message, setMessage] = useState('');
 
   useEffect(() => {
-    handleCallback();
-  }, []);
-
-  const handleCallback = async () => {
+    const paymentStatus = searchParams.get('status');
     const reference = searchParams.get('reference');
-    const trxref = searchParams.get('trxref');
-    const paymentRef = reference || trxref;
 
-    if (!paymentRef) {
-      setStatus('error');
-      return;
+    if (paymentStatus === 'success') {
+      setStatus('success');
+      setMessage('Payment successful! Your order has been confirmed.');
+      
+      // Redirect to order confirmation after 3 seconds
+      setTimeout(() => {
+        router.push(`/orders/${reference}`);
+      }, 3000);
+    } else {
+      setStatus('failed');
+      setMessage('Payment failed. Please try again or contact support.');
     }
-
-    try {
-      // Verify the payment
-      const res = await fetch('/api/payment/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reference: paymentRef }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok && data.verified) {
-        setStatus('success');
-        setOrderId(data.orderId);
-        
-        // Redirect to success page after 2 seconds
-        setTimeout(() => {
-          if (data.orderId) {
-            router.push(`/checkout/success/${data.orderId}`);
-          }
-        }, 2000);
-      } else {
-        setStatus('error');
-      }
-    } catch (error) {
-      console.error('Callback error:', error);
-      setStatus('error');
-    }
-  };
+  }, [searchParams, router]);
 
   return (
-    <div className="min-h-screen bg-gray-50 pt-20 flex items-center justify-center">
-      <div className="max-w-md mx-auto px-4">
-        <div className="bg-white rounded-2xl p-8 text-center shadow-lg">
-          {status === 'loading' && (
-            <>
-              <Loader2 className="w-16 h-16 text-brand-orange animate-spin mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-brand-black mb-2">Verifying Payment</h2>
-              <p className="text-gray-600">Please wait while we confirm your payment...</p>
-            </>
-          )}
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+      <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
+        {status === 'loading' && (
+          <>
+            <Loader2 className="w-16 h-16 text-brand-orange animate-spin mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Processing Payment</h2>
+            <p className="text-gray-600">Please wait while we verify your payment...</p>
+          </>
+        )}
 
-          {status === 'success' && (
-            <>
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <CheckCircle className="w-10 h-10 text-green-600" />
-              </div>
-              <h2 className="text-2xl font-bold text-brand-black mb-2">Payment Successful!</h2>
-              <p className="text-gray-600 mb-4">Your payment has been confirmed. Redirecting...</p>
-            </>
-          )}
+        {status === 'success' && (
+          <>
+            <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Payment Successful!</h2>
+            <p className="text-gray-600 mb-6">{message}</p>
+            <p className="text-sm text-gray-500">Redirecting to your order details...</p>
+          </>
+        )}
 
-          {status === 'error' && (
-            <>
-              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <XCircle className="w-10 h-10 text-red-600" />
-              </div>
-              <h2 className="text-2xl font-bold text-brand-black mb-2">Payment Failed</h2>
-              <p className="text-gray-600 mb-6">There was an issue processing your payment.</p>
-              <Link href="/cart" className="btn-primary inline-block">
-                Return to Cart
-              </Link>
-            </>
-          )}
-
-          {status === 'cancelled' && (
-            <>
-              <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <AlertCircle className="w-10 h-10 text-yellow-600" />
-              </div>
-              <h2 className="text-2xl font-bold text-brand-black mb-2">Payment Cancelled</h2>
-              <p className="text-gray-600 mb-6">Your payment was cancelled.</p>
-              <Link href="/cart" className="btn-primary inline-block">
-                Return to Cart
-              </Link>
-            </>
-          )}
-        </div>
+        {status === 'failed' && (
+          <>
+            <XCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Payment Failed</h2>
+            <p className="text-gray-600 mb-6">{message}</p>
+            <button
+              onClick={() => router.push('/checkout')}
+              className="btn-primary w-full"
+            >
+              Try Again
+            </button>
+          </>
+        )}
       </div>
     </div>
+  );
+}
+
+export default function PaymentCallback() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Loader2 className="w-16 h-16 text-brand-orange animate-spin" />
+      </div>
+    }>
+      <PaymentCallbackContent />
+    </Suspense>
   );
 }

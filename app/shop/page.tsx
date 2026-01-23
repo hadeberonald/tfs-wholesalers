@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Search, Filter, Package, ChevronDown, ChevronRight, SlidersHorizontal, Home } from 'lucide-react';
@@ -33,7 +33,7 @@ interface Product {
   description?: string;
 }
 
-export default function ShopPage() {
+function ShopPageContent() {
   const searchParams = useSearchParams();
   const categoryFromUrl = searchParams.get('category');
   
@@ -251,8 +251,6 @@ export default function ShopPage() {
           </p>
         </div>
 
-        {/* Subcategories Grid - Removed */}
-
         <div className="grid lg:grid-cols-4 gap-6">
           {/* Sidebar Filters - Desktop */}
           <div className="hidden lg:block lg:col-span-1">
@@ -400,5 +398,27 @@ export default function ShopPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ShopPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 pt-16">
+        <div className="max-w-7xl mx-auto px-4 py-8 pt-24">
+          <div className="animate-pulse">
+            <div className="h-8 bg-gray-200 rounded w-1/4 mb-4"></div>
+            <div className="h-4 bg-gray-200 rounded w-1/2 mb-8"></div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div key={i} className="bg-white rounded-2xl h-96"></div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    }>
+      <ShopPageContent />
+    </Suspense>
   );
 }

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 
+// Force dynamic rendering - prevents static generation issues
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
@@ -16,16 +19,14 @@ export async function GET(request: NextRequest) {
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
 
-    // Create text search index if not exists (run this once)
-    // db.collection('products').createIndex({ name: 'text', description: 'text', category: 'text' });
-
-    // Search products using text search and regex for better results
+    // Search products using regex for better results
     const searchRegex = new RegExp(query.trim(), 'i');
     
     const products = await db
       .collection('products')
       .find({
         active: true,
+        stockLevel: { $gt: 0 },
         $or: [
           { name: searchRegex },
           { description: searchRegex },
