@@ -8,7 +8,7 @@ import {
   Alert,
   ScrollView,
 } from 'react-native';
-import { BarCodeScanner } from 'expo-barcode-scanner';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { Package, QrCode, CheckCircle } from 'lucide-react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -22,6 +22,7 @@ export default function PackagingScreen() {
   const { orders, createPackage, completeOrder } = useOrdersStore();
   const order = orders.find((o) => o._id === orderId);
 
+  const [permission, requestPermission] = useCameraPermissions();
   const [scanning, setScanning] = useState(false);
   const [totalPackages, setTotalPackages] = useState('1');
   const [packages, setPackages] = useState<any[]>([]);
@@ -184,10 +185,12 @@ export default function PackagingScreen() {
           {/* QR Scanner */}
           {scanning ? (
             <View style={styles.scannerContainer}>
-              <BarCodeScanner
-                onBarCodeScanned={handleQRScanned}
+              <CameraView
                 style={StyleSheet.absoluteFillObject}
-                barCodeTypes={[BarCodeScanner.Constants.BarCodeType.qr]}
+                onBarcodeScanned={handleQRScanned}
+                barcodeScannerSettings={{
+                  barcodeTypes: ['qr'],
+                }}
               />
               <View style={styles.scannerOverlay}>
                 <View style={styles.scannerFrame} />
@@ -202,7 +205,13 @@ export default function PackagingScreen() {
                 styles.scanButton,
                 currentPackageItems.length === 0 && styles.scanButtonDisabled,
               ]}
-              onPress={() => setScanning(true)}
+              onPress={() => {
+                if (!permission?.granted) {
+                  requestPermission();
+                } else {
+                  setScanning(true);
+                }
+              }}
               disabled={currentPackageItems.length === 0}
             >
               <QrCode size={24} color="#fff" />

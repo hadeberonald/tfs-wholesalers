@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 
-const API_URL = 'YOUR_API_URL'; // Replace with your actual API URL
+const API_URL = 'https://tfs-wholesalers.onrender.com';
 
 interface User {
   id: string;
@@ -28,24 +28,44 @@ export const useAuthStore = create<AuthState>((set) => ({
   login: async (email: string, password: string) => {
     try {
       set({ loading: true });
-      const response = await axios.post(`${API_URL}/api/auth/login`, {
+      
+      // Use the mobile-auth endpoint which returns a token
+      const response = await axios.post(`${API_URL}/api/mobile-auth/login`, {
         email,
         password,
       });
 
       const { user, token } = response.data;
       
+      // Validate that we received the required data
+      if (!token) {
+        throw new Error('No authentication token received from server');
+      }
+      
+      if (!user) {
+        throw new Error('No user data received from server');
+      }
+      
       // Only allow pickers to log in
       if (user.role !== 'picker') {
         throw new Error('This app is only for pickers. Please use the correct app for your role.');
       }
 
+      // Store the token and user data
       await AsyncStorage.setItem('auth_token', token);
       await AsyncStorage.setItem('user', JSON.stringify(user));
       
       set({ user, token, loading: false });
     } catch (error: any) {
       set({ loading: false });
+      
+      // Log the full error for debugging
+      console.error('Login error:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+      });
+      
       throw error;
     }
   },
