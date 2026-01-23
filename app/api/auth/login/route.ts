@@ -39,26 +39,27 @@ export async function POST(request: NextRequest) {
         role: user.role 
       },
       JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: '30d' }
     );
 
-    // Set cookie
+    // Set cookie for web clients
     cookies().set('auth-token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 7 days
+      maxAge: 60 * 60 * 24 * 30, // 30 days
       path: '/',
     });
 
-    // Return user info (without password)
+    // Return user info AND token (for mobile clients)
     return NextResponse.json({
       user: {
         id: user._id.toString(),
         email: user.email,
         name: user.name,
         role: user.role,
-      }
+      },
+      token, // Mobile apps need this
     });
   } catch (error) {
     console.error('Login error:', error);
