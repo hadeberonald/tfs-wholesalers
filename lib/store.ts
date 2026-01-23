@@ -1,82 +1,73 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { CartItem, Cart } from '../types';
 
-interface CartState extends Cart {
-  addItem: (item: CartItem) => void;
-  removeItem: (productId: string) => void;
-  updateQuantity: (productId: string, quantity: number) => void;
-  clearCart: () => void;
-  setDeliveryFee: (fee: number) => void;
+interface CartItem {
+  id: string;
+  name: string;
+  price: number;
+  image: string;
+  quantity: number;
 }
 
-export const useCartStore = create<CartState>()(
+interface CartStore {
+  items: CartItem[];
+  addItem: (item: CartItem) => void;
+  removeItem: (id: string) => void;
+  updateQuantity: (id: string, quantity: number) => void;
+  clearCart: () => void;
+  getTotal: () => number;
+}
+
+export const useCartStore = create<CartStore>()(
   persist(
     (set, get) => ({
       items: [],
-      subtotal: 0,
-      deliveryFee: 0,
-      total: 0,
-
-      addItem: (item: CartItem) => {
-        const items = get().items;
-        const existingItem = items.find(i => i.productId === item.productId);
-
-        let newItems: CartItem[];
-        if (existingItem) {
-          newItems = items.map(i =>
-            i.productId === item.productId
-              ? { ...i, quantity: i.quantity + item.quantity }
-              : i
-          );
-        } else {
-          newItems = [...items, item];
-        }
-
-        const subtotal = newItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
-        const deliveryFee = get().deliveryFee;
-        const total = subtotal + deliveryFee;
-
-        set({ items: newItems, subtotal, total });
+      
+      addItem: (item) => {
+        set((state) => {
+          const existingItem = state.items.find((i) => i.id === item.id);
+          
+          if (existingItem) {
+            return {
+              items: state.items.map((i) =>
+                i.id === item.id
+                  ? { ...i, quantity: i.quantity + item.quantity }
+                  : i
+              ),
+            };
+          }
+          
+          return { items: [...state.items, item] };
+        });
       },
-
-      removeItem: (productId: string) => {
-        const newItems = get().items.filter(i => i.productId !== productId);
-        const subtotal = newItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
-        const deliveryFee = get().deliveryFee;
-        const total = subtotal + deliveryFee;
-
-        set({ items: newItems, subtotal, total });
+      
+      removeItem: (id) => {
+        set((state) => ({
+          items: state.items.filter((item) => item.id !== id),
+        }));
       },
-
-      updateQuantity: (productId: string, quantity: number) => {
-        if (quantity <= 0) {
-          get().removeItem(productId);
-          return;
-        }
-
-        const newItems = get().items.map(i =>
-          i.productId === productId ? { ...i, quantity } : i
-        );
-        const subtotal = newItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
-        const deliveryFee = get().deliveryFee;
-        const total = subtotal + deliveryFee;
-
-        set({ items: newItems, subtotal, total });
+      
+      updateQuantity: (id, quantity) => {
+        set((state) => ({
+          items: state.items.map((item) =>
+            item.id === id ? { ...item, quantity } : item
+          ),
+        }));
       },
-
+      
       clearCart: () => {
-        set({ items: [], subtotal: 0, deliveryFee: 0, total: 0 });
+        set({ items: [] });
       },
-
-      setDeliveryFee: (fee: number) => {
-        const subtotal = get().subtotal;
-        const total = subtotal + fee;
-        set({ deliveryFee: fee, total });
+      
+      getTotal: () => {
+        return get().items.reduce(
+          (sum, item) => sum + (item.price * item.quantity),
+          0
+        );
       },
     }),
     {
-      name: 'tfs-cart-storage',
+      name: 'cart-storage',
     }
   )
 );

@@ -1,0 +1,30 @@
+# React Native / Expo
+node_modules/
+.expo/
+.expo-shared/
+dist/
+npm-debug.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+web-build/
+
+# macOS
+.DS_Store
+
+# Environment
+.env
+.env.local
+
+# Builds
+android/
+ios/
+*.apk
+*.ipa
+*.aab
+
+# This folder won't affect your Next.js deployment
+# It's completely separate

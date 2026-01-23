@@ -1,14 +1,16 @@
 import type { Metadata } from 'next';
-import { Toaster } from 'react-hot-toast';
+import { Inter } from 'next/font/google';
 import './globals.css';
-import Header from '../components/Header';
-import Footer from '../components/Footer';
-import { AuthProvider } from '../lib/auth-context';
+import ConditionalHeader from '@/components/ConditionalHeader';
+import Footer from '@/components/Footer';
+import { AuthProvider } from '@/lib/auth-context';
+import { Toaster } from 'react-hot-toast';
+
+const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: 'TFS Wholesalers - Quality Products at Wholesale Prices',
-  description: 'Your trusted wholesale supplier for groceries, home supplies, appliances, and cleaning products.',
-  keywords: 'wholesale, groceries, home supplies, appliances, cleaning supplies, bulk products',
+  description: 'South Africa\'s trusted wholesale supplier',
 };
 
 export default function RootLayout({
@@ -18,23 +20,22 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>
+      <body className={inter.className}>
         <AuthProvider>
-          <Header />
-          <main className="min-h-screen">
-            {children}
-          </main>
+          <ConditionalHeader />
+          <main>{children}</main>
           <Footer />
           <Toaster 
             position="top-right"
             toastOptions={{
-              duration: 4000,
+              duration: 3000,
               style: {
-                background: '#1A1A1A',
+                background: '#363636',
                 color: '#fff',
-                borderRadius: '0.75rem',
+                maxWidth: '500px',
               },
               success: {
+                duration: 3000,
                 iconTheme: {
                   primary: '#FF6B35',
                   secondary: '#fff',
