@@ -21,10 +21,6 @@ const Circle = dynamic(
   () => import('react-leaflet').then((mod) => mod.Circle),
   { ssr: false }
 );
-const useMapEvents = dynamic(
-  () => import('react-leaflet').then((mod) => mod.useMapEvents),
-  { ssr: false }
-);
 
 interface AddressMapPickerProps {
   onLocationSelect: (data: {
@@ -68,9 +64,13 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c;
 }
 
+// Map click handler component (must be used inside MapContainer)
 function MapClickHandler({ onLocationChange }: { onLocationChange: (lat: number, lng: number) => void }) {
+  // Import useMapEvents directly in the component (not dynamically)
+  const { useMapEvents } = require('react-leaflet');
+  
   useMapEvents({
-    click(e) {
+    click(e: any) {
       onLocationChange(e.latlng.lat, e.latlng.lng);
     },
   });
@@ -94,7 +94,7 @@ export default function AddressMapPicker({
   const [error, setError] = useState('');
   const [isWithinRange, setIsWithinRange] = useState(true);
   const [showMap, setShowMap] = useState(false);
-  const searchTimeoutRef = useRef<NodeJS.Timeout>();
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
   // Search addresses as user types
   const handleSearch = async (query: string) => {
