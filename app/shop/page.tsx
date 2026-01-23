@@ -143,21 +143,6 @@ export default function ShopPage() {
     }
   };
 
-  const handleAddToCart = (productId: string) => {
-    const product = products.find(p => p._id === productId);
-    if (!product) return;
-
-    addItem({
-      id: product._id,
-      name: product.name,
-      price: product.specialPrice || product.price,
-      image: product.images[0] || '',
-      quantity: 1,
-    });
-
-    toast.success(`${product.name} added to cart!`);
-  };
-
   const toggleCategory = (categoryId: string) => {
     setExpandedCategories(prev => {
       const newSet = new Set(prev);
@@ -225,7 +210,7 @@ export default function ShopPage() {
         
         {hasChildren && isExpanded && (
           <div className="mt-1 space-y-1">
-            {category.children.map(child => renderCategoryFilter(child, level + 1))}
+            {category.children?.map(child => renderCategoryFilter(child, level + 1))}
           </div>
         )}
       </div>
@@ -407,7 +392,6 @@ export default function ShopPage() {
                   <ProductCard
                     key={product._id}
                     product={product}
-                    onAddToCart={handleAddToCart}
                   />
                 ))}
               </div>

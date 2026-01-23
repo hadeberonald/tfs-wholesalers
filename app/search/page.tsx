@@ -72,21 +72,6 @@ export default function SearchPage() {
     }
   };
 
-  const handleAddToCart = (productId: string) => {
-    const product = products.find(p => p._id === productId);
-    if (!product) return;
-
-    addItem({
-      id: product._id,
-      name: product.name,
-      price: product.specialPrice || product.price,
-      image: product.images[0] || '',
-      quantity: 1,
-    });
-
-    toast.success(`${product.name} added to cart!`);
-  };
-
   const clearSearch = () => {
     setSearchQuery('');
     setProducts([]);
@@ -196,7 +181,6 @@ export default function SearchPage() {
                   <ProductCard
                     key={product._id}
                     product={product}
-                    onAddToCart={handleAddToCart}
                   />
                 ))}
               </div>
