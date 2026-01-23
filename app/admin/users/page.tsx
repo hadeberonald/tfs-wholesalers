@@ -89,42 +89,55 @@ export default function AdminUsersPage() {
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  e.preventDefault();
 
-    // Validate password requirement for new users
-    if (!editingUser && !formData.password) {
-      toast.error('Password is required for new users');
-      return;
+  // Validate password requirement for new users
+  if (!editingUser && !formData.password) {
+    toast.error('Password is required for new users');
+    return;
+  }
+
+  console.log('📤 Submitting user data:', {
+    ...formData,
+    password: '***' // Don't log actual password
+  });
+
+  try {
+    const url = editingUser ? `/api/users/${editingUser._id}` : '/api/users';
+    const method = editingUser ? 'PUT' : 'POST';
+
+    const payload = editingUser && !formData.password
+      ? { ...formData, password: undefined } // Don't send password if not changed
+      : formData;
+
+    console.log('🌐 Making request to:', url, method);
+
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    console.log('📥 Response status:', res.status);
+
+    if (res.ok) {
+      const data = await res.json();
+      console.log('✅ Success:', data);
+      toast.success(editingUser ? 'User updated!' : 'User created!');
+      setShowModal(false);
+      setEditingUser(null);
+      resetForm();
+      fetchUsers();
+    } else {
+      const error = await res.json();
+      console.error('❌ Error response:', error);
+      toast.error(error.error || 'Failed to save user');
     }
-
-    try {
-      const url = editingUser ? `/api/users/${editingUser._id}` : '/api/users';
-      const method = editingUser ? 'PUT' : 'POST';
-
-      const payload = editingUser && !formData.password
-        ? { ...formData, password: undefined } // Don't send password if not changed
-        : formData;
-
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.ok) {
-        toast.success(editingUser ? 'User updated!' : 'User created!');
-        setShowModal(false);
-        setEditingUser(null);
-        resetForm();
-        fetchUsers();
-      } else {
-        const error = await res.json();
-        toast.error(error.error || 'Failed to save user');
-      }
-    } catch (error) {
-      toast.error('An error occurred');
-    }
-  };
+  } catch (error) {
+    console.error('❌ Exception:', error);
+    toast.error('An error occurred: ' + (error as Error).message);
+  }
+};
 
   const filteredUsers = users.filter(u => {
     const matchesSearch = 
