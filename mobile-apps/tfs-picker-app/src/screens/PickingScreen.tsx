@@ -8,8 +8,7 @@ import {
   Alert,
   Vibration,
 } from 'react-native';
-import { BarCodeScanner } from 'expo-barcode-scanner';
-import { Camera } from 'expo-camera';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { CheckCircle, XCircle, Package, Camera as CameraIcon } from 'lucide-react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -23,18 +22,11 @@ export default function PickingScreen() {
   const { orders, scanProduct } = useOrdersStore();
   const order = orders.find((o) => o._id === orderId);
 
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [permission, requestPermission] = useCameraPermissions();
   const [scanning, setScanning] = useState(false);
   const [scannedItems, setScannedItems] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    (async () => {
-      const { status } = await Camera.requestCameraPermissionsAsync();
-      setHasPermission(status === 'granted');
-    })();
-  }, []);
-
-  const handleBarCodeScanned = async ({ type, data }: any) => {
+  const handleBarCodeScanned = async ({ data }: any) => {
     if (!scanning) return;
 
     setScanning(false);
@@ -69,7 +61,7 @@ export default function PickingScreen() {
     }
   };
 
-  if (hasPermission === null) {
+  if (!permission) {
     return (
       <View style={styles.centered}>
         <Text>Requesting camera permission...</Text>
@@ -77,11 +69,17 @@ export default function PickingScreen() {
     );
   }
 
-  if (hasPermission === false) {
+  if (!permission.granted) {
     return (
       <View style={styles.centered}>
         <CameraIcon size={64} color="#ccc" />
         <Text style={styles.errorText}>No access to camera</Text>
+        <TouchableOpacity
+          style={styles.scanButton}
+          onPress={requestPermission}
+        >
+          <Text style={styles.scanButtonText}>Grant Permission</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -152,9 +150,12 @@ export default function PickingScreen() {
       {/* Scanner */}
       {scanning && (
         <View style={styles.scannerContainer}>
-          <BarCodeScanner
-            onBarCodeScanned={handleBarCodeScanned}
+          <CameraView
             style={StyleSheet.absoluteFillObject}
+            onBarcodeScanned={handleBarCodeScanned}
+            barcodeScannerSettings={{
+              barcodeTypes: ['qr', 'ean13', 'ean8', 'code128', 'code39'],
+            }}
           />
           <View style={styles.scannerOverlay}>
             <View style={styles.scannerFrame} />
@@ -217,6 +218,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 16,
     color: '#666',
+    marginBottom: 16,
   },
   header: {
     backgroundColor: '#fff',
