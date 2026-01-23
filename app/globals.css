@@ -146,3 +146,26 @@ body {
     padding: 3rem 1rem;
   }
 }
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-in-out;
+}
+
+/* Add proper spacing for fixed header */
+main {
+  padding-top: 0;
+}
+
+/* Pages with header need top padding */
+.page-with-header {
+  padding-top: 80px;
+}

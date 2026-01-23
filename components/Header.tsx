@@ -26,37 +26,36 @@ export default function Header() {
       isScrolled ? 'bg-white shadow-lg' : 'bg-white/95 backdrop-blur-sm'
     }`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        <div className="flex items-center justify-between h-20">
-          {/* Logo */}
-           <Link href="/" className="flex items-center space-x-3 group">
-  <div className="w-20 h-20 flex items-center justify-center transform group-hover:scale-105 transition-transform">
-    <img src="/logo.png" alt="TFS Logo" className="w-full h-full object-contain" />
-  </div>
-</Link>
+        <div className="flex items-center justify-between h-16">
+          {/* Logo - Smaller */}
+          <Link href="/" className="flex items-center space-x-2 group">
+            <div className="w-12 h-12 flex items-center justify-center transform group-hover:scale-105 transition-transform">
+              <img src="/logo.png" alt="TFS Logo" className="w-full h-full object-contain" />
+            </div>
+            
+          </Link>
 
           {/* Desktop Navigation */}
-          <nav className="hidden lg:flex items-center space-x-8">
-            <Link href="/" className="text-brand-black hover:text-brand-orange transition-colors font-medium">
+          <nav className="hidden lg:flex items-center space-x-6">
+            <Link href="/" className="text-brand-black hover:text-brand-orange transition-colors font-medium text-sm">
               Home
             </Link>
-            <Link href="/products" className="text-brand-black hover:text-brand-orange transition-colors font-medium">
-              Products
+            <Link href="/shop" className="text-brand-black hover:text-brand-orange transition-colors font-medium text-sm">
+              Shop
             </Link>
-            <Link href="/categories" className="text-brand-black hover:text-brand-orange transition-colors font-medium">
-              Categories
-            </Link>
-            <Link href="/specials" className="text-brand-black hover:text-brand-orange transition-colors font-medium">
+            
+            <Link href="/specials" className="text-brand-black hover:text-brand-orange transition-colors font-medium text-sm">
               Specials
             </Link>
             {user?.role === 'admin' && (
-              <Link href="/admin" className="text-brand-orange hover:text-orange-600 transition-colors font-semibold">
+              <Link href="/admin" className="text-brand-orange hover:text-orange-600 transition-colors font-semibold text-sm">
                 Admin
               </Link>
             )}
           </nav>
 
           {/* Right Actions */}
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2 sm:space-x-3">
             <Link 
               href="/search" 
               className="p-2 hover:bg-gray-100 rounded-lg transition-colors hidden sm:flex"
@@ -89,7 +88,7 @@ export default function Header() {
             ) : (
               <Link 
                 href="/login" 
-                className="btn-primary text-sm px-4 py-2 hidden sm:flex"
+                className="btn-primary text-sm px-3 py-1.5 hidden sm:flex"
               >
                 Sign In
               </Link>
@@ -102,7 +101,7 @@ export default function Header() {
             >
               <ShoppingCart className="w-5 h-5 text-brand-black" />
               {cartItemCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-brand-orange text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center animate-scale-in">
+                <span className="absolute -top-1 -right-1 bg-brand-orange text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
                   {cartItemCount}
                 </span>
               )}
@@ -126,32 +125,26 @@ export default function Header() {
 
       {/* Mobile Menu */}
       {isMenuOpen && (
-        <div className="lg:hidden bg-white border-t border-gray-200 animate-fade-in">
-          <nav className="max-w-7xl mx-auto px-4 py-4 space-y-3">
+        <div className="lg:hidden bg-white border-t border-gray-200">
+          <nav className="max-w-7xl mx-auto px-4 py-4 space-y-2">
             <Link 
               href="/" 
-              className="block py-2 text-brand-black hover:text-brand-orange transition-colors font-medium"
+              className="block py-2 text-brand-black hover:text-brand-orange transition-colors font-medium text-sm"
               onClick={() => setIsMenuOpen(false)}
             >
               Home
             </Link>
             <Link 
-              href="/products" 
-              className="block py-2 text-brand-black hover:text-brand-orange transition-colors font-medium"
+              href="/shop" 
+              className="block py-2 text-brand-black hover:text-brand-orange transition-colors font-medium text-sm"
               onClick={() => setIsMenuOpen(false)}
             >
-              Products
+              shop
             </Link>
-            <Link 
-              href="/categories" 
-              className="block py-2 text-brand-black hover:text-brand-orange transition-colors font-medium"
-              onClick={() => setIsMenuOpen(false)}
-            >
-              Categories
-            </Link>
+            
             <Link 
               href="/specials" 
-              className="block py-2 text-brand-black hover:text-brand-orange transition-colors font-medium"
+              className="block py-2 text-brand-black hover:text-brand-orange transition-colors font-medium text-sm"
               onClick={() => setIsMenuOpen(false)}
             >
               Specials
@@ -159,16 +152,16 @@ export default function Header() {
             {user?.role === 'admin' && (
               <Link 
                 href="/admin" 
-                className="block py-2 text-brand-orange hover:text-orange-600 transition-colors font-semibold"
+                className="block py-2 text-brand-orange hover:text-orange-600 transition-colors font-semibold text-sm"
                 onClick={() => setIsMenuOpen(false)}
               >
                 Admin Dashboard
               </Link>
             )}
-            <div className="pt-3 border-t border-gray-200 space-y-3">
+            <div className="pt-3 border-t border-gray-200 space-y-2">
               <Link 
                 href="/search" 
-                className="flex items-center space-x-2 py-2 text-brand-black hover:text-brand-orange transition-colors font-medium"
+                className="flex items-center space-x-2 py-2 text-brand-black hover:text-brand-orange transition-colors font-medium text-sm"
                 onClick={() => setIsMenuOpen(false)}
               >
                 <Search className="w-5 h-5" />
@@ -178,7 +171,7 @@ export default function Header() {
                 <>
                   <Link 
                     href={user.role === 'admin' ? '/admin' : '/account'} 
-                    className="flex items-center space-x-2 py-2 text-brand-black hover:text-brand-orange transition-colors font-medium"
+                    className="flex items-center space-x-2 py-2 text-brand-black hover:text-brand-orange transition-colors font-medium text-sm"
                     onClick={() => setIsMenuOpen(false)}
                   >
                     <User className="w-5 h-5" />
@@ -189,7 +182,7 @@ export default function Header() {
                       logout();
                       setIsMenuOpen(false);
                     }}
-                    className="flex items-center space-x-2 py-2 text-brand-black hover:text-brand-orange transition-colors font-medium w-full text-left"
+                    className="flex items-center space-x-2 py-2 text-brand-black hover:text-brand-orange transition-colors font-medium w-full text-left text-sm"
                   >
                     <LogOut className="w-5 h-5" />
                     <span>Logout</span>
@@ -198,7 +191,7 @@ export default function Header() {
               ) : (
                 <Link 
                   href="/login" 
-                  className="flex items-center space-x-2 py-2 text-brand-black hover:text-brand-orange transition-colors font-medium"
+                  className="flex items-center space-x-2 py-2 text-brand-black hover:text-brand-orange transition-colors font-medium text-sm"
                   onClick={() => setIsMenuOpen(false)}
                 >
                   <User className="w-5 h-5" />

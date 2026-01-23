@@ -2,9 +2,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { ShoppingCart, Heart } from 'lucide-react';
-import { useCartStore } from '../lib/store';
-import toast from 'react-hot-toast';
+import { ShoppingCart, Plus, Minus, Package, Check } from 'lucide-react';
+import { useCartStore } from '@/lib/store';
 
 interface ProductCardProps {
   product: {
@@ -13,94 +12,171 @@ interface ProductCardProps {
     slug: string;
     price: number;
     specialPrice?: number;
+    compareAtPrice?: number;
     images: string[];
-    category: string;
+    stockLevel: number;
+    onSpecial?: boolean;
   };
-  showDiscount?: boolean;
 }
 
-export default function ProductCard({ product, showDiscount }: ProductCardProps) {
-  const [imageError, setImageError] = useState(false);
+export default function ProductCard({ product }: ProductCardProps) {
+  const [quantity, setQuantity] = useState(1);
+  const [imgError, setImgError] = useState(false);
+  const [justAdded, setJustAdded] = useState(false);
   const addItem = useCartStore((state) => state.addItem);
 
   const displayPrice = product.specialPrice || product.price;
-  const hasDiscount = product.specialPrice && product.specialPrice < product.price;
-  const discountPercent = hasDiscount 
-    ? Math.round(((product.price - product.specialPrice!) / product.price) * 100)
+  const hasDiscount = product.compareAtPrice && product.compareAtPrice > displayPrice;
+  const discountPercent = hasDiscount
+    ? Math.round(((product.compareAtPrice! - displayPrice) / product.compareAtPrice!) * 100)
     : 0;
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
     addItem({
-      productId: product._id,
+      id: product._id,
       name: product.name,
       price: displayPrice,
-      quantity: 1,
-      image: product.images[0] || '/placeholder-product.png',
-      sku: product._id,
+      image: product.images[0] || '/placeholder.png',
+      quantity: quantity,
     });
-    toast.success('Added to cart!');
+    
+    setJustAdded(true);
+    setTimeout(() => {
+      setJustAdded(false);
+      setQuantity(1);
+    }, 1500);
+  };
+
+  const incrementQuantity = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (quantity < product.stockLevel) {
+      setQuantity(q => q + 1);
+    }
+  };
+
+  const decrementQuantity = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (quantity > 1) {
+      setQuantity(q => q - 1);
+    }
   };
 
   return (
-    <Link href={`/products/${product.slug}`} className="group block">
-      <div className="bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 transform hover:-translate-y-2">
-        {/* Image Container */}
-        <div className="relative aspect-square overflow-hidden bg-gray-100">
-          {hasDiscount && showDiscount && (
-            <div className="absolute top-3 left-3 z-10 bg-brand-orange text-white px-3 py-1 rounded-full text-sm font-bold">
-              -{discountPercent}%
-            </div>
-          )}
-          
-          <button
-            onClick={(e) => {
-              e.preventDefault();
-              toast('Wishlist coming soon!');
-            }}
-            className="absolute top-3 right-3 z-10 bg-white/90 backdrop-blur-sm p-2 rounded-full hover:bg-white transition-all opacity-0 group-hover:opacity-100"
-          >
-            <Heart className="w-5 h-5 text-gray-700" />
-          </button>
+    <Link
+      href={`/products/${product.slug}`}
+      className="group bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition-all duration-300 border border-gray-100 relative"
+    >
+      {/* Added Animation */}
+      {justAdded && (
+        <div className="absolute inset-0 bg-green-500/90 z-20 flex items-center justify-center animate-fade-in">
+          <div className="text-center">
+            <Check className="w-12 h-12 text-white mx-auto mb-2" />
+            <p className="text-white font-semibold">Added!</p>
+          </div>
+        </div>
+      )}
 
+      {/* Image */}
+      <div className="relative aspect-[4/3] overflow-hidden bg-gray-100">
+        {product.images[0] && !imgError ? (
           <img
-            src={product.images[0] || '/placeholder-product.png'}
+            src={product.images[0]}
             alt={product.name}
-            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-            onError={() => setImageError(true)}
+            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+            onError={() => setImgError(true)}
+            loading="lazy"
           />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <div className="text-center text-gray-400">
+              <Package className="w-12 h-12 mx-auto mb-2" />
+              <p className="text-xs">No Image</p>
+            </div>
+          </div>
+        )}
+        
+        {/* Badges */}
+        <div className="absolute top-2 left-2 flex flex-col space-y-1">
+          {product.onSpecial && (
+            <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+              SPECIAL
+            </span>
+          )}
+          {hasDiscount && (
+            <span className="bg-brand-orange text-white text-xs font-bold px-2 py-0.5 rounded-full">
+              {discountPercent}% OFF
+            </span>
+          )}
         </div>
 
-        {/* Content */}
-        <div className="p-5">
-          <p className="text-sm text-gray-500 mb-1">{product.category}</p>
-          <h3 className="font-semibold text-lg text-brand-black mb-3 line-clamp-2 group-hover:text-brand-orange transition-colors">
-            {product.name}
-          </h3>
+        {/* Stock Warning */}
+        {product.stockLevel < 10 && product.stockLevel > 0 && (
+          <div className="absolute top-2 right-2">
+            <span className="bg-yellow-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+              {product.stockLevel} left
+            </span>
+          </div>
+        )}
+      </div>
 
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="flex items-center space-x-2">
-                <span className="text-2xl font-bold text-brand-orange">
-                  R{displayPrice.toFixed(2)}
-                </span>
-                {hasDiscount && (
-                  <span className="text-sm text-gray-400 line-through">
-                    R{product.price.toFixed(2)}
-                  </span>
-                )}
-              </div>
+      {/* Content */}
+      <div className="p-3 md:p-4">
+        <h3 className="text-sm md:text-base font-semibold text-brand-black mb-2 line-clamp-2 group-hover:text-brand-orange transition-colors">
+          {product.name}
+        </h3>
+
+        {/* Price */}
+        <div className="mb-3">
+          <div className="flex items-baseline space-x-2">
+            <span className="text-lg md:text-xl font-bold text-brand-orange">
+              R{displayPrice.toFixed(2)}
+            </span>
+            {product.compareAtPrice && product.compareAtPrice > displayPrice && (
+              <span className="text-xs text-gray-500 line-through">
+                R{product.compareAtPrice.toFixed(2)}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Quantity + Add to Cart */}
+        {product.stockLevel > 0 ? (
+          <div className="flex items-center space-x-2">
+            <div className="flex items-center border border-gray-300 rounded-lg">
+              <button
+                onClick={decrementQuantity}
+                className="p-1.5 hover:bg-gray-100 transition-colors"
+                disabled={quantity <= 1}
+              >
+                <Minus className="w-3 h-3 md:w-4 md:h-4 text-gray-600" />
+              </button>
+              <span className="px-2 md:px-3 font-semibold text-brand-black text-sm">{quantity}</span>
+              <button
+                onClick={incrementQuantity}
+                className="p-1.5 hover:bg-gray-100 transition-colors"
+                disabled={quantity >= product.stockLevel}
+              >
+                <Plus className="w-3 h-3 md:w-4 md:h-4 text-gray-600" />
+              </button>
             </div>
 
             <button
               onClick={handleAddToCart}
-              className="bg-brand-orange text-white p-3 rounded-xl hover:bg-orange-600 transition-all transform hover:scale-110 active:scale-95"
-              aria-label="Add to cart"
+              className="flex-1 flex items-center justify-center space-x-1 bg-brand-orange hover:bg-orange-600 text-white py-2 px-2 md:px-3 rounded-lg transition-colors"
             >
-              <ShoppingCart className="w-5 h-5" />
+              <ShoppingCart className="w-3 h-3 md:w-4 md:h-4" />
+              <span className="font-semibold text-xs md:text-sm">Add</span>
             </button>
           </div>
-        </div>
+        ) : (
+          <button
+            disabled
+            className="w-full py-2 bg-gray-300 text-gray-600 rounded-lg cursor-not-allowed text-xs md:text-sm"
+          >
+            Out of Stock
+          </button>
+        )}
       </div>
     </Link>
   );

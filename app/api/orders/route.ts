@@ -1,20 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
-import clientPromise from '../../../lib/mongodb';
-import { generateOrderNumber } from '../../../lib/utils';
+import clientPromise from '@/lib/mongodb';
 
 export async function GET(request: NextRequest) {
   try {
+    const searchParams = request.nextUrl.searchParams;
+    const userId = searchParams.get('userId');
+    const all = searchParams.get('all'); // For admin
+    
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
     
-    const orders = await db
-      .collection('orders')
-      .find({})
+    const query: any = {};
+    if (userId && !all) {
+      query.userId = userId;
+    }
+    
+    const orders = await db.collection('orders')
+      .find(query)
       .sort({ createdAt: -1 })
       .toArray();
 
     return NextResponse.json({ orders });
   } catch (error) {
+    console.error('Failed to fetch orders:', error);
     return NextResponse.json({ error: 'Failed to fetch orders' }, { status: 500 });
   }
 }
@@ -26,21 +34,23 @@ export async function POST(request: NextRequest) {
     const db = client.db('tfs-wholesalers');
 
     const order = {
-      orderNumber: generateOrderNumber(),
       ...body,
-      paymentStatus: 'pending',
-      orderStatus: 'pending',
-      deliveryFee: 35,
-      subtotal: body.items.reduce((sum: number, item: any) => sum + item.price * item.quantity, 0),
+      orderNumber: `ORD-${Date.now()}`,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
 
-    order.total = order.subtotal + order.deliveryFee;
-
     const result = await db.collection('orders').insertOne(order);
-    return NextResponse.json({ orderId: result.insertedId }, { status: 201 });
+    
+    console.log('✅ Order created in DB:', result.insertedId.toString());
+    
+    return NextResponse.json({ 
+      success: true,
+      orderId: result.insertedId.toString(),
+      orderNumber: order.orderNumber,
+    }, { status: 201 });
   } catch (error) {
+    console.error('❌ Failed to create order:', error);
     return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
   }
 }

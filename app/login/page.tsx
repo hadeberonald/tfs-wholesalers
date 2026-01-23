@@ -46,7 +46,7 @@ function LoginForm() {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-brand-orange rounded-2xl mb-4">
             <span className="text-white font-bold text-2xl">TFS</span>
           </div>
-          <h1 className="font-display text-3xl text-brand-black mb-2">Welcome Back</h1>
+          <h1 className="text-3xl text-brand-black mb-2">Welcome Back</h1>
           <p className="text-gray-600">Sign in to your TFS Wholesalers account</p>
         </div>
 

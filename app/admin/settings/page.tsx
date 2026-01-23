@@ -68,7 +68,7 @@ export default function AdminSettingsPage() {
     <div className="min-h-screen bg-gray-50 pt-20">
       <div className="max-w-4xl mx-auto px-4 py-8">
         <div className="mb-8">
-          <h1 className="font-display text-4xl text-brand-black mb-2 flex items-center">
+          <h1 className="text-4xl text-brand-black mb-2 flex items-center">
             <Settings className="w-10 h-10 mr-3 text-brand-orange" />
             Settings
           </h1>
@@ -77,7 +77,7 @@ export default function AdminSettingsPage() {
 
         {/* Delivery Pricing Section */}
         <div className="bg-white rounded-2xl p-8 mb-6">
-          <h2 className="font-display text-2xl text-brand-black mb-6 flex items-center">
+          <h2 className="text-2xl text-brand-black mb-6 flex items-center">
             <Truck className="w-6 h-6 mr-2 text-brand-orange" />
             Delivery Pricing
           </h2>
@@ -204,7 +204,7 @@ export default function AdminSettingsPage() {
 
         {/* Store Location Section */}
         <div className="bg-white rounded-2xl p-8">
-          <h2 className="font-display text-2xl text-brand-black mb-6">Store Location</h2>
+          <h2 className="text-2xl text-brand-black mb-6">Store Location</h2>
 
           <div className="space-y-4 mb-6">
             <div>

@@ -31,8 +31,12 @@ export interface Category {
   slug: string;
   description?: string;
   image?: string;
+  banner?: string; // For featured carousel
+  parentId?: ObjectId | string | null; // For nested categories
+  level: number; // 0 = top level, 1 = subcategory, 2 = sub-subcategory
   order: number;
   active: boolean;
+  featured: boolean; // Show in carousel
   createdAt: Date;
   updatedAt: Date;
 }
@@ -43,6 +47,7 @@ export interface Product {
   slug: string;
   description: string;
   category: ObjectId | string;
+  categoryPath?: string[]; // Array of category IDs from root to leaf
   price: number;
   compareAtPrice?: number;
   costPrice?: number;
