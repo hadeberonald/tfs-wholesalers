@@ -30,7 +30,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ loading: true });
       
       // Use the mobile-auth endpoint which returns a token
-      const response = await axios.post(`${API_URL}/api/mobile-auth/login`, {
+      const response = await axios.post(`${API_URL}/api/auth/mobile-login`, {
         email,
         password,
       });
