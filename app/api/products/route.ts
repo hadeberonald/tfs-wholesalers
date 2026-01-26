@@ -13,6 +13,7 @@ export async function GET(request: NextRequest) {
     const slug = searchParams.get('slug');
     const limit = searchParams.get('limit');
     const all = searchParams.get('all'); // For admin
+    const barcode = searchParams.get('barcode'); // For barcode lookup
     
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
@@ -24,6 +25,7 @@ export async function GET(request: NextRequest) {
     if (special === 'true') query.onSpecial = true;
     if (featured === 'true') query.featured = true;
     if (slug) query.slug = slug;
+    if (barcode) query.barcode = barcode;
     
     let cursor = db.collection('products').find(query).sort({ createdAt: -1 });
     
@@ -32,6 +34,13 @@ export async function GET(request: NextRequest) {
     }
     
     const products = await cursor.toArray();
+
+    // If searching by barcode, return single product or null
+    if (barcode) {
+      return NextResponse.json({ 
+        product: products.length > 0 ? products[0] : null 
+      });
+    }
 
     return NextResponse.json({ products });
   } catch (error) {
@@ -46,8 +55,21 @@ export async function POST(request: NextRequest) {
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
 
+    // Check if barcode already exists (if provided)
+    if (body.barcode) {
+      const existing = await db.collection('products').findOne({ 
+        barcode: body.barcode 
+      });
+      if (existing) {
+        return NextResponse.json({ 
+          error: 'A product with this barcode already exists' 
+        }, { status: 400 });
+      }
+    }
+
     const product = {
       ...body,
+      barcode: body.barcode || null, // Optional barcode field
       createdAt: new Date(),
       updatedAt: new Date(),
     };

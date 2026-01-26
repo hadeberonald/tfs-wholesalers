@@ -3,14 +3,16 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Package, ClipboardList, User } from 'lucide-react-native';
+import { Package, ClipboardList, User, Settings, Car } from 'lucide-react-native';
 
 // Screens
 import LoginScreen from './src/screens/LoginScreen';
 import OrdersListScreen from './src/screens/OrdersListScreen';
 import PickingScreen from './src/screens/PickingScreen';
 import PackagingScreen from './src/screens/PackagingScreen';
-// import ProfileScreen from './src/screens/ProfileScreen';
+import BarcodeLinkingScreen from './src/screens/BarcodeLinkingScreen';
+import DeliveriesListScreen from './src/screens/DeliveriesListScreen';
+import DeliveryScreen from './src/screens/DeliveryScreen';
 import { useAuthStore } from './src/stores/authStore';
 
 const Stack = createStackNavigator();
@@ -31,6 +33,24 @@ function MainTabs() {
         options={{
           tabBarIcon: ({ color, size }) => (
             <ClipboardList color={color} size={size} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Products"
+        component={BarcodeLinkingScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Settings color={color} size={size} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Deliveries"
+        component={DeliveriesListScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Car color={color} size={size} />
           ),
         }}
       />
@@ -60,6 +80,7 @@ export default function App() {
             <Stack.Screen name="Main" component={MainTabs} />
             <Stack.Screen name="Picking" component={PickingScreen} />
             <Stack.Screen name="Packaging" component={PackagingScreen} />
+            <Stack.Screen name="DeliveryDetail" component={DeliveryScreen} />
           </>
         )}
       </Stack.Navigator>
