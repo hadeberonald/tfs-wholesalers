@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { paystackService } from '@/lib/payment';
+import clientPromise from '@/lib/mongodb';
+import { ObjectId } from 'mongodb';
 
 export async function POST(request: NextRequest) {
   try {
@@ -24,21 +26,26 @@ export async function POST(request: NextRequest) {
       )?.value;
 
       if (orderId) {
-        // Update order status in database
-        await fetch(`${process.env.NEXTAUTH_URL}/api/orders/${orderId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            paymentStatus: 'paid',
-            status: 'processing',
-            paymentDetails: {
-              reference: data.reference,
-              amount: data.amount / 100, // Convert from kobo to rands
-              paidAt: data.paid_at,
-              channel: data.channel,
-            },
-          }),
-        });
+        // Update order status in database directly
+        const client = await clientPromise;
+        const db = client.db('tfs-wholesalers');
+        
+        await db.collection('orders').findOneAndUpdate(
+          { _id: new ObjectId(orderId) },
+          { 
+            $set: { 
+              paymentStatus: 'paid',
+              status: 'processing',
+              paymentDetails: {
+                reference: data.reference,
+                amount: data.amount / 100,
+                paidAt: data.paid_at,
+                channel: data.channel,
+              },
+              updatedAt: new Date()
+            } 
+          }
+        );
       }
 
       return NextResponse.json({

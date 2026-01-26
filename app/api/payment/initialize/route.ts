@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { paystackService, generatePaymentReference, formatAmountForPayment } from '@/lib/payment';
+import clientPromise from '@/lib/mongodb';
+import { ObjectId } from 'mongodb';
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,6 +16,10 @@ export async function POST(request: NextRequest) {
 
     // Generate unique payment reference
     const reference = generatePaymentReference(`ORDER-${orderId}`);
+
+    // Get database connection
+    const client = await clientPromise;
+    const db = client.db('tfs-wholesalers');
 
     // If using saved card, charge directly
     if (authorizationCode) {
@@ -48,16 +54,18 @@ export async function POST(request: NextRequest) {
         const result = await response.json();
 
         if (result.status && result.data.status === 'success') {
-          // Update order status immediately
-          await fetch(`${process.env.NEXTAUTH_URL}/api/orders/${orderId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              paymentReference: reference,
-              paymentStatus: 'paid',
-              status: 'processing',
-            }),
-          });
+          // Update order status directly in database
+          await db.collection('orders').findOneAndUpdate(
+            { _id: new ObjectId(orderId) },
+            { 
+              $set: { 
+                paymentReference: reference,
+                paymentStatus: 'paid',
+                status: 'processing',
+                updatedAt: new Date()
+              } 
+            }
+          );
 
           return NextResponse.json({
             success: true,
@@ -99,14 +107,16 @@ export async function POST(request: NextRequest) {
     const result = await paystackService.initializePayment(paymentData);
 
     if (result.status) {
-      // Store reference in database for verification later
-      await fetch(`${process.env.NEXTAUTH_URL}/api/orders/${orderId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          paymentReference: reference,
-        }),
-      });
+      // Store reference in database directly
+      await db.collection('orders').findOneAndUpdate(
+        { _id: new ObjectId(orderId) },
+        { 
+          $set: { 
+            paymentReference: reference,
+            updatedAt: new Date()
+          } 
+        }
+      );
 
       return NextResponse.json({
         success: true,
