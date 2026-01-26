@@ -2,84 +2,224 @@ import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
+  FlatList,
   StyleSheet,
   TouchableOpacity,
-  FlatList,
+  ActivityIndicator,
   Alert,
-  Vibration,
+  Image,
+  ScrollView,
 } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as Haptics from 'expo-haptics';
-import { CheckCircle, XCircle, Package, Camera as CameraIcon } from 'lucide-react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
-import { useOrdersStore } from '../stores/ordersStore';
+import { Ionicons } from '@expo/vector-icons';
+import axios from 'axios';
+import { useAuthStore } from '../stores/authStore';
+import BarcodeScanner from '../components/BarcodeScanner';
 
-export default function PickingScreen() {
-  const navigation = useNavigation();
-  const route = useRoute();
-  const { orderId } = route.params as { orderId: string };
+const API_URL = 'https://tfs-wholesalers.onrender.com';
+
+interface OrderItem {
+  productId: string;
+  name: string;
+  sku: string;
+  quantity: number;
+  price: number;
+  barcode?: string;
+  image?: string;
+  description?: string;
+}
+
+interface Order {
+  _id: string;
+  orderNumber: string;
+  items: OrderItem[];
+  status: string;
+  total: number;
+  customerName?: string;
+  deliveryAddress?: string;
+}
+
+export default function OrderPickingScreen({ route, navigation }: any) {
+  const { orderId } = route.params;
+  const { token } = useAuthStore();
   
-  const { orders, scanProduct } = useOrdersStore();
-  const order = orders.find((o) => o._id === orderId);
-
-  const [permission, requestPermission] = useCameraPermissions();
-  const [scanning, setScanning] = useState(false);
+  const [order, setOrder] = useState<Order | null>(null);
   const [scannedItems, setScannedItems] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+  const [updating, setUpdating] = useState(false);
+  const [scannerVisible, setScannerVisible] = useState(false);
+  const [currentItem, setCurrentItem] = useState<OrderItem | null>(null);
 
-  const handleBarCodeScanned = async ({ data }: any) => {
-    if (!scanning) return;
+  useEffect(() => {
+    fetchOrder();
+  }, []);
 
-    setScanning(false);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-
-    // Check if product exists in order and hasn't been scanned
-    const success = await scanProduct(orderId, data);
-
-    if (success) {
-      setScannedItems((prev) => new Set([...prev, data]));
-      Alert.alert('Success', 'Product scanned successfully!');
-    } else {
-      Vibration.vibrate(500);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Error', 'Product not found in this order or already scanned');
+  const fetchOrder = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/api/orders/${orderId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setOrder(response.data.order);
+    } catch (error: any) {
+      console.error('Fetch order error:', error.response?.data || error.message);
+      Alert.alert('Error', 'Failed to fetch order details');
+    } finally {
+      setLoading(false);
     }
-
-    // Re-enable scanning after 2 seconds
-    setTimeout(() => setScanning(true), 2000);
   };
 
-  const allItemsScanned = order?.items.every((item) => item.scanned);
+  const handleScanPress = (item: OrderItem) => {
+    if (!item.barcode) {
+      Alert.alert('No Barcode', 'This product does not have a barcode assigned. Use manual confirmation.');
+      return;
+    }
+    setCurrentItem(item);
+    setScannerVisible(true);
+  };
 
-  const handleContinueToPackaging = () => {
-    if (!allItemsScanned) {
-      Alert.alert('Warning', 'Not all items have been scanned. Continue anyway?', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Continue', onPress: () => navigation.navigate('Packaging', { orderId }) },
-      ]);
+  const handleBarcodeScanned = async (scannedBarcode: string) => {
+    if (!currentItem) return;
+
+    if (currentItem.barcode === scannedBarcode) {
+      setScannedItems(prev => new Set([...prev, currentItem.productId]));
+      Alert.alert('✓ Correct', `${currentItem.name} scanned successfully!`);
     } else {
+      try {
+        const response = await axios.get(
+          `${API_URL}/api/products?barcode=${scannedBarcode}`
+        );
+        
+        if (response.data.product) {
+          Alert.alert(
+            '✗ Wrong Product',
+            `You scanned: ${response.data.product.name}\n\nExpected: ${currentItem.name}`,
+            [{ text: 'OK' }]
+          );
+        } else {
+          Alert.alert('Error', 'Barcode does not match any product');
+        }
+      } catch (error) {
+        Alert.alert('Error', 'Invalid barcode');
+      }
+    }
+    
+    setCurrentItem(null);
+  };
+
+  const handleManualConfirm = (item: OrderItem) => {
+    Alert.alert(
+      'Manual Confirmation',
+      `Confirm you picked:\n\n${item.name}\nSKU: ${item.sku}\nQuantity: ${item.quantity}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm',
+          onPress: () => {
+            setScannedItems(prev => new Set([...prev, item.productId]));
+          },
+        },
+      ]
+    );
+  };
+
+  const handleCompleteOrder = async () => {
+    if (!order) return;
+
+    const totalItems = order.items.length;
+    const scannedCount = scannedItems.size;
+
+    if (scannedCount < totalItems) {
+      Alert.alert(
+        'Incomplete Order',
+        `You've only picked ${scannedCount} of ${totalItems} items.\n\nComplete picking before packaging.`,
+        [
+          { text: 'OK', style: 'cancel' }
+        ]
+      );
+    } else {
+      // All items picked, go to packaging
       navigation.navigate('Packaging', { orderId });
     }
   };
 
-  if (!permission) {
+  const renderItem = ({ item }: { item: OrderItem }) => {
+    const isScanned = scannedItems.has(item.productId);
+    
     return (
-      <View style={styles.centered}>
-        <Text>Requesting camera permission...</Text>
+      <View style={[styles.itemCard, isScanned && styles.itemCardScanned]}>
+        <View style={styles.itemHeader}>
+          {item.image && (
+            <Image source={{ uri: item.image }} style={styles.itemImage} />
+          )}
+          <View style={styles.itemInfo}>
+            <Text style={styles.itemName}>{item.name}</Text>
+            <Text style={styles.itemSKU}>SKU: {item.sku}</Text>
+            <Text style={styles.itemPrice}>R{item.price.toFixed(2)} each</Text>
+          </View>
+          {isScanned && (
+            <View style={styles.checkmark}>
+              <Ionicons name="checkmark-circle" size={32} color="#4CAF50" />
+            </View>
+          )}
+        </View>
+
+        {item.description && (
+          <Text style={styles.itemDescription} numberOfLines={2}>
+            {item.description}
+          </Text>
+        )}
+
+        <View style={styles.itemMeta}>
+          <View style={styles.metaItem}>
+            <Text style={styles.metaLabel}>Quantity</Text>
+            <Text style={styles.metaValue}>{item.quantity}</Text>
+          </View>
+          <View style={styles.metaItem}>
+            <Text style={styles.metaLabel}>Subtotal</Text>
+            <Text style={styles.metaValue}>
+              R{(item.price * item.quantity).toFixed(2)}
+            </Text>
+          </View>
+          {item.barcode && (
+            <View style={styles.metaItem}>
+              <Text style={styles.metaLabel}>Barcode</Text>
+              <Text style={styles.metaValueBarcode}>{item.barcode}</Text>
+            </View>
+          )}
+        </View>
+
+        {!isScanned && (
+          <View style={styles.itemActions}>
+            {item.barcode ? (
+              <TouchableOpacity
+                style={styles.scanButton}
+                onPress={() => handleScanPress(item)}
+              >
+                <Ionicons name="barcode-outline" size={20} color="#fff" />
+                <Text style={styles.scanButtonText}>Scan to Verify</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.noBarcodeWarning}>
+                <Ionicons name="warning-outline" size={16} color="#FF9800" />
+                <Text style={styles.noBarcodeText}>No barcode linked</Text>
+              </View>
+            )}
+            <TouchableOpacity
+              style={styles.manualButton}
+              onPress={() => handleManualConfirm(item)}
+            >
+              <Ionicons name="checkmark" size={20} color="#fff" />
+              <Text style={styles.manualButtonText}>Manual Pick</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     );
-  }
+  };
 
-  if (!permission.granted) {
+  if (loading) {
     return (
       <View style={styles.centered}>
-        <CameraIcon size={64} color="#ccc" />
-        <Text style={styles.errorText}>No access to camera</Text>
-        <TouchableOpacity
-          style={styles.scanButton}
-          onPress={requestPermission}
-        >
-          <Text style={styles.scanButtonText}>Grant Permission</Text>
-        </TouchableOpacity>
+        <ActivityIndicator size="large" color="#FF6B35" />
       </View>
     );
   }
@@ -87,96 +227,31 @@ export default function PickingScreen() {
   if (!order) {
     return (
       <View style={styles.centered}>
-        <Text>Order not found</Text>
+        <Ionicons name="alert-circle-outline" size={64} color="#999" />
+        <Text style={styles.errorText}>Order not found</Text>
       </View>
     );
   }
 
-  const renderItem = ({ item }: { item: any }) => {
-    const isScanned = item.scanned || scannedItems.has(item.sku);
-    
-    return (
-      <View style={[styles.itemCard, isScanned && styles.itemCardScanned]}>
-        <View style={styles.itemInfo}>
-          <Text style={styles.itemName}>{item.name}</Text>
-          <Text style={styles.itemSku}>SKU: {item.sku}</Text>
-          <Text style={styles.itemQuantity}>Qty: {item.quantity}</Text>
-        </View>
-        
-        <View style={styles.itemStatus}>
-          {isScanned ? (
-            <CheckCircle size={32} color="#10B981" />
-          ) : (
-            <XCircle size={32} color="#EF4444" />
-          )}
-        </View>
-      </View>
-    );
-  };
+  const progress = (scannedItems.size / order.items.length) * 100;
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.backButtonText}>← Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Pick Order</Text>
-        <Text style={styles.orderNumber}>{order.orderNumber}</Text>
-      </View>
-
-      {/* Progress */}
-      <View style={styles.progressContainer}>
-        <View style={styles.progressBar}>
-          <View
-            style={[
-              styles.progressFill,
-              {
-                width: `${
-                  (scannedItems.size / order.items.length) * 100
-                }%`,
-              },
-            ]}
-          />
-        </View>
-        <Text style={styles.progressText}>
-          {scannedItems.size} / {order.items.length} items scanned
+        <Text style={styles.headerTitle}>Order #{order.orderNumber}</Text>
+        {order.customerName && (
+          <Text style={styles.customerName}>
+            <Ionicons name="person" size={14} /> {order.customerName}
+          </Text>
+        )}
+        <Text style={styles.headerSubtitle}>
+          {scannedItems.size} of {order.items.length} items picked ({Math.round(progress)}%)
         </Text>
+        <View style={styles.progressBar}>
+          <View style={[styles.progressFill, { width: `${progress}%` }]} />
+        </View>
       </View>
 
-      {/* Scanner */}
-      {scanning && (
-        <View style={styles.scannerContainer}>
-          <CameraView
-            style={StyleSheet.absoluteFillObject}
-            onBarcodeScanned={handleBarCodeScanned}
-            barcodeScannerSettings={{
-              barcodeTypes: ['qr', 'ean13', 'ean8', 'code128', 'code39'],
-            }}
-          />
-          <View style={styles.scannerOverlay}>
-            <View style={styles.scannerFrame} />
-            <Text style={styles.scannerText}>
-              Align barcode within frame
-            </Text>
-          </View>
-        </View>
-      )}
-
-      {!scanning && (
-        <TouchableOpacity
-          style={styles.scanButton}
-          onPress={() => setScanning(true)}
-        >
-          <CameraIcon size={24} color="#fff" />
-          <Text style={styles.scanButtonText}>Scan Product</Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Items List */}
       <FlatList
         data={order.items}
         renderItem={renderItem}
@@ -184,21 +259,35 @@ export default function PickingScreen() {
         contentContainerStyle={styles.list}
       />
 
-      {/* Continue Button */}
-      {scannedItems.size > 0 && (
+      <View style={styles.footer}>
+        <View style={styles.footerInfo}>
+          <Text style={styles.footerLabel}>Order Total</Text>
+          <Text style={styles.footerTotal}>R{order.total.toFixed(2)}</Text>
+        </View>
         <TouchableOpacity
           style={[
-            styles.continueButton,
-            allItemsScanned && styles.continueButtonReady,
+            styles.completeButton,
+            scannedItems.size === order.items.length && styles.completeButtonReady,
+            scannedItems.size < order.items.length && styles.completeButtonDisabled,
           ]}
-          onPress={handleContinueToPackaging}
+          onPress={handleCompleteOrder}
+          disabled={scannedItems.size < order.items.length}
         >
-          <Package size={24} color="#fff" />
-          <Text style={styles.continueButtonText}>
-            Continue to Packaging
+          <Ionicons name="arrow-forward" size={20} color="#fff" />
+          <Text style={styles.completeButtonText}>
+            {scannedItems.size === order.items.length ? 'Continue to Packaging' : 'Pick All Items First'}
           </Text>
         </TouchableOpacity>
-      )}
+      </View>
+
+      <BarcodeScanner
+        visible={scannerVisible}
+        onClose={() => {
+          setScannerVisible(false);
+          setCurrentItem(null);
+        }}
+        onScan={handleBarcodeScanned}
+      />
     </View>
   );
 }
@@ -212,155 +301,213 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
   },
   errorText: {
-    marginTop: 16,
     fontSize: 16,
-    color: '#666',
-    marginBottom: 16,
+    color: '#999',
+    marginTop: 12,
   },
   header: {
     backgroundColor: '#fff',
-    padding: 24,
+    padding: 20,
     paddingTop: 60,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e5e5',
-  },
-  backButton: {
-    marginBottom: 16,
-  },
-  backButtonText: {
-    fontSize: 16,
-    color: '#FF6B35',
-    fontWeight: '600',
+    borderBottomColor: '#ddd',
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#1a1a1a',
-    marginBottom: 4,
   },
-  orderNumber: {
+  customerName: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+  },
+  headerSubtitle: {
     fontSize: 16,
     color: '#666',
-  },
-  progressContainer: {
-    backgroundColor: '#fff',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e5e5',
+    marginTop: 8,
   },
   progressBar: {
     height: 8,
-    backgroundColor: '#e5e5e5',
+    backgroundColor: '#e0e0e0',
     borderRadius: 4,
+    marginTop: 12,
     overflow: 'hidden',
-    marginBottom: 8,
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#10B981',
+    backgroundColor: '#4CAF50',
     borderRadius: 4,
-  },
-  progressText: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-  },
-  scannerContainer: {
-    height: 300,
-    backgroundColor: '#000',
-    position: 'relative',
-  },
-  scannerOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  scannerFrame: {
-    width: 250,
-    height: 250,
-    borderWidth: 3,
-    borderColor: '#FF6B35',
-    borderRadius: 12,
-  },
-  scannerText: {
-    marginTop: 16,
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  scanButton: {
-    backgroundColor: '#FF6B35',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-    margin: 16,
-    borderRadius: 12,
-    gap: 8,
-  },
-  scanButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
   },
   list: {
     padding: 16,
   },
   itemCard: {
-    flexDirection: 'row',
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
     borderWidth: 2,
-    borderColor: '#EF4444',
+    borderColor: '#ddd',
   },
   itemCardScanned: {
-    borderColor: '#10B981',
-    backgroundColor: '#F0FDF4',
+    borderColor: '#4CAF50',
+    backgroundColor: '#f1f8f4',
+  },
+  itemHeader: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  itemImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    marginRight: 12,
   },
   itemInfo: {
     flex: 1,
   },
   itemName: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '600',
     color: '#1a1a1a',
     marginBottom: 4,
   },
-  itemSku: {
+  itemSKU: {
     fontSize: 14,
     color: '#666',
-    marginBottom: 4,
+    marginBottom: 2,
   },
-  itemQuantity: {
+  itemPrice: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: '#FF6B35',
   },
-  itemStatus: {
-    justifyContent: 'center',
+  checkmark: {
+    marginLeft: 8,
+  },
+  itemDescription: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 12,
+    lineHeight: 20,
+  },
+  itemMeta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#f8f8f8',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  metaItem: {
+    flex: 1,
+  },
+  metaLabel: {
+    fontSize: 12,
+    color: '#999',
+    marginBottom: 2,
+  },
+  metaValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  metaValueBarcode: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    fontFamily: 'monospace',
+  },
+  itemActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  scanButton: {
+    flex: 2,
+    flexDirection: 'row',
+    backgroundColor: '#FF6B35',
+    padding: 14,
+    borderRadius: 8,
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
-  continueButton: {
-    backgroundColor: '#3B82F6',
+  scanButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  manualButton: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#666',
+    padding: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  manualButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  noBarcodeWarning: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#FFF3E0',
+    padding: 14,
+    borderRadius: 8,
+  },
+  noBarcodeText: {
+    color: '#FF9800',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  footer: {
     padding: 16,
-    margin: 16,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#ddd',
+  },
+  footerInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  footerLabel: {
+    fontSize: 16,
+    color: '#666',
+  },
+  footerTotal: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  completeButton: {
+    flexDirection: 'row',
+    backgroundColor: '#999',
+    padding: 16,
     borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
   },
-  continueButtonReady: {
-    backgroundColor: '#10B981',
+  completeButtonReady: {
+    backgroundColor: '#FF6B35',
   },
-  continueButtonText: {
+  completeButtonDisabled: {
+    opacity: 0.5,
+  },
+  completeButtonText: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
   },
 });

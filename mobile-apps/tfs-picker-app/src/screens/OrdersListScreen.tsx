@@ -1,138 +1,135 @@
-import React, { useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   FlatList,
-  TouchableOpacity,
   StyleSheet,
-  RefreshControl,
+  TouchableOpacity,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { Package, Clock, CheckCircle } from 'lucide-react-native';
-import { useOrdersStore } from '../stores/ordersStore';
+import { Ionicons } from '@expo/vector-icons';
+import { Package, Clock } from 'lucide-react-native';
+import axios from 'axios';
 import { useAuthStore } from '../stores/authStore';
+import { useFocusEffect } from '@react-navigation/native';
 
-export default function OrdersListScreen() {
-  const navigation = useNavigation();
-  const { orders, loading, fetchOrders, assignOrder } = useOrdersStore();
-  const { user } = useAuthStore();
-  const [refreshing, setRefreshing] = React.useState(false);
+const API_URL = 'https://tfs-wholesalers.onrender.com';
 
-  useEffect(() => {
-    fetchOrders();
-  }, []);
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await fetchOrders();
-    setRefreshing(false);
+interface Order {
+  _id: string;
+  orderNumber: string;
+  customerInfo?: {
+    name: string;
   };
+  items: any[];
+  total: number;
+  status: string;
+  createdAt: string;
+}
 
-  const handlePickOrder = async (orderId: string) => {
-    try {
-      if (!user?.id) return;
+export default function OrdersListScreen({ navigation }: any) {
+  const { token } = useAuthStore();
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Fetch orders when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchOrders();
       
-      await assignOrder(orderId, user.id);
-      navigation.navigate('Picking', { orderId });
-    } catch (error) {
-      console.error('Failed to pick order:', error);
+      // Poll every 30 seconds while screen is focused
+      const interval = setInterval(() => {
+        fetchOrders(true); // Silent refresh
+      }, 30000);
+
+      return () => clearInterval(interval);
+    }, [])
+  );
+
+  const fetchOrders = async (silent = false) => {
+    try {
+      if (!silent) setLoading(true);
+      
+      const response = await axios.get(`${API_URL}/api/orders?all=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      // Filter out orders that are ready for delivery or already delivered
+      const pendingOrders = response.data.orders.filter(
+        (order: Order) => 
+          order.status !== 'ready_for_delivery' && 
+          order.status !== 'out_for_delivery' &&
+          order.status !== 'delivered'
+      );
+
+      console.log('📋 Pending orders for picking:', pendingOrders.length);
+      setOrders(pendingOrders);
+    } catch (error: any) {
+      console.error('Fetch orders error:', error.response?.data || error.message);
+    } finally {
+      if (!silent) setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  const getStatusColor = (status?: string) => {
-    switch (status) {
-      case 'pending':
-        return '#FFA500';
-      case 'assigned':
-        return '#3B82F6';
-      case 'picking':
-        return '#8B5CF6';
-      case 'packed':
-        return '#10B981';
-      case 'ready':
-        return '#059669';
-      default:
-        return '#6B7280';
-    }
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchOrders();
   };
 
-  const getStatusIcon = (status?: string) => {
-    switch (status) {
-      case 'pending':
-        return Clock;
-      case 'ready':
-        return CheckCircle;
-      default:
-        return Package;
-    }
+  const handleOrderPress = (order: Order) => {
+    navigation.navigate('Picking', { orderId: order._id });
   };
 
-  const renderOrder = ({ item }: { item: any }) => {
-    const StatusIcon = getStatusIcon(item.pickingStatus);
-    const isAssignedToMe = item.assignedPicker === user?.id;
-    const canPick = !item.pickingStatus || item.pickingStatus === 'pending' || isAssignedToMe;
+  const renderOrder = ({ item }: { item: Order }) => {
+    const itemCount = item.items?.length || 0;
 
     return (
       <TouchableOpacity
         style={styles.orderCard}
-        onPress={() => canPick && handlePickOrder(item._id)}
-        disabled={!canPick}
+        onPress={() => handleOrderPress(item)}
       >
         <View style={styles.orderHeader}>
-          <View style={styles.orderInfo}>
-            <Text style={styles.orderNumber}>{item.orderNumber}</Text>
-            <Text style={styles.customerName}>{item.customerInfo.name}</Text>
+          <Text style={styles.orderNumber}>{item.orderNumber}</Text>
+          <Text style={styles.orderTotal}>R{item.total.toFixed(2)}</Text>
+        </View>
+
+        <View style={styles.orderInfo}>
+          {item.customerInfo?.name && (
+            <View style={styles.infoRow}>
+              <Ionicons name="person" size={16} color="#666" />
+              <Text style={styles.infoText}>{item.customerInfo.name}</Text>
+            </View>
+          )}
+
+          <View style={styles.infoRow}>
+            <Package size={16} color="#666" />
+            <Text style={styles.infoText}>
+              {itemCount} {itemCount === 1 ? 'item' : 'items'}
+            </Text>
           </View>
-          
-          <View
-            style={[
-              styles.statusBadge,
-              { backgroundColor: `${getStatusColor(item.pickingStatus)}20` },
-            ]}
-          >
-            <StatusIcon
-              size={16}
-              color={getStatusColor(item.pickingStatus)}
-            />
-            <Text
-              style={[
-                styles.statusText,
-                { color: getStatusColor(item.pickingStatus) },
-              ]}
-            >
-              {item.pickingStatus || 'New'}
+
+          <View style={styles.infoRow}>
+            <Clock size={16} color="#666" />
+            <Text style={styles.infoText}>
+              {new Date(item.createdAt).toLocaleString()}
             </Text>
           </View>
         </View>
 
-        <View style={styles.orderDetails}>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Items:</Text>
-            <Text style={styles.detailValue}>{item.items.length}</Text>
+        <View style={styles.orderFooter}>
+          <View style={styles.statusBadge}>
+            <Text style={styles.statusBadgeText}>Ready to Pick</Text>
           </View>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Total:</Text>
-            <Text style={styles.detailValue}>R{item.total.toFixed(2)}</Text>
-          </View>
+          <Ionicons name="chevron-forward" size={24} color="#FF6B35" />
         </View>
-
-        {canPick && (
-          <TouchableOpacity
-            style={styles.pickButton}
-            onPress={() => handlePickOrder(item._id)}
-          >
-            <Package size={20} color="#fff" />
-            <Text style={styles.pickButtonText}>
-              {isAssignedToMe ? 'Continue Picking' : 'Start Picking'}
-            </Text>
-          </TouchableOpacity>
-        )}
       </TouchableOpacity>
     );
   };
 
-  if (loading && !refreshing) {
+  if (loading) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color="#FF6B35" />
@@ -145,27 +142,38 @@ export default function OrdersListScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Orders to Pick</Text>
-        <Text style={styles.headerSubtitle}>{orders.length} pending orders</Text>
+        <Text style={styles.headerSubtitle}>
+          {orders.length} {orders.length === 1 ? 'order' : 'orders'}
+        </Text>
       </View>
 
-      <FlatList
-        data={orders}
-        renderItem={renderOrder}
-        keyExtractor={(item) => item._id}
-        contentContainerStyle={styles.list}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Package size={64} color="#ccc" />
-            <Text style={styles.emptyTitle}>No orders to pick</Text>
-            <Text style={styles.emptySubtitle}>
-              New orders will appear here
-            </Text>
-          </View>
-        }
-      />
+      {orders.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Package size={64} color="#ccc" />
+          <Text style={styles.emptyTitle}>No Orders</Text>
+          <Text style={styles.emptyText}>
+            All orders have been picked!
+          </Text>
+          <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
+            <Ionicons name="refresh" size={20} color="#FF6B35" />
+            <Text style={styles.refreshButtonText}>Refresh</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <FlatList
+          data={orders}
+          renderItem={renderOrder}
+          keyExtractor={(item) => item._id}
+          contentContainerStyle={styles.list}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#FF6B35"
+            />
+          }
+        />
+      )}
     </View>
   );
 }
@@ -182,11 +190,12 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 12,
+    fontSize: 16,
     color: '#666',
   },
   header: {
     backgroundColor: '#fff',
-    padding: 24,
+    padding: 20,
     paddingTop: 60,
     borderBottomWidth: 1,
     borderBottomColor: '#e5e5e5',
@@ -195,102 +204,109 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     color: '#1a1a1a',
-    marginBottom: 4,
   },
   headerSubtitle: {
     fontSize: 16,
     color: '#666',
+    marginTop: 4,
   },
   list: {
     padding: 16,
   },
   orderCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 12,
     padding: 16,
     marginBottom: 12,
+    borderWidth: 2,
+    borderColor: '#e5e5e5',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 2,
   },
   orderHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: 12,
-  },
-  orderInfo: {
-    flex: 1,
   },
   orderNumber: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#1a1a1a',
-    marginBottom: 4,
   },
-  customerName: {
-    fontSize: 14,
-    color: '#666',
+  orderTotal: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#FF6B35',
   },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    gap: 6,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'capitalize',
-  },
-  orderDetails: {
+  orderInfo: {
     gap: 8,
     marginBottom: 12,
   },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  detailLabel: {
-    fontSize: 14,
-    color: '#666',
-  },
-  detailValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1a1a1a',
-  },
-  pickButton: {
-    backgroundColor: '#FF6B35',
+  infoRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-    borderRadius: 12,
     gap: 8,
   },
-  pickButtonText: {
-    color: '#fff',
-    fontSize: 16,
+  infoText: {
+    fontSize: 14,
+    color: '#666',
+    flex: 1,
+  },
+  orderFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#e5e5e5',
+    paddingTop: 12,
+  },
+  statusBadge: {
+    backgroundColor: '#FFF3E0',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  statusBadgeText: {
+    color: '#FF9800',
+    fontSize: 12,
     fontWeight: 'bold',
   },
   emptyState: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 64,
+    padding: 40,
   },
   emptyTitle: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: 'bold',
     color: '#1a1a1a',
     marginTop: 16,
   },
-  emptySubtitle: {
+  emptyText: {
     fontSize: 16,
     color: '#666',
     marginTop: 8,
+    textAlign: 'center',
+  },
+  refreshButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#FF6B35',
+  },
+  refreshButtonText: {
+    color: '#FF6B35',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

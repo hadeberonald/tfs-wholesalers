@@ -81,7 +81,7 @@ export default function PackagingScreen() {
         [
           {
             text: 'OK',
-            onPress: () => navigation.navigate('Orders'),
+            onPress: () => navigation.navigate('Main', { screen: 'Orders' }),
           },
         ]
       );
