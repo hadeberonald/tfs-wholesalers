@@ -11,6 +11,8 @@ interface OrderItem {
   quantity: number;
   price: number;
   image: string;
+  barcode?: string; // ✅ Added barcode field
+  description?: string; // ✅ Added description field
   scanned?: boolean;
 }
 
