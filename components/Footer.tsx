@@ -5,7 +5,7 @@ export default function Footer() {
   return (
     <footer className="bg-brand-black text-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-8">
           {/* Company Info */}
           <div>
             <div className="flex items-center space-x-3 mb-4">
@@ -30,27 +30,10 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
-                <Link href="/categories" className="text-gray-400 hover:text-brand-orange transition-colors">
-                  Categories
-                </Link>
-              </li>
-              <li>
                 <Link href="/specials" className="text-gray-400 hover:text-brand-orange transition-colors">
                   Special Offers
                 </Link>
               </li>
-              <li>
-                <Link href="/about" className="text-gray-400 hover:text-brand-orange transition-colors">
-                  About Us
-                </Link>
-              </li>
-            </ul>
-          </div>
-
-          {/* Customer Service */}
-          <div>
-            <h3 className="font-semibold text-lg mb-4">Customer Service</h3>
-            <ul className="space-y-2">
               <li>
                 <Link href="/account/orders" className="text-gray-400 hover:text-brand-orange transition-colors">
                   Track Order
@@ -61,18 +44,10 @@ export default function Footer() {
                   My Account
                 </Link>
               </li>
-              <li>
-                <Link href="/delivery-info" className="text-gray-400 hover:text-brand-orange transition-colors">
-                  Delivery Information
-                </Link>
-              </li>
-              <li>
-                <Link href="/contact" className="text-gray-400 hover:text-brand-orange transition-colors">
-                  Contact Us
-                </Link>
-              </li>
             </ul>
           </div>
+
+         
 
           {/* Contact Info */}
           <div>
@@ -80,15 +55,15 @@ export default function Footer() {
             <ul className="space-y-3">
               <li className="flex items-start space-x-3">
                 <Phone className="w-5 h-5 text-brand-orange mt-0.5 flex-shrink-0" />
-                <span className="text-gray-400 text-sm">+27 31 123 4567</span>
+                <span className="text-gray-400 text-sm">034 981 3210</span>
               </li>
               <li className="flex items-start space-x-3">
                 <Mail className="w-5 h-5 text-brand-orange mt-0.5 flex-shrink-0" />
-                <span className="text-gray-400 text-sm">info@tfswholesalers.co.za</span>
+                <span className="text-gray-400 text-sm">info@tfs.co.za</span>
               </li>
               <li className="flex items-start space-x-3">
                 <MapPin className="w-5 h-5 text-brand-orange mt-0.5 flex-shrink-0" />
-                <span className="text-gray-400 text-sm">123 Main Street<br />Durban, KZN 4001</span>
+                <span className="text-gray-400 text-sm">241 Utrecht St<br />Vryheid, KZN 3100</span>
               </li>
             </ul>
           </div>
