@@ -52,6 +52,7 @@ export interface Product {
   compareAtPrice?: number;
   costPrice?: number;
   sku: string;
+  barcode?: string; // Barcode for product scanning during order picking
   stockLevel: number;
   lowStockThreshold: number;
   images: string[];
@@ -120,6 +121,8 @@ export interface OrderItem {
   price: number;
   quantity: number;
   image: string;
+  barcode?: string; // Include barcode from product for order picking
+  description?: string; // Additional product details for pickers
 }
 
 export interface HeroBanner {
