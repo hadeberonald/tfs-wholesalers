@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
+import { ObjectId } from 'mongodb';
 
 export async function GET(request: NextRequest) {
   try {
@@ -33,8 +34,41 @@ export async function POST(request: NextRequest) {
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
 
+    // ✅ CRITICAL: Enrich order items with product data including barcodes
+    const enrichedItems = await Promise.all(
+      body.items.map(async (item: any) => {
+        try {
+          // Fetch full product details from database
+          const product = await db.collection('products').findOne({
+            _id: new ObjectId(item.productId)
+          });
+
+          if (!product) {
+            console.warn(`⚠️ Product not found: ${item.productId}, using cart data`);
+            return item; // Fallback to cart data if product not found
+          }
+
+          // Return enriched item with barcode and description from product
+          return {
+            productId: item.productId,
+            name: product.name || item.name,
+            sku: product.sku || item.sku,
+            price: item.price, // Use price from cart (may be special price)
+            quantity: item.quantity,
+            image: product.images?.[0] || item.image || '',
+            barcode: product.barcode || undefined, // ✅ Include barcode from product
+            description: product.description || undefined, // ✅ Include description for pickers
+          };
+        } catch (error) {
+          console.error(`❌ Error enriching item ${item.productId}:`, error);
+          return item; // Fallback to original item on error
+        }
+      })
+    );
+
     const order = {
       ...body,
+      items: enrichedItems, // ✅ Use enriched items instead of cart items
       orderNumber: `ORD-${Date.now()}`,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -42,7 +76,8 @@ export async function POST(request: NextRequest) {
 
     const result = await db.collection('orders').insertOne(order);
     
-    console.log('✅ Order created in DB:', result.insertedId.toString());
+    console.log('✅ Order created with barcodes:', result.insertedId.toString());
+    console.log(`   - ${enrichedItems.filter((i: any) => i.barcode).length}/${enrichedItems.length} items have barcodes`);
     
     return NextResponse.json({ 
       success: true,
