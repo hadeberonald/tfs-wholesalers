@@ -15,7 +15,7 @@
 
 import { MongoClient, ObjectId } from 'mongodb';
 
-const MONGODB_URI = process.env.MONGODB_URI || 'your-mongodb-connection-string';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://ronaldvhadebe_db_user:RFWWUNVb2F0C6ysm@cluster0.xovcymo.mongodb.net/?appName=Cluster0';
 
 async function migrateOrderBarcodes() {
   const client = new MongoClient(MONGODB_URI);

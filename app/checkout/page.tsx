@@ -159,6 +159,24 @@ export default function CheckoutPage() {
 
   const finalTotal = total + deliveryFee;
 
+  // ── promote order from payment_pending → pending once payment is confirmed ─
+  const promoteOrderToPending = async (orderId: string) => {
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'pending' }),
+      });
+      if (!res.ok) {
+        console.error('❌ Failed to promote order to pending:', await res.json());
+      } else {
+        console.log('✅ Order promoted to pending — now visible to pickers');
+      }
+    } catch (error) {
+      console.error('❌ Error promoting order:', error);
+    }
+  };
+
   const handlePaystackPayment = async (orderId: string, orderData: any) => {
     console.log('💳 Initializing Paystack payment...');
     
@@ -265,6 +283,10 @@ export default function CheckoutPage() {
 
       if (res.ok && data.verified) {
         console.log('✅ Payment verified successfully');
+
+        // Payment confirmed — make the order visible to pickers
+        await promoteOrderToPending(orderId);
+
         toast.success('Payment successful!');
         router.push(`/checkout/success/${orderId}`);
       } else {
@@ -323,7 +345,8 @@ export default function CheckoutPage() {
         deliveryNotes: formData.deliveryNotes,
         paymentMethod: formData.paymentMethod,
         paymentStatus: 'pending',
-        status: 'pending',
+        // Hold the order back until payment is verified; promoteOrderToPending() flips this to 'pending'
+        status: 'payment_pending',
       };
 
       const res = await fetch('/api/orders', {
@@ -334,7 +357,7 @@ export default function CheckoutPage() {
 
       if (res.ok) {
         const data = await res.json();
-        console.log('✅ Order created:', data.orderId);
+        console.log('✅ Order created (payment_pending):', data.orderId);
 
         if (formData.paymentMethod === 'card') {
           setTimeout(() => {
