@@ -64,7 +64,7 @@ export default function ProductCard({ product }: ProductCardProps) {
 
   return (
     <Link
-      href={`/products/${product.slug}`}
+      href={`/shop/${product.slug}`}
       className="group bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition-all duration-300 border border-gray-100 relative"
     >
       {/* Added Animation */}

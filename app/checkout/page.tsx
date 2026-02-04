@@ -9,7 +9,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ShoppingBag, User, MapPin, CreditCard, Loader2, Plus, FileText } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-// Dynamically import map component
+// Dynamically import the NEW Google Maps component
 const AddressMapPicker = dynamic(() => import('@/components/AddressMapPicker'), {
   ssr: false,
   loading: () => (
@@ -70,15 +70,10 @@ export default function CheckoutPage() {
     script.async = true;
     document.body.appendChild(script);
     
-    // Load Leaflet CSS
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-    document.head.appendChild(link);
-    
     return () => {
-      document.body.removeChild(script);
-      document.head.removeChild(link);
+      if (document.body.contains(script)) {
+        document.body.removeChild(script);
+      }
     };
   }, [items, router]);
 
@@ -159,7 +154,6 @@ export default function CheckoutPage() {
 
   const finalTotal = total + deliveryFee;
 
-  // ── promote order from payment_pending → pending once payment is confirmed ─
   const promoteOrderToPending = async (orderId: string) => {
     try {
       const res = await fetch(`/api/orders/${orderId}`, {
@@ -283,10 +277,7 @@ export default function CheckoutPage() {
 
       if (res.ok && data.verified) {
         console.log('✅ Payment verified successfully');
-
-        // Payment confirmed — make the order visible to pickers
         await promoteOrderToPending(orderId);
-
         toast.success('Payment successful!');
         router.push(`/checkout/success/${orderId}`);
       } else {
@@ -345,7 +336,6 @@ export default function CheckoutPage() {
         deliveryNotes: formData.deliveryNotes,
         paymentMethod: formData.paymentMethod,
         paymentStatus: 'pending',
-        // Hold the order back until payment is verified; promoteOrderToPending() flips this to 'pending'
         status: 'payment_pending',
       };
 
@@ -490,7 +480,7 @@ export default function CheckoutPage() {
                   </div>
                 </div>
 
-                {/* Shipping Address with Map */}
+                {/* Shipping Address with NEW Google Maps */}
                 <div className="bg-white rounded-2xl p-6">
                   <div className="flex items-center space-x-3 mb-6">
                     <MapPin className="w-6 h-6 text-brand-orange" />

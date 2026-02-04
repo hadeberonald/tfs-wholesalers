@@ -42,19 +42,19 @@ export default function ProductDetailPage() {
 
   const fetchProduct = async (slug: string) => {
     try {
-      const res = await fetch(`/api/shop?slug=${slug}`);
+      const res = await fetch(`/api/products?slug=${slug}`);
       if (res.ok) {
         const data = await res.json();
         if (data.products && data.products.length > 0) {
           setProduct(data.products[0]);
           setImgErrors(new Array(data.products[0].images.length).fill(false));
         } else {
-          router.push('/shop');
+          router.push('/products');
         }
       }
     } catch (error) {
       console.error('Failed to fetch product:', error);
-      router.push('/shop');
+      router.push('/products');
     } finally {
       setLoading(false);
     }

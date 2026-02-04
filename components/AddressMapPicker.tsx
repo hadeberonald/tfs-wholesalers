@@ -1,28 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import dynamic from 'next/dynamic';
-import { MapPin, Crosshair, AlertCircle, CheckCircle, Search, Loader2, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 
-// Dynamically import map components (Leaflet doesn't work with SSR)
-const MapContainer = dynamic(
-  () => import('react-leaflet').then((mod) => mod.MapContainer),
-  { ssr: false }
-);
-const TileLayer = dynamic(
-  () => import('react-leaflet').then((mod) => mod.TileLayer),
-  { ssr: false }
-);
-const Marker = dynamic(
-  () => import('react-leaflet').then((mod) => mod.Marker),
-  { ssr: false }
-);
-const Circle = dynamic(
-  () => import('react-leaflet').then((mod) => mod.Circle),
-  { ssr: false }
-);
-
-interface AddressMapPickerProps {
+interface LocationPickerProps {
   onLocationSelect: (data: {
     lat: number;
     lng: number;
@@ -41,407 +21,410 @@ interface AddressMapPickerProps {
   };
 }
 
-interface SearchResult {
-  place_id: number;
-  display_name: string;
-  lat: string;
-  lon: string;
-  boundingbox: string[];
-}
-
-// Helper function to calculate distance between two coordinates (Haversine formula)
-function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371; // Earth's radius in kilometers
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-// Map click handler component (must be used inside MapContainer)
-function MapClickHandler({ onLocationChange }: { onLocationChange: (lat: number, lng: number) => void }) {
-  // Import useMapEvents directly in the component (not dynamically)
-  const { useMapEvents } = require('react-leaflet');
-  
-  useMapEvents({
-    click(e: any) {
-      onLocationChange(e.latlng.lat, e.latlng.lng);
-    },
-  });
-  return null;
-}
-
 export default function AddressMapPicker({
   onLocationSelect,
   storeLocation,
   deliverySettings,
-}: AddressMapPickerProps) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [showResults, setShowResults] = useState(false);
-  const [position, setPosition] = useState<{ lat: number; lng: number } | null>(null);
+}: LocationPickerProps) {
+  const mapRef = useRef<any>(null);
+  const markerRef = useRef<any>(null);
+  const circlesRef = useRef<any[]>([]);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [address, setAddress] = useState('');
-  const [distance, setDistance] = useState<number>(0);
-  const [deliveryFee, setDeliveryFee] = useState<number>(0);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [isWithinRange, setIsWithinRange] = useState(true);
-  const [showMap, setShowMap] = useState(false);
-  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const [distance, setDistance] = useState<number | null>(null);
+  const [deliveryFee, setDeliveryFee] = useState(0);
+  const [isInRange, setIsInRange] = useState(false);
 
-  // Search addresses as user types
-  const handleSearch = async (query: string) => {
-    setSearchQuery(query);
-    
-    if (query.length < 3) {
-      setSearchResults([]);
-      setShowResults(false);
-      return;
-    }
-
-    // Debounce search
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
-
-    searchTimeoutRef.current = setTimeout(async () => {
-      setSearching(true);
-      setShowResults(true);
-      
-      try {
-        // Search within South Africa, prioritizing KwaZulu-Natal
-        const response = await fetch(
-          `https://nominatim.openstreetmap.org/search?` +
-          `q=${encodeURIComponent(query)}&` +
-          `countrycodes=za&` +
-          `format=json&` +
-          `limit=5&` +
-          `addressdetails=1`
-        );
-        
-        const data = await response.json();
-        setSearchResults(data);
-      } catch (error) {
-        console.error('Search error:', error);
-        setSearchResults([]);
-      } finally {
-        setSearching(false);
-      }
-    }, 500);
+  // Calculate distance between two points using Haversine formula
+  const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
+    const R = 6371; // Earth's radius in km
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
   };
 
-  const selectSearchResult = (result: SearchResult) => {
-    const lat = parseFloat(result.lat);
-    const lng = parseFloat(result.lon);
-    
-    setSearchQuery(result.display_name);
-    setShowResults(false);
-    handleLocationChange(lat, lng);
+  // Calculate delivery fee based on distance
+  const getDeliveryFee = (distanceKm: number): number => {
+    if (distanceKm <= deliverySettings.localRadius) {
+      return deliverySettings.local;
+    } else if (distanceKm <= deliverySettings.mediumRadius) {
+      return deliverySettings.medium;
+    } else if (distanceKm <= deliverySettings.farRadius) {
+      return deliverySettings.far;
+    }
+    return deliverySettings.far;
   };
 
-  const getCurrentLocation = () => {
+  // Reverse geocode using Nominatim (OpenStreetMap)
+  const reverseGeocode = async (lat: number, lng: number) => {
     setLoading(true);
-    setError('');
-    
-    if (!navigator.geolocation) {
-      setError('Geolocation is not supported by your browser');
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`,
+        {
+          headers: {
+            'User-Agent': 'TFS-Wholesalers/1.0',
+          },
+        }
+      );
+      const data = await response.json();
+
+      if (data && data.display_name) {
+        const formattedAddress = data.display_name;
+        setAddress(formattedAddress);
+
+        const dist = calculateDistance(storeLocation.lat, storeLocation.lng, lat, lng);
+        const fee = getDeliveryFee(dist);
+        const inRange = dist <= deliverySettings.farRadius;
+
+        setDistance(dist);
+        setDeliveryFee(fee);
+        setIsInRange(inRange);
+
+        onLocationSelect({
+          lat,
+          lng,
+          address: formattedAddress,
+          distance: dist,
+          deliveryFee: fee,
+        });
+      } else {
+        setAddress('Address not found - please verify location');
+        const dist = calculateDistance(storeLocation.lat, storeLocation.lng, lat, lng);
+        const fee = getDeliveryFee(dist);
+        const inRange = dist <= deliverySettings.farRadius;
+
+        setDistance(dist);
+        setDeliveryFee(fee);
+        setIsInRange(inRange);
+
+        onLocationSelect({
+          lat,
+          lng,
+          address: 'Selected location on map',
+          distance: dist,
+          deliveryFee: fee,
+        });
+      }
+    } catch (error) {
+      console.error('Geocoding error:', error);
+      setAddress('Location selected - please verify address below');
+      
+      const dist = calculateDistance(storeLocation.lat, storeLocation.lng, lat, lng);
+      const fee = getDeliveryFee(dist);
+      const inRange = dist <= deliverySettings.farRadius;
+
+      setDistance(dist);
+      setDeliveryFee(fee);
+      setIsInRange(inRange);
+
+      onLocationSelect({
+        lat,
+        lng,
+        address: 'Selected location',
+        distance: dist,
+        deliveryFee: fee,
+      });
+    } finally {
       setLoading(false);
+    }
+  };
+
+  // Load Leaflet
+  useEffect(() => {
+    // Load Leaflet CSS
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    link.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
+    link.crossOrigin = '';
+    document.head.appendChild(link);
+
+    // Load Leaflet JS
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
+    script.crossOrigin = '';
+    script.async = true;
+
+    script.onload = () => {
+      setMapLoaded(true);
+    };
+
+    document.body.appendChild(script);
+
+    return () => {
+      if (document.head.contains(link)) {
+        document.head.removeChild(link);
+      }
+      if (document.body.contains(script)) {
+        document.body.removeChild(script);
+      }
+      if (mapRef.current) {
+        mapRef.current.remove();
+      }
+    };
+  }, []);
+
+  // Initialize map
+  useEffect(() => {
+    if (!mapLoaded || mapRef.current) return;
+
+    // @ts-ignore
+    const L = window.L;
+    if (!L) return;
+
+    // Initialize map centered on store
+    const map = L.map('delivery-map').setView([storeLocation.lat, storeLocation.lng], 12);
+
+    // Add OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19,
+    }).addTo(map);
+
+    // Store location marker (blue)
+    const storeIcon = L.divIcon({
+      className: 'custom-store-marker',
+      html: `
+        <div style="position: relative;">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="#3B82F6" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="12" cy="12" r="8" fill="#3B82F6" stroke="white" stroke-width="2"/>
+            <circle cx="12" cy="12" r="3" fill="white"/>
+          </svg>
+        </div>
+      `,
+      iconSize: [40, 40],
+      iconAnchor: [20, 20],
+    });
+
+    L.marker([storeLocation.lat, storeLocation.lng], { icon: storeIcon })
+      .addTo(map)
+      .bindPopup('<strong>Store Location</strong>');
+
+    // Delivery range circles
+    const localCircle = L.circle([storeLocation.lat, storeLocation.lng], {
+      radius: deliverySettings.localRadius * 1000,
+      color: '#10B981',
+      fillColor: '#10B981',
+      fillOpacity: 0.1,
+      weight: 2,
+    }).addTo(map);
+
+    const mediumCircle = L.circle([storeLocation.lat, storeLocation.lng], {
+      radius: deliverySettings.mediumRadius * 1000,
+      color: '#F59E0B',
+      fillColor: '#F59E0B',
+      fillOpacity: 0.1,
+      weight: 2,
+    }).addTo(map);
+
+    const farCircle = L.circle([storeLocation.lat, storeLocation.lng], {
+      radius: deliverySettings.farRadius * 1000,
+      color: '#EF4444',
+      fillColor: '#EF4444',
+      fillOpacity: 0.1,
+      weight: 2,
+    }).addTo(map);
+
+    circlesRef.current = [localCircle, mediumCircle, farCircle];
+
+    // Delivery location marker (orange - draggable)
+    const deliveryIcon = L.divIcon({
+      className: 'custom-delivery-marker',
+      html: `
+        <div style="position: relative;">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="#FF6B35" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+          </svg>
+        </div>
+      `,
+      iconSize: [40, 40],
+      iconAnchor: [20, 40],
+    });
+
+    const marker = L.marker([storeLocation.lat, storeLocation.lng], {
+      icon: deliveryIcon,
+      draggable: true,
+    }).addTo(map);
+
+    marker.on('dragend', function (e: any) {
+      const position = e.target.getLatLng();
+      setSelectedLocation({ lat: position.lat, lng: position.lng });
+      reverseGeocode(position.lat, position.lng);
+    });
+
+    // Click to place marker
+    map.on('click', function (e: any) {
+      marker.setLatLng(e.latlng);
+      setSelectedLocation({ lat: e.latlng.lat, lng: e.latlng.lng });
+      reverseGeocode(e.latlng.lat, e.latlng.lng);
+    });
+
+    mapRef.current = map;
+    markerRef.current = marker;
+
+    // Info box
+    const info = L.control({ position: 'topright' });
+    info.onAdd = function () {
+      const div = L.DomUtil.create('div', 'info-box');
+      div.innerHTML = `
+        <div style="background: white; padding: 12px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); font-family: sans-serif; max-width: 220px;">
+          <div style="font-weight: bold; margin-bottom: 8px; color: #1a1a1a; font-size: 14px;">📍 Select Delivery Location</div>
+          <div style="font-size: 12px; color: #666; margin-bottom: 8px;">Click on map or drag the orange marker</div>
+          <div style="border-top: 1px solid #e5e5e5; padding-top: 8px; margin-top: 8px;">
+            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+              <div style="width: 12px; height: 12px; border-radius: 50%; background: #10B981;"></div>
+              <span style="font-size: 11px; color: #666;">Local (R${deliverySettings.local})</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+              <div style="width: 12px; height: 12px; border-radius: 50%; background: #F59E0B;"></div>
+              <span style="font-size: 11px; color: #666;">Medium (R${deliverySettings.medium})</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <div style="width: 12px; height: 12px; border-radius: 50%; background: #EF4444;"></div>
+              <span style="font-size: 11px; color: #666;">Far (R${deliverySettings.far})</span>
+            </div>
+          </div>
+        </div>
+      `;
+      return div;
+    };
+    info.addTo(map);
+  }, [mapLoaded, storeLocation, deliverySettings]);
+
+  // Get current location button handler
+  const handleUseMyLocation = () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser');
       return;
     }
 
+    setLoading(true);
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        const { latitude, longitude } = position.coords;
-        handleLocationChange(latitude, longitude);
-        setLoading(false);
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+
+        if (markerRef.current && mapRef.current) {
+          // @ts-ignore
+          const L = window.L;
+          if (L) {
+            markerRef.current.setLatLng([lat, lng]);
+            mapRef.current.setView([lat, lng], 15);
+            setSelectedLocation({ lat, lng });
+            reverseGeocode(lat, lng);
+          }
+        }
       },
       (error) => {
-        setError('Unable to get your location. GPS might be inaccurate. Please search for your address instead.');
+        console.error('Geolocation error:', error);
+        alert('Unable to get your location. Please select manually on the map.');
         setLoading(false);
-        setShowMap(true); // Show map as fallback
       },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0
-      }
+      { enableHighAccuracy: true, timeout: 10000 }
     );
   };
 
-  const handleLocationChange = useCallback(async (lat: number, lng: number) => {
-    setPosition({ lat, lng });
-
-    // Calculate distance from store
-    const dist = calculateDistance(storeLocation.lat, storeLocation.lng, lat, lng);
-    setDistance(dist);
-
-    // Check if within service area (60km)
-    if (dist > 60) {
-      setIsWithinRange(false);
-      setError('Sorry, this location is outside our 60km delivery range.');
-      return;
-    } else {
-      setIsWithinRange(true);
-      setError('');
-    }
-
-    // Calculate delivery fee based on distance
-    let fee = deliverySettings.far;
-    if (dist <= deliverySettings.localRadius) {
-      fee = deliverySettings.local;
-    } else if (dist <= deliverySettings.mediumRadius) {
-      fee = deliverySettings.medium;
-    }
-    setDeliveryFee(fee);
-
-    // Reverse geocode to get address (only if we don't have one from search)
-    if (!searchQuery || searchQuery.length < 3) {
-      try {
-        const response = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`
-        );
-        const data = await response.json();
-        const formattedAddress = data.display_name || `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-        setAddress(formattedAddress);
-        setSearchQuery(formattedAddress);
-      } catch (error) {
-        console.error('Geocoding error:', error);
-        setAddress(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
-      }
-    } else {
-      setAddress(searchQuery);
-    }
-
-    // Send data to parent
-    onLocationSelect({
-      lat,
-      lng,
-      address: searchQuery || address,
-      distance: dist,
-      deliveryFee: fee,
-    });
-  }, [storeLocation, deliverySettings, onLocationSelect, searchQuery, address]);
-
-  useEffect(() => {
-    // Set default position to store location
-    setPosition(storeLocation);
-  }, [storeLocation]);
-
   return (
     <div className="space-y-4">
-      {/* Address Search Bar */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Search for your address *
-        </label>
-        <div className="relative">
-          <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-            <Search className="w-5 h-5" />
-          </div>
-          <input
-            type="text"
-            className="input-field pl-10 pr-10"
-            placeholder="Type your street address, suburb, or town (e.g., 'Vryheid', 'Nquthu', 'Blood River')"
-            value={searchQuery}
-            onChange={(e) => handleSearch(e.target.value)}
-            onFocus={() => searchResults.length > 0 && setShowResults(true)}
-          />
-          {searching && (
-            <div className="absolute right-3 top-1/2 -translate-y-1/2">
-              <Loader2 className="w-5 h-5 text-brand-orange animate-spin" />
-            </div>
-          )}
-          {searchQuery && !searching && (
-            <button
-              type="button"
-              onClick={() => {
-                setSearchQuery('');
-                setSearchResults([]);
-                setShowResults(false);
-              }}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          )}
-        </div>
+      {/* Use My Location Button */}
+      <button
+        type="button"
+        onClick={handleUseMyLocation}
+        disabled={loading}
+        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+        <span>Use My Current Location</span>
+      </button>
 
-        {/* Search Results Dropdown */}
-        {showResults && searchResults.length > 0 && (
-          <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-            {searchResults.map((result) => (
-              <button
-                key={result.place_id}
-                type="button"
-                onClick={() => selectSearchResult(result)}
-                className="w-full px-4 py-3 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0 transition-colors"
-              >
-                <div className="flex items-start space-x-3">
-                  <MapPin className="w-5 h-5 text-brand-orange flex-shrink-0 mt-0.5" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">
-                      {result.display_name.split(',')[0]}
-                    </p>
-                    <p className="text-xs text-gray-500 line-clamp-2">
-                      {result.display_name}
-                    </p>
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {showResults && searchQuery.length >= 3 && searchResults.length === 0 && !searching && (
-          <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg p-4">
-            <p className="text-sm text-gray-500">No addresses found. Try a different search or use the map below.</p>
-          </div>
-        )}
-      </div>
-
-      {/* Alternative Options */}
-      <div className="flex items-center space-x-4">
-        <button
-          type="button"
-          onClick={getCurrentLocation}
-          disabled={loading}
-          className="flex items-center space-x-2 text-sm text-brand-orange hover:text-orange-600 font-medium"
+      {/* Map */}
+      <div className="relative">
+        <div
+          id="delivery-map"
+          className="w-full h-96 rounded-xl border-2 border-gray-300 relative z-0"
+          style={{ minHeight: '400px' }}
         >
-          <Crosshair className="w-4 h-4" />
-          <span>{loading ? 'Getting location...' : 'Use GPS Location'}</span>
-        </button>
-        <span className="text-gray-400">|</span>
-        <button
-          type="button"
-          onClick={() => setShowMap(!showMap)}
-          className="flex items-center space-x-2 text-sm text-brand-orange hover:text-orange-600 font-medium"
-        >
-          <MapPin className="w-4 h-4" />
-          <span>{showMap ? 'Hide Map' : 'Show Map'}</span>
-        </button>
-      </div>
-
-      {/* Map (shown on demand or as fallback) */}
-      {showMap && position && (
-        <div className="relative h-80 rounded-xl overflow-hidden border-2 border-gray-200 mt-4">
-          <MapContainer
-            center={[position.lat, position.lng]}
-            zoom={13}
-            style={{ height: '100%', width: '100%' }}
-            className="z-0"
-          >
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            
-            {/* Store location marker */}
-            <Marker position={[storeLocation.lat, storeLocation.lng]} />
-            
-            {/* Service area circles */}
-            <Circle
-              center={[storeLocation.lat, storeLocation.lng]}
-              radius={deliverySettings.localRadius * 1000}
-              pathOptions={{ color: 'green', fillColor: 'green', fillOpacity: 0.1 }}
-            />
-            <Circle
-              center={[storeLocation.lat, storeLocation.lng]}
-              radius={deliverySettings.mediumRadius * 1000}
-              pathOptions={{ color: 'orange', fillColor: 'orange', fillOpacity: 0.1 }}
-            />
-            <Circle
-              center={[storeLocation.lat, storeLocation.lng]}
-              radius={deliverySettings.farRadius * 1000}
-              pathOptions={{ color: 'red', fillColor: 'red', fillOpacity: 0.1 }}
-            />
-            <Circle
-              center={[storeLocation.lat, storeLocation.lng]}
-              radius={60000}
-              pathOptions={{ color: 'gray', fillColor: 'gray', fillOpacity: 0.05, dashArray: '5, 5' }}
-            />
-            
-            {/* Delivery location marker */}
-            {position && (
-              <Marker
-                position={[position.lat, position.lng]}
-                draggable={true}
-                eventHandlers={{
-                  dragend: (e) => {
-                    const marker = e.target;
-                    const position = marker.getLatLng();
-                    handleLocationChange(position.lat, position.lng);
-                  },
-                }}
-              />
-            )}
-            
-            <MapClickHandler onLocationChange={handleLocationChange} />
-          </MapContainer>
-          
-          <div className="absolute top-4 left-4 bg-white rounded-lg shadow-lg p-3 z-10 max-w-xs">
-            <p className="text-xs text-gray-600 mb-1">Click on map or drag marker to fine-tune location</p>
-            <div className="flex items-center space-x-2">
-              <MapPin className="w-4 h-4 text-brand-orange flex-shrink-0" />
-              <p className="text-xs font-medium text-gray-900">Store Location</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Distance and fee info */}
-      {position && distance > 0 && (
-        <div className={`rounded-lg p-4 ${isWithinRange ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
-          <div className="flex items-start space-x-3">
-            {isWithinRange ? (
-              <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-            ) : (
-              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-            )}
-            <div className="flex-1">
-              <div className="flex items-center justify-between mb-2">
-                <p className={`text-sm font-medium ${isWithinRange ? 'text-green-900' : 'text-red-900'}`}>
-                  Distance: {distance.toFixed(1)} km from store
-                </p>
-                {isWithinRange && (
-                  <p className="text-lg font-bold text-brand-orange">
-                    R{deliveryFee.toFixed(2)}
-                  </p>
-                )}
+          {!mapLoaded && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-100 rounded-xl">
+              <div className="text-center">
+                <div className="w-12 h-12 border-4 border-brand-orange border-t-transparent rounded-full animate-spin mb-3 mx-auto"></div>
+                <p className="text-gray-600">Loading map...</p>
               </div>
-              {isWithinRange ? (
-                <div className="text-xs text-green-700 space-y-1">
-                  <p>✓ Within delivery range</p>
-                  {distance <= deliverySettings.localRadius && (
-                    <p>✓ Local delivery zone (up to {deliverySettings.localRadius}km) - R{deliverySettings.local}</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Selected Address Display */}
+      {selectedLocation && (
+        <div className={`p-4 rounded-lg border-2 ${isInRange ? 'border-green-500 bg-green-50' : 'border-red-500 bg-red-50'}`}>
+          {loading ? (
+            <div className="flex items-center justify-center gap-2">
+              <div className="w-5 h-5 border-2 border-gray-600 border-t-transparent rounded-full animate-spin"></div>
+              <span className="text-gray-600">Loading address...</span>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-start gap-3 mb-3">
+                <svg className={`w-5 h-5 mt-0.5 ${isInRange ? 'text-green-600' : 'text-red-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <div className="flex-1">
+                  <p className="font-semibold text-gray-900">{address}</p>
+                  {distance !== null && (
+                    <p className="text-sm text-gray-600 mt-1">
+                      Distance: {distance.toFixed(2)} km from store
+                    </p>
                   )}
-                  {distance > deliverySettings.localRadius && distance <= deliverySettings.mediumRadius && (
-                    <p>✓ Medium distance zone ({deliverySettings.localRadius}-{deliverySettings.mediumRadius}km) - R{deliverySettings.medium}</p>
-                  )}
-                  {distance > deliverySettings.mediumRadius && (
-                    <p>✓ Far distance zone ({deliverySettings.mediumRadius}-60km) - R{deliverySettings.far}</p>
-                  )}
+                </div>
+              </div>
+
+              {isInRange ? (
+                <div className="flex items-center justify-between bg-white p-3 rounded-lg">
+                  <span className="text-sm font-medium text-gray-700">Delivery Fee:</span>
+                  <span className="text-lg font-bold text-brand-orange">R{deliveryFee.toFixed(2)}</span>
                 </div>
               ) : (
-                <p className="text-xs text-red-700">
-                  We only deliver within 60km of our store location. Please select a closer address.
-                </p>
+                <div className="flex items-start gap-2 bg-red-100 p-3 rounded-lg">
+                  <svg className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <p className="text-sm text-red-800">
+                    This location is outside our delivery area (max {deliverySettings.farRadius} km). Please select a closer location.
+                  </p>
+                </div>
               )}
-            </div>
-          </div>
+            </>
+          )}
         </div>
       )}
 
-      {error && !isWithinRange && (
-        <div className="flex items-center space-x-2 text-amber-600 text-sm bg-amber-50 border border-amber-200 rounded-lg p-3">
-          <AlertCircle className="w-4 h-4 flex-shrink-0" />
-          <span>{error}</span>
+      {/* Instructions */}
+      {!selectedLocation && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <p className="text-sm text-blue-800">
+            <strong>How to select your location:</strong>
+          </p>
+          <ul className="text-sm text-blue-700 mt-2 space-y-1 list-disc list-inside">
+            <li>Click "Use My Current Location" to auto-detect your address</li>
+            <li>Or click anywhere on the map to pin your delivery location</li>
+            <li>You can also drag the orange marker to adjust your location</li>
+          </ul>
         </div>
       )}
     </div>
