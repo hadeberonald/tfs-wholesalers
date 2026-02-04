@@ -42,19 +42,19 @@ export default function ProductDetailPage() {
 
   const fetchProduct = async (slug: string) => {
     try {
-      const res = await fetch(`/api/products?slug=${slug}`);
+      const res = await fetch(`/api/shop?slug=${slug}`);
       if (res.ok) {
         const data = await res.json();
         if (data.products && data.products.length > 0) {
           setProduct(data.products[0]);
           setImgErrors(new Array(data.products[0].images.length).fill(false));
         } else {
-          router.push('/products');
+          router.push('/shop');
         }
       }
     } catch (error) {
       console.error('Failed to fetch product:', error);
-      router.push('/products');
+      router.push('/shop');
     } finally {
       setLoading(false);
     }
@@ -107,7 +107,7 @@ export default function ProductDetailPage() {
     <div className="min-h-screen bg-gray-50 pt-16">
       <div className="max-w-7xl mx-auto px-4 py-6">
         <Link
-          href="/products"
+          href="/shop"
           className="inline-flex items-center text-brand-orange hover:text-orange-600 mb-6 text-sm"
         >
           <ArrowLeft className="w-4 h-4 mr-1" />

@@ -12,6 +12,7 @@ import PickingScreen from './src/screens/PickingScreen';
 import PackagingScreen from './src/screens/PackagingScreen';
 import BarcodeLinkingScreen from './src/screens/BarcodeLinkingScreen';
 import DeliveriesListScreen from './src/screens/DeliveriesListScreen';
+import DeliveryCollectionScreen from './src/screens/DeliveryCollectionScreen';
 import DeliveryScreen from './src/screens/DeliveryScreen';
 import { useAuthStore } from './src/stores/authStore';
 
@@ -80,6 +81,7 @@ export default function App() {
             <Stack.Screen name="Main" component={MainTabs} />
             <Stack.Screen name="Picking" component={PickingScreen} />
             <Stack.Screen name="Packaging" component={PackagingScreen} />
+            <Stack.Screen name="DeliveryCollection" component={DeliveryCollectionScreen} />
             <Stack.Screen name="DeliveryDetail" component={DeliveryScreen} />
           </>
         )}

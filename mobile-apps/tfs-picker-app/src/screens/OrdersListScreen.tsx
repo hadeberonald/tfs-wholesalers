@@ -28,6 +28,15 @@ interface Order {
   createdAt: string;
 }
 
+// Statuses that should never appear in the picker's queue
+const EXCLUDED_STATUSES = [
+  'payment_pending', // created but payment not yet verified
+  'payment_failed',  // payment was attempted but declined / timed out
+  'ready_for_delivery',
+  'out_for_delivery',
+  'delivered',
+];
+
 export default function OrdersListScreen({ navigation }: any) {
   const { token } = useAuthStore();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -56,12 +65,9 @@ export default function OrdersListScreen({ navigation }: any) {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      // Filter out orders that are ready for delivery or already delivered
+      // Filter out any order whose status is in the exclusion list
       const pendingOrders = response.data.orders.filter(
-        (order: Order) => 
-          order.status !== 'ready_for_delivery' && 
-          order.status !== 'out_for_delivery' &&
-          order.status !== 'delivered'
+        (order: Order) => !EXCLUDED_STATUSES.includes(order.status)
       );
 
       console.log('📋 Pending orders for picking:', pendingOrders.length);
