@@ -273,33 +273,40 @@ export default function AddressMapPicker({
     mapRef.current = map;
     markerRef.current = marker;
 
-    // Info box
-    const info = L.control({ position: 'topright' });
-    info.onAdd = function () {
-      const div = L.DomUtil.create('div', 'info-box');
-      div.innerHTML = `
-        <div style="background: white; padding: 12px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); font-family: sans-serif; max-width: 220px;">
-          <div style="font-weight: bold; margin-bottom: 8px; color: #1a1a1a; font-size: 14px;">📍 Select Delivery Location</div>
-          <div style="font-size: 12px; color: #666; margin-bottom: 8px;">Click on map or drag the orange marker</div>
-          <div style="border-top: 1px solid #e5e5e5; padding-top: 8px; margin-top: 8px;">
-            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
-              <div style="width: 12px; height: 12px; border-radius: 50%; background: #10B981;"></div>
-              <span style="font-size: 11px; color: #666;">Local (R${deliverySettings.local})</span>
-            </div>
-            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
-              <div style="width: 12px; height: 12px; border-radius: 50%; background: #F59E0B;"></div>
-              <span style="font-size: 11px; color: #666;">Medium (R${deliverySettings.medium})</span>
-            </div>
-            <div style="display: flex; align-items: center; gap: 6px;">
-              <div style="width: 12px; height: 12px; border-radius: 50%; background: #EF4444;"></div>
-              <span style="font-size: 11px; color: #666;">Far (R${deliverySettings.far})</span>
+    // Create info box using L.Control.extend
+    const InfoControl = L.Control.extend({
+      options: {
+        position: 'topright'
+      },
+      onAdd: function () {
+        const div = L.DomUtil.create('div', 'info-box');
+        div.innerHTML = `
+          <div style="background: white; padding: 12px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); font-family: sans-serif; max-width: 220px;">
+            <div style="font-weight: bold; margin-bottom: 8px; color: #1a1a1a; font-size: 14px;">📍 Select Delivery Location</div>
+            <div style="font-size: 12px; color: #666; margin-bottom: 8px;">Click on map or drag the orange marker</div>
+            <div style="border-top: 1px solid #e5e5e5; padding-top: 8px; margin-top: 8px;">
+              <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                <div style="width: 12px; height: 12px; border-radius: 50%; background: #10B981;"></div>
+                <span style="font-size: 11px; color: #666;">Local (R${deliverySettings.local})</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                <div style="width: 12px; height: 12px; border-radius: 50%; background: #F59E0B;"></div>
+                <span style="font-size: 11px; color: #666;">Medium (R${deliverySettings.medium})</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <div style="width: 12px; height: 12px; border-radius: 50%; background: #EF4444;"></div>
+                <span style="font-size: 11px; color: #666;">Far (R${deliverySettings.far})</span>
+              </div>
             </div>
           </div>
-        </div>
-      `;
-      return div;
-    };
-    info.addTo(map);
+        `;
+        return div;
+      }
+    });
+
+    // Add the control to the map
+    new InfoControl().addTo(map);
+
   }, [mapLoaded, storeLocation, deliverySettings]);
 
   // Get current location button handler
