@@ -200,7 +200,13 @@ export default function DeliveryDetailScreen({ navigation: navProp }: any) {
         [
           {
             text: 'OK',
-            onPress: () => navigation.navigate('Deliveries'),
+            onPress: () => {
+              // Navigate back to the deliveries list screen
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'DeliveriesList' }],
+              });
+            },
           },
         ]
       );

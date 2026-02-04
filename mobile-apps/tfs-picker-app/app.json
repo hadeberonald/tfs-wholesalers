@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "TFS Picker",
-    "slug": "tfs-picker-app",
+    "slug": "tfs-wholesalers",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -26,7 +26,8 @@
       "package": "com.tfswholesalers.picker",
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.VIBRATE"
+        "android.permission.VIBRATE",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -42,8 +43,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "your-project-id-here"
+        "projectId": "47538bb9-6325-44d1-ab12-95a5c7027d18"
       }
-    }
+    },
+    "owner": "hadeberonald"
   }
 }

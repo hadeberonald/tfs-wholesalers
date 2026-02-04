@@ -3,7 +3,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Package, ClipboardList, User, Settings, Car } from 'lucide-react-native';
+import { Package, ClipboardList, User, Settings, Car, Archive } from 'lucide-react-native';
 
 // Screens
 import LoginScreen from './src/screens/LoginScreen';
@@ -37,21 +37,22 @@ function MainTabs() {
           ),
         }}
       />
-      <Tab.Screen
-        name="Products"
-        component={BarcodeLinkingScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Settings color={color} size={size} />
-          ),
-        }}
-      />
+      
       <Tab.Screen
         name="Deliveries"
         component={DeliveriesListScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
             <Car color={color} size={size} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Products"
+        component={BarcodeLinkingScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Archive color={color} size={size} />
           ),
         }}
       />
@@ -83,6 +84,7 @@ export default function App() {
             <Stack.Screen name="Packaging" component={PackagingScreen} />
             <Stack.Screen name="DeliveryCollection" component={DeliveryCollectionScreen} />
             <Stack.Screen name="DeliveryDetail" component={DeliveryScreen} />
+            <Stack.Screen name="DeliveriesList" component={DeliveriesListScreen} />
           </>
         )}
       </Stack.Navigator>
