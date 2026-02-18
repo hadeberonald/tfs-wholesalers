@@ -1,9 +1,10 @@
-// app/api/auth/me/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import jwt from 'jsonwebtoken';
 import clientPromise from '../../../../lib/mongodb';
 import { ObjectId } from 'mongodb';
+
+export const dynamic = 'force-dynamic';
 
 const JWT_SECRET = process.env.NEXTAUTH_SECRET || 'your-secret-key-change-in-production';
 
@@ -16,7 +17,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    // Verify token
     const decoded = jwt.verify(token, JWT_SECRET) as {
       userId: string;
       email: string;
@@ -26,7 +26,6 @@ export async function GET(request: NextRequest) {
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
 
-    // Get user from database
     const user = await db.collection('users').findOne(
       { _id: new ObjectId(decoded.userId) },
       { projection: { password: 0 } }

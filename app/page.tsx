@@ -4,19 +4,18 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 
+export const dynamic = 'force-dynamic';
+
 export default function RootPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // Check if user has a saved branch preference
     const savedBranch = localStorage.getItem('selectedBranch');
     
     if (savedBranch) {
-      // Redirect to saved branch
-      router.push(`/${savedBranch}`);
+      router.replace(`/${savedBranch}`);
     } else {
-      // Redirect to branch selector
-      router.push('/select-branch');
+      router.replace('/select-branch');
     }
   }, [router]);
 
