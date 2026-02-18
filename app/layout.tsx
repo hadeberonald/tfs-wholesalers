@@ -22,7 +22,8 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <AuthProvider>
-          <ConditionalHeader />
+                   <ConditionalHeader /> 
+
           <main>{children}</main>
           <Footer />
           <Toaster 

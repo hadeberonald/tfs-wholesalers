@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
+import { getAdminBranch } from '@/lib/get-admin-branch';
 
 export async function GET(
   request: NextRequest,
@@ -30,30 +31,94 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
+    const adminInfo = await getAdminBranch();
+    if ('error' in adminInfo) {
+      return NextResponse.json({ error: adminInfo.error }, { status: adminInfo.status });
+    }
+
     const body = await request.json();
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
 
-    const { _id, ...updateData } = body;
+    // ✅ Verify ownership
+    const existing = await db.collection('products').findOne({
+      _id: new ObjectId(params.id)
+    });
+    
+    if (!existing) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+    
+    if (!adminInfo.isSuperAdmin && existing.branchId.toString() !== adminInfo.branchId.toString()) {
+      return NextResponse.json({ error: 'Not authorized to edit this product' }, { status: 403 });
+    }
 
-    // ✅ Handle barcode field properly
+    const { _id, branchId, ...updateData } = body;
+
+    // Convert categories to array
+    if (updateData.categories && !Array.isArray(updateData.categories)) {
+      updateData.categories = [updateData.categories];
+    }
+
+    // Handle barcode validation
     if ('barcode' in updateData) {
       if (updateData.barcode === null || updateData.barcode === '') {
-        // Remove barcode if null or empty
         delete updateData.barcode;
       } else {
-        // Validate and trim barcode
         updateData.barcode = String(updateData.barcode).trim();
 
-        // ✅ Check if barcode is already used by another product
         const existingProduct = await db.collection('products').findOne({
-          barcode: updateData.barcode,
-          _id: { $ne: new ObjectId(params.id) }
+          _id: { $ne: new ObjectId(params.id) },
+          branchId: existing.branchId,
+          $or: [
+            { barcode: updateData.barcode },
+            { 'variants.barcode': updateData.barcode }
+          ]
         });
 
         if (existingProduct) {
           return NextResponse.json({
-            error: 'Barcode already in use',
+            error: 'Barcode already in use in your branch',
+            product: existingProduct.name
+          }, { status: 400 });
+        }
+      }
+    }
+
+    // Validate variant barcodes
+    if (updateData.hasVariants && updateData.variants && updateData.variants.length > 0) {
+      updateData.variants = updateData.variants.map((v: any) => ({
+        ...v,
+        _id: v._id || new ObjectId().toString()
+      }));
+
+      const variantBarcodes = updateData.variants
+        .filter((v: any) => v.barcode)
+        .map((v: any) => v.barcode);
+      
+      if (variantBarcodes.length > 0) {
+        const duplicates = variantBarcodes.filter((item: string, index: number) => 
+          variantBarcodes.indexOf(item) !== index
+        );
+        
+        if (duplicates.length > 0) {
+          return NextResponse.json({ 
+            error: `Duplicate barcode(s) in variants: ${duplicates.join(', ')}` 
+          }, { status: 400 });
+        }
+
+        const existingProduct = await db.collection('products').findOne({
+          _id: { $ne: new ObjectId(params.id) },
+          branchId: existing.branchId,
+          $or: [
+            { barcode: { $in: variantBarcodes } },
+            { 'variants.barcode': { $in: variantBarcodes } }
+          ]
+        });
+
+        if (existingProduct) {
+          return NextResponse.json({
+            error: 'One or more variant barcodes already in use in your branch',
             product: existingProduct.name
           }, { status: 400 });
         }
@@ -71,7 +136,7 @@ export async function PUT(
       return NextResponse.json({ error: 'Product not found' }, { status: 404 });
     }
 
-    console.log('✅ Product updated:', params.id, updateData.barcode ? `with barcode: ${updateData.barcode}` : '');
+    console.log('✅ Product updated:', params.id);
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -85,8 +150,26 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    const adminInfo = await getAdminBranch();
+    if ('error' in adminInfo) {
+      return NextResponse.json({ error: adminInfo.error }, { status: adminInfo.status });
+    }
+
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
+
+    // ✅ Verify ownership
+    const existing = await db.collection('products').findOne({
+      _id: new ObjectId(params.id)
+    });
+    
+    if (!existing) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+    
+    if (!adminInfo.isSuperAdmin && existing.branchId.toString() !== adminInfo.branchId.toString()) {
+      return NextResponse.json({ error: 'Not authorized to delete this product' }, { status: 403 });
+    }
 
     await db.collection('products').deleteOne({ 
       _id: new ObjectId(params.id) 

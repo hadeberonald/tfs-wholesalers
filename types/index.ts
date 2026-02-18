@@ -1,13 +1,43 @@
 import { ObjectId } from 'mongodb';
 
+// NEW: Branch interface for multi-tenant system
+export interface Branch {
+  _id?: ObjectId;
+  name: string; // 'Vryheid', 'Ladysmith', etc.
+  slug: string; // 'vryheid', 'ladysmith', etc.
+  displayName: string; // 'TFS Vryheid', 'TFS Ladysmith'
+  status: 'active' | 'paused' | 'inactive';
+  settings: {
+    storeLocation: {
+      lat: number;
+      lng: number;
+      address: string;
+    };
+    contactEmail: string;
+    contactPhone: string;
+    deliveryPricing: DeliveryPricing;
+    minimumOrderValue?: number;
+  };
+  paymentConfig?: {
+    paystackPublicKey?: string;
+    paystackSecretKey?: string;
+  };
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy: ObjectId | string; // Super admin who created it
+}
+
+// UPDATED: User with super-admin role and branchId
 export interface User {
   _id?: ObjectId;
   email: string;
   password: string;
   name: string;
-  role: 'customer' | 'admin' | 'picker';
+  role: 'customer' | 'admin' | 'picker' | 'super-admin'; // ADDED super-admin
+  branchId?: ObjectId | string; // Which branch this user belongs to (null for super-admin and customers)
   phone?: string;
   addresses?: Address[];
+  active?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -25,38 +55,115 @@ export interface Address {
   isDefault?: boolean;
 }
 
+// UPDATED: Category with branchId
 export interface Category {
   _id?: ObjectId;
   name: string;
   slug: string;
   description?: string;
   image?: string;
-  banner?: string; // For featured carousel
-  parentId?: ObjectId | string | null; // For nested categories
-  level: number; // 0 = top level, 1 = subcategory, 2 = sub-subcategory
+  banner?: string;
+  parentId?: ObjectId | string | null;
+  level: number;
   order: number;
   active: boolean;
-  featured: boolean; // Show in carousel
+  featured: boolean;
+  branchId: ObjectId | string; // ADDED: Which branch owns this category
   createdAt: Date;
   updatedAt: Date;
 }
 
+export interface ProductVariant {
+  _id?: string;
+  name: string;
+  sku: string;
+  barcode?: string;
+  price?: number;
+  compareAtPrice?: number;
+  specialPrice?: number;
+  stockLevel: number;
+  images: string[];
+  active: boolean;
+  attributes?: { [key: string]: string };
+}
+
+export type SpecialType = 
+  | 'percentage_off'
+  | 'amount_off'
+  | 'buy_x_get_y'
+  | 'multibuy'
+  | 'bundle'
+  | 'fixed_price';
+
+export interface SpecialCondition {
+  buyProductId?: string;
+  buyProductVariantId?: string;
+  buyQuantity?: number;
+  getProductId?: string;
+  getProductVariantId?: string;
+  getQuantity?: number;
+  getDiscount?: number;
+  requiredQuantity?: number;
+  specialPrice?: number;
+  bundleProducts?: {
+    productId: string;
+    variantId?: string;
+    quantity: number;
+  }[];
+  bundlePrice?: number;
+  discountPercentage?: number;
+  discountAmount?: number;
+  newPrice?: number;
+  minimumPurchase?: number;
+  maximumDiscount?: number;
+  limitPerCustomer?: number;
+  applyToAll?: boolean;
+}
+
+// UPDATED: Special with branchId
+export interface Special {
+  _id?: ObjectId;
+  name: string;
+  slug: string;
+  description: string;
+  type: SpecialType;
+  productId?: string;
+  productIds?: string[];
+  categoryId?: string;
+  conditions: SpecialCondition;
+  badgeText?: string;
+  images?: string[];
+  active: boolean;
+  featured: boolean;
+  startDate?: Date;
+  endDate?: Date;
+  stockLimit?: number;
+  stockUsed?: number;
+  branchId: ObjectId | string; // ADDED: Which branch owns this special
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// UPDATED: Product with branchId
 export interface Product {
   _id?: ObjectId;
   name: string;
   slug: string;
   description: string;
-  category: ObjectId | string;
-  categoryPath?: string[]; // Array of category IDs from root to leaf
+  categories: (ObjectId | string)[];
+  categoryPaths?: string[][];
   price: number;
   compareAtPrice?: number;
   costPrice?: number;
   sku: string;
-  barcode?: string; // Barcode for product scanning during order picking
+  barcode?: string;
   stockLevel: number;
   lowStockThreshold: number;
   images: string[];
+  hasVariants: boolean;
+  variants?: ProductVariant[];
   onSpecial: boolean;
+  specialId?: ObjectId | string;
   specialPrice?: number;
   specialStartDate?: Date;
   specialEndDate?: Date;
@@ -69,17 +176,23 @@ export interface Product {
     width: number;
     height: number;
   };
+  branchId: ObjectId | string; // ADDED: Which branch owns this product
   createdAt: Date;
   updatedAt: Date;
 }
 
 export interface CartItem {
-  productId: string;
+  id: string;
+  variantId?: string;
   name: string;
+  variantName?: string;
   price: number;
   quantity: number;
   image: string;
   sku: string;
+  appliedSpecialId?: string;
+  originalPrice?: number;
+  specialDiscount?: number;
 }
 
 export interface Cart {
@@ -87,8 +200,35 @@ export interface Cart {
   subtotal: number;
   deliveryFee: number;
   total: number;
+  totalSavings?: number;
 }
 
+export interface ComboItem {
+  productId: string;
+  variantId?: string;
+  productName: string;
+  quantity: number;
+}
+
+// UPDATED: Combo with branchId
+export interface Combo {
+  _id?: ObjectId;
+  name: string;
+  slug: string;
+  description: string;
+  items: ComboItem[];
+  comboPrice: number;
+  regularPrice: number;
+  images: string[];
+  active: boolean;
+  featured: boolean;
+  stockLevel: number;
+  branchId: ObjectId | string; // ADDED: Which branch owns this combo
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// UPDATED: Order with branchId
 export interface Order {
   _id?: ObjectId;
   orderNumber: string;
@@ -103,6 +243,7 @@ export interface Order {
   deliveryFee: number;
   subtotal: number;
   total: number;
+  totalSavings?: number;
   paymentMethod: 'paystack' | 'ozow' | 'cash';
   paymentStatus: 'pending' | 'paid' | 'failed' | 'refunded';
   paymentReference?: string;
@@ -110,21 +251,28 @@ export interface Order {
   pickerId?: ObjectId | string;
   pickedAt?: Date;
   deliveryNotes?: string;
+  branchId: ObjectId | string; // ADDED: Which branch this order belongs to
   createdAt: Date;
   updatedAt: Date;
 }
 
 export interface OrderItem {
   productId: string;
+  variantId?: string;
   name: string;
+  variantName?: string;
   sku: string;
   price: number;
   quantity: number;
   image: string;
-  barcode?: string; // Include barcode from product for order picking
-  description?: string; // Additional product details for pickers
+  barcode?: string;
+  description?: string;
+  appliedSpecialId?: string;
+  originalPrice?: number;
+  specialDiscount?: number;
 }
 
+// UPDATED: HeroBanner with branchId
 export interface HeroBanner {
   _id?: ObjectId;
   title: string;
@@ -134,6 +282,7 @@ export interface HeroBanner {
   buttonText?: string;
   active: boolean;
   order: number;
+  branchId: ObjectId | string; // ADDED: Which branch owns this banner
   createdAt: Date;
   updatedAt: Date;
 }
@@ -149,6 +298,7 @@ export interface DeliveryPricing {
   updatedAt: Date;
 }
 
+// SiteSettings remains mostly the same but will be stored per branch
 export interface SiteSettings {
   _id?: ObjectId;
   storeName: string;

@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "seed:categories": "tsx scripts/seed-categories.ts"
+    "seed:categories": "tsx scripts/seed-categories.ts",
+    "migrate:wholesale": "node scripts/migrate-wholesale-db.js"
   },
   "dependencies": {
     "@react-google-maps/api": "^2.20.8",

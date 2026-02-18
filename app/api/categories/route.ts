@@ -1,59 +1,73 @@
 import { NextRequest, NextResponse } from 'next/server';
-import clientPromise from '../../../lib/mongodb';
+import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
+import { getAdminBranch } from '@/lib/get-admin-branch';
 
-// Force dynamic rendering
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const featured = searchParams.get('featured');
-    const parentId = searchParams.get('parentId');
     const slug = searchParams.get('slug');
-    const all = searchParams.get('all'); // For admin
-    const withChildren = searchParams.get('withChildren'); // Get nested structure
+    const all = searchParams.get('all');
+    const branchId = searchParams.get('branchId');
+    const withChildren = searchParams.get('withChildren');
+    const featured = searchParams.get('featured');
     
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
     
-    const query: any = all === 'true' ? {} : { active: true };
+    const query: any = { active: true };
     
-    if (featured === 'true') query.featured = true;
-    if (slug) {
-      query.slug = slug;
-      // When querying by slug, don't apply active filter unless explicitly requested
-      if (all !== 'true') {
-        query.active = true;
+    // Admin requesting their categories
+    if (all === 'true') {
+      const adminInfo = await getAdminBranch();
+      if ('error' in adminInfo) {
+        return NextResponse.json({ error: adminInfo.error }, { status: adminInfo.status });
+      }
+      
+      // Remove active filter for admin
+      delete query.active;
+      
+      if (!adminInfo.isSuperAdmin && adminInfo.branchId) {
+        query.branchId = adminInfo.branchId;
+      }
+    } else {
+      // Customer browsing
+      if (branchId) {
+        query.branchId = new ObjectId(branchId);
       }
     }
-    if (parentId === 'null' || parentId === null) {
-      query.parentId = null;
-    } else if (parentId) {
-      query.parentId = new ObjectId(parentId);
+    
+    if (slug) {
+      query.slug = slug;
     }
     
-    let categories = await db
-      .collection('categories')
+    // ✅ FIX: Add featured filter
+    if (featured === 'true') {
+      query.featured = true;
+    }
+    
+    const categories = await db.collection('categories')
       .find(query)
       .sort({ order: 1, name: 1 })
       .toArray();
-
-    // If withChildren is true, build nested structure
-    if (withChildren === 'true' && !slug) {
-      const buildTree = (parentId: ObjectId | null = null): any[] => {
+    
+    // Build hierarchical structure if requested
+    if (withChildren === 'true') {
+      const buildTree = (parentId: string | null = null): any[] => {
         return categories
-          .filter(cat => {
-            if (parentId === null) return !cat.parentId;
-            return cat.parentId?.toString() === parentId.toString();
+          .filter((cat: any) => {
+            const catParentId = cat.parentId?.toString() || null;
+            return catParentId === parentId;
           })
-          .map(cat => ({
+          .map((cat: any) => ({
             ...cat,
-            children: buildTree(cat._id)
+            children: buildTree(cat._id.toString())
           }));
       };
       
-      const tree = buildTree();
+      const tree = buildTree(null);
       return NextResponse.json({ categories: tree });
     }
 
@@ -66,6 +80,17 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const adminInfo = await getAdminBranch();
+    if ('error' in adminInfo) {
+      return NextResponse.json({ error: adminInfo.error }, { status: adminInfo.status });
+    }
+
+    if (adminInfo.isSuperAdmin) {
+      return NextResponse.json({ 
+        error: 'Super admins cannot create categories directly. Please assign to a branch.' 
+      }, { status: 403 });
+    }
+
     const body = await request.json();
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
@@ -73,17 +98,35 @@ export async function POST(request: NextRequest) {
     // Generate slug from name
     const slug = body.name.toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '');
+      .replace(/^-+|-+$/g, '');
+
+    // Check for duplicate slug in same branch
+    const existing = await db.collection('categories').findOne({
+      branchId: adminInfo.branchId,
+      slug
+    });
+
+    if (existing) {
+      return NextResponse.json({ 
+        error: 'A category with this name already exists in your branch' 
+      }, { status: 400 });
+    }
 
     // Determine level based on parent
     let level = 0;
     if (body.parentId) {
       const parent = await db.collection('categories').findOne({
-        _id: new ObjectId(body.parentId)
+        _id: new ObjectId(body.parentId),
+        branchId: adminInfo.branchId
       });
-      if (parent) {
-        level = (parent.level || 0) + 1;
+      
+      if (!parent) {
+        return NextResponse.json({ 
+          error: 'Parent category not found' 
+        }, { status: 400 });
       }
+      
+      level = (parent.level || 0) + 1;
     }
 
     const category = {
@@ -95,13 +138,17 @@ export async function POST(request: NextRequest) {
       parentId: body.parentId ? new ObjectId(body.parentId) : null,
       level,
       order: body.order || 0,
-      active: body.active !== false,
+      active: body.active !== undefined ? body.active : true,
       featured: body.featured || false,
+      branchId: adminInfo.branchId,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
 
     const result = await db.collection('categories').insertOne(category);
+    
+    console.log('✅ Category created for branch:', adminInfo.branchId.toString());
+    
     return NextResponse.json({ id: result.insertedId }, { status: 201 });
   } catch (error) {
     console.error('Failed to create category:', error);
