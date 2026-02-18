@@ -248,8 +248,9 @@ export default function PurchaseOrderDetailPage() {
                     <img src="/logo.png" alt="TFS" className="h-12 ml-auto" />
                   </div>
                   <p className="font-semibold text-brand-black">{branch?.displayName || 'TFS Wholesalers'}</p>
-                  <p className="text-sm text-gray-600">{branch?.address}</p>
-                  <p className="text-sm text-gray-600">{branch?.phone}</p>
+                  {/* ✅ FIXED: Use nested settings properties */}
+                  <p className="text-sm text-gray-600">{branch?.settings?.storeLocation?.address}</p>
+                  <p className="text-sm text-gray-600">{branch?.settings?.contactPhone}</p>
                 </div>
               </div>
             </div>
@@ -372,8 +373,9 @@ export default function PurchaseOrderDetailPage() {
             <div className="text-right">
               <img src="/logo.png" alt="TFS" className="h-10 ml-auto mb-2" />
               <p className="font-semibold">{branch?.displayName || 'TFS Wholesalers'}</p>
-              <p className="text-xs">{branch?.address}</p>
-              <p className="text-xs">{branch?.phone}</p>
+              {/* ✅ FIXED: Use nested settings properties */}
+              <p className="text-xs">{branch?.settings?.storeLocation?.address}</p>
+              {branch?.settings?.contactPhone && <p className="text-xs">{branch?.settings?.contactPhone}</p>}
             </div>
           </div>
 

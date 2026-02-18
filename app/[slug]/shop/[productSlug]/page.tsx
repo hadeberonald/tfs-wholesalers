@@ -54,7 +54,6 @@ export default function SpecialDetailPage() {
   useEffect(() => {
     if (!branch?.id || !specialSlug) return;
 
-    // Reset all state immediately when slug changes — prevents stale data flash
     setSpecial(null);
     setProducts([]);
     setSelectedProduct(null);
@@ -62,11 +61,10 @@ export default function SpecialDetailPage() {
     setSelectedImage(0);
     setLoading(true);
 
-    let cancelled = false; // guard against setting state after navigation away
+    let cancelled = false;
 
     const load = async () => {
       try {
-        // 1. Fetch the special
         const specialRes = await fetch(`/api/specials?slug=${specialSlug}&branchId=${branch.id}`);
         if (!specialRes.ok || cancelled) return;
 
@@ -76,7 +74,6 @@ export default function SpecialDetailPage() {
 
         setSpecial(foundSpecial);
 
-        // 2. Determine product IDs to fetch
         let productIds: string[] = [];
         if (foundSpecial.type === 'buy_x_get_y') {
           if (foundSpecial.conditions.buyProductId) {
@@ -92,8 +89,8 @@ export default function SpecialDetailPage() {
 
         if (productIds.length === 0) return;
 
-        // 3. Fetch products in parallel (deduplicated IDs)
-        const uniqueIds = [...new Set(productIds)];
+        // ✅ FIXED: Use Array.from() instead of spread operator with Set
+        const uniqueIds = Array.from(new Set(productIds));
         const results = await Promise.all(
           uniqueIds.map((id) =>
             fetch(`/api/products/${id}`)
@@ -117,11 +114,10 @@ export default function SpecialDetailPage() {
     load();
 
     return () => {
-      cancelled = true; // cancel any in-flight fetch when slug changes
+      cancelled = true;
     };
-  }, [branch?.id, specialSlug]); // primitives only — re-runs on every real slug change
+  }, [branch?.id, specialSlug]);
 
-  // Reset quantity when product or special type changes
   useEffect(() => {
     if (!special || !selectedProduct) return;
     if (special.type === 'multibuy' && special.conditions.requiredQuantity) {
@@ -130,8 +126,6 @@ export default function SpecialDetailPage() {
       setQuantity(1);
     }
   }, [selectedProduct?._id, special?.type]);
-
-  // ── Price helpers ────────────────────────────────────────────────────────
 
   const getDisplayPrice = (product: Product) => {
     if (!special) return product.price;
@@ -194,8 +188,6 @@ export default function SpecialDetailPage() {
     }
   };
 
-  // ── Quantity stepper ─────────────────────────────────────────────────────
-
   const bundleStep = special?.type === 'multibuy' ? (special.conditions.requiredQuantity || 1) : 1;
   const minQty = bundleStep;
 
@@ -247,8 +239,6 @@ export default function SpecialDetailPage() {
     }
   };
 
-  // ── Derived values ───────────────────────────────────────────────────────
-
   const isInStock     = (selectedProduct?.stockLevel ?? 0) > 0;
   const displayImages = (special?.images?.length ? special.images : selectedProduct?.images) ?? [];
   const displayPrice  = selectedProduct ? getDisplayPrice(selectedProduct) : 0;
@@ -263,8 +253,6 @@ export default function SpecialDetailPage() {
     const remainder = quantity % requiredQuantity;
     return sets * specialPrice + remainder * selectedProduct.price;
   })();
-
-  // ── Loading / not-found ──────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -303,7 +291,6 @@ export default function SpecialDetailPage() {
     <div className="min-h-screen bg-gray-50 pt-32 md:pt-28">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
 
-        {/* Breadcrumb */}
         <nav className="flex items-center space-x-2 text-sm text-gray-600 mb-8">
           <Link href={`/${branch?.slug}`} className="hover:text-brand-orange">
             <Home className="w-4 h-4" />
@@ -316,7 +303,6 @@ export default function SpecialDetailPage() {
 
         <div className="grid md:grid-cols-2 gap-8 lg:gap-12">
 
-          {/* Images */}
           <div>
             <div className="bg-white rounded-2xl overflow-hidden mb-4">
               <div className="relative aspect-square">
@@ -360,7 +346,6 @@ export default function SpecialDetailPage() {
             )}
           </div>
 
-          {/* Info Panel */}
           <div>
             <h1 className="text-3xl md:text-4xl font-bold text-brand-black mb-4">{special.name}</h1>
 
@@ -368,7 +353,6 @@ export default function SpecialDetailPage() {
               <p className="text-gray-600 mb-6 whitespace-pre-line">{special.description}</p>
             )}
 
-            {/* Type banners */}
             {special.type === 'buy_x_get_y' && (
               <div className="mb-6 bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
                 <h3 className="font-semibold text-blue-900 mb-2">Special Offer</h3>
@@ -406,7 +390,6 @@ export default function SpecialDetailPage() {
               </div>
             )}
 
-            {/* Product selector */}
             {products.length > 1 && (
               <div className="mb-6">
                 <label className="block text-sm font-semibold text-brand-black mb-2">Select Product</label>
@@ -437,7 +420,6 @@ export default function SpecialDetailPage() {
               </div>
             )}
 
-            {/* Price block */}
             {selectedProduct && (
               <div className="mb-6">
                 {special.type === 'multibuy' ? (
@@ -476,7 +458,6 @@ export default function SpecialDetailPage() {
               </div>
             )}
 
-            {/* Stock status */}
             {selectedProduct && (
               <div className="mb-6">
                 {isInStock ? (
@@ -493,7 +474,6 @@ export default function SpecialDetailPage() {
               </div>
             )}
 
-            {/* Quantity + Add to Cart */}
             {selectedProduct && isInStock && (
               <div className="mb-6">
                 <label className="block text-sm font-semibold text-brand-black mb-2">
@@ -547,7 +527,6 @@ export default function SpecialDetailPage() {
               </div>
             )}
 
-            {/* Product details */}
             {selectedProduct && (
               <div className="border-t border-gray-200 pt-6">
                 <h2 className="text-xl font-bold text-brand-black mb-3">Product Details</h2>

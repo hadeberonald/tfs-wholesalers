@@ -1,14 +1,14 @@
-// lib/auth-context.tsx
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 
+// ✅ FIXED: Added 'super-admin' to role union
 interface User {
   id: string;
   email: string;
   name: string;
-  role: 'customer' | 'admin' | 'picker';
+  role: 'customer' | 'admin' | 'picker' | 'super-admin';
 }
 
 interface AuthContextType {
@@ -62,8 +62,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await res.json();
     setUser(data.user);
     
-    // Redirect based on role and slug
-    if (data.user.role === 'admin') {
+    // ✅ FIXED: Added super-admin routing
+    if (data.user.role === 'super-admin') {
+      router.push('/super-admin');
+    } else if (data.user.role === 'admin') {
       router.push('/admin');
     } else if (data.user.role === 'picker') {
       router.push('/picker');

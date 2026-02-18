@@ -56,6 +56,7 @@ interface ProductCardProps {
     specialId?: string;
     unit?: string;
     unitQuantity?: number;
+    sku?: string; // ✅ Already optional
   };
 }
 
@@ -72,7 +73,6 @@ export default function ProductCard({ product }: ProductCardProps) {
   const [justAdded, setJustAdded] = useState(false);
   const addItem = useCartStore((state) => state.addItem);
 
-  // Fetch special if product has one
   useEffect(() => {
     if (product.specialId) {
       fetchSpecial(product.specialId);
@@ -116,6 +116,8 @@ export default function ProductCard({ product }: ProductCardProps) {
         return `${special.conditions.requiredQuantity} FOR R${special.conditions.specialPrice}`;
       case 'buy_x_get_y':
         return `BUY ${special.conditions.buyQuantity} GET ${special.conditions.getQuantity}`;
+      case 'bundle':
+        return 'BUNDLE DEAL';
       default:
         return 'SPECIAL';
     }
@@ -131,7 +133,8 @@ export default function ProductCard({ product }: ProductCardProps) {
       price: displayPrice,
       image: primaryImage,
       quantity: quantity,
-      sku: selectedVariant?.sku || product.slug,
+      // ✅ FIXED: Added proper fallback chain for SKU
+      sku: selectedVariant?.sku || product.sku || product.slug,
       appliedSpecialId: special?._id,
       originalPrice: comparePrice,
     });
@@ -167,15 +170,12 @@ export default function ProductCard({ product }: ProductCardProps) {
 
   const specialBadge = getSpecialBadge();
 
-  // Build correct product URL with branch slug
   const productUrl = branch ? `/${branch.slug}/shop/${product.slug}` : `/shop/${product.slug}`;
 
-  // Get display size
   const displaySize = product.unitQuantity && product.unit 
     ? `${product.unitQuantity}${product.unit}` 
     : '';
 
-  // Truncate description to 60 characters
   const truncatedDescription = product.description 
     ? product.description.length > 60 
       ? product.description.substring(0, 60) + '...' 
@@ -187,7 +187,6 @@ export default function ProductCard({ product }: ProductCardProps) {
       href={productUrl}
       className="group bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition-all duration-300 border border-gray-100 relative flex flex-col h-full"
     >
-      {/* Added Animation */}
       {justAdded && (
         <div className="absolute inset-0 bg-green-500/90 z-20 flex items-center justify-center animate-fade-in">
           <div className="text-center">
@@ -197,7 +196,6 @@ export default function ProductCard({ product }: ProductCardProps) {
         </div>
       )}
 
-      {/* Image */}
       <div className="relative aspect-[4/3] overflow-hidden bg-gray-100 flex-shrink-0">
         {primaryImage && !imgError ? (
           <img
@@ -216,9 +214,7 @@ export default function ProductCard({ product }: ProductCardProps) {
           </div>
         )}
         
-        {/* Badges - Top Left */}
         <div className="absolute top-2 left-2 flex flex-col space-y-1">
-          {/* Special Promotion Badge */}
           {specialBadge && (
             <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg flex items-center space-x-1">
               <Tag className="w-3 h-3" />
@@ -226,21 +222,18 @@ export default function ProductCard({ product }: ProductCardProps) {
             </span>
           )}
           
-          {/* Regular Special Badge (if no special promotion) */}
           {!specialBadge && product.onSpecial && (
             <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
               SPECIAL
             </span>
           )}
           
-          {/* Discount Badge */}
           {hasDiscount && (
             <span className="bg-brand-orange text-white text-xs font-bold px-2 py-0.5 rounded-full">
               {discountPercent}% OFF
             </span>
           )}
 
-          {/* Variants Badge */}
           {product.hasVariants && product.variants && product.variants.length > 1 && (
             <span className="bg-purple-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
               {product.variants.length} OPTIONS
@@ -248,7 +241,6 @@ export default function ProductCard({ product }: ProductCardProps) {
           )}
         </div>
 
-        {/* Stock Warning - Top Right */}
         {lowStock && inStock && (
           <div className="absolute top-2 right-2">
             <span className="bg-yellow-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
@@ -258,9 +250,7 @@ export default function ProductCard({ product }: ProductCardProps) {
         )}
       </div>
 
-      {/* Content */}
       <div className="p-3 md:p-4 flex flex-col flex-grow">
-        {/* Product Name & Size */}
         <div className="mb-2">
           <h3 className="text-sm md:text-base font-semibold text-brand-black line-clamp-2 group-hover:text-brand-orange transition-colors">
             {product.name}
@@ -273,14 +263,12 @@ export default function ProductCard({ product }: ProductCardProps) {
           )}
         </div>
 
-        {/* Description Snippet */}
         {truncatedDescription && (
           <p className="text-xs text-gray-600 mb-2 line-clamp-2">
             {truncatedDescription}
           </p>
         )}
 
-        {/* Variant Selector */}
         {product.hasVariants && product.variants && product.variants.length > 0 && (
           <div className="mb-2" onClick={(e) => e.preventDefault()}>
             <select
@@ -299,7 +287,6 @@ export default function ProductCard({ product }: ProductCardProps) {
           </div>
         )}
 
-        {/* Price */}
         <div className="mb-2">
           <div className="flex items-baseline space-x-2">
             <span className="text-lg md:text-xl font-bold text-brand-orange">
@@ -318,7 +305,6 @@ export default function ProductCard({ product }: ProductCardProps) {
           )}
         </div>
 
-        {/* Special Description (if applicable) */}
         {special && special.type === 'buy_x_get_y' && (
           <div className="mb-2 bg-blue-50 border border-blue-200 rounded-lg p-2">
             <p className="text-xs text-blue-900 font-semibold">
@@ -336,10 +322,8 @@ export default function ProductCard({ product }: ProductCardProps) {
           </div>
         )}
 
-        {/* Spacer to push button to bottom */}
         <div className="flex-grow" />
 
-        {/* Quantity + Add to Cart */}
         {inStock ? (
           <div className="flex items-center space-x-2 mt-auto" onClick={(e) => e.preventDefault()}>
             <div className="flex items-center border border-gray-300 rounded-lg">
