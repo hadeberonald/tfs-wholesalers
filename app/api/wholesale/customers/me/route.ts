@@ -1,9 +1,10 @@
-// app/api/wholesale/customers/me/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import jwt from 'jsonwebtoken';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
+
+export const dynamic = 'force-dynamic';
 
 const JWT_SECRET = process.env.NEXTAUTH_SECRET || 'your-secret-key-change-in-production';
 
@@ -32,7 +33,6 @@ export async function GET(request: NextRequest) {
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
 
-    // ✅ FIX: Use 'wholesale_customers' instead of 'wholesaleCustomers'
     const customer = await db.collection('wholesale_customers').findOne({
       userId: new ObjectId(decoded.userId),
       branchId: new ObjectId(branchId),
