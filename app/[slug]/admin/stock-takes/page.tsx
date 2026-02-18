@@ -21,6 +21,7 @@ interface StockTake {
   _id: string;
   productId: string;
   productName: string;
+  variantId?: string; // ✅ ADD THIS LINE
   variantName?: string;
   sku: string;
   expectedStock: number;

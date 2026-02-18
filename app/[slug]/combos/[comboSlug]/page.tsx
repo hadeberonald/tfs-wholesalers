@@ -103,6 +103,7 @@ export default function ComboDetailPage() {
       image: combo.images[0] || '/placeholder.png',
       quantity: quantity,
       originalPrice: combo.regularPrice,
+      sku: ''
     });
     
     toast.success(`Added ${quantity}x ${combo.name} to cart!`);
