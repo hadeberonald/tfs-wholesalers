@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
+import { getAdminBranch } from '@/lib/get-admin-branch';
 
-// GET /api/orders/[orderId]
 export async function GET(
   request: NextRequest,
   { params }: { params: { orderId: string } }
@@ -50,20 +50,51 @@ export async function GET(
   }
 }
 
-// PUT /api/orders/[orderId] - Added this method
 export async function PUT(
   request: NextRequest,
   { params }: { params: { orderId: string } }
 ) {
   try {
+    const adminInfo = await getAdminBranch();
+    if ('error' in adminInfo) {
+      return NextResponse.json({ error: adminInfo.error }, { status: adminInfo.status });
+    }
+
     const updates = await request.json();
-    console.log('📝 Updating order:', params.orderId, 'with:', updates);
+    console.log('📝 Updating order:', params.orderId);
     
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
 
+    // ✅ Verify order belongs to admin's branch
+    let order;
+    if (ObjectId.isValid(params.orderId)) {
+      order = await db.collection('orders').findOne({
+        _id: new ObjectId(params.orderId)
+      });
+    } else {
+      order = await db.collection('orders').findOne({
+        orderNumber: params.orderId
+      });
+    }
+
+    if (!order) {
+      return NextResponse.json(
+        { error: 'Order not found' },
+        { status: 404 }
+      );
+    }
+
+    if (!adminInfo.isSuperAdmin && order.branchId.toString() !== adminInfo.branchId.toString()) {
+      return NextResponse.json(
+        { error: 'Not authorized to update this order' },
+        { status: 403 }
+      );
+    }
+
     delete updates._id;
     delete updates.id;
+    delete updates.branchId; // Don't allow changing branch
 
     let result;
 
@@ -107,7 +138,6 @@ export async function PUT(
   }
 }
 
-// PATCH /api/orders/[orderId]
 export async function PATCH(
   request: NextRequest,
   { params }: { params: { orderId: string } }

@@ -1,8 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useBranch } from '@/lib/branch-context';
 import ProductCard from '@/components/ProductCard';
-
+import { ChevronRight } from 'lucide-react';
+import Link from 'next/link';
 
 interface Product {
   _id: string;
@@ -13,27 +15,31 @@ interface Product {
   compareAtPrice?: number;
   images: string[];
   stockLevel: number;
-  onSpecial?: boolean;
   active: boolean;
-  featured: boolean;
+  onSpecial?: boolean;
+  hasVariants?: boolean;
+  variants?: any[];
 }
 
 export default function FeaturedProducts() {
+  const { branch } = useBranch();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchFeaturedProducts();
-  }, []);
+    if (branch) {
+      fetchFeaturedProducts();
+    }
+  }, [branch]);
 
   const fetchFeaturedProducts = async () => {
+    if (!branch) return;
+
     try {
-      const res = await fetch('/api/products?featured=true&limit=6');
+      const res = await fetch(`/api/products?branchId=${branch.id}&featured=true&limit=8`);
       if (res.ok) {
         const data = await res.json();
-        // Only show active products
-        const activeProducts = (data.products || []).filter((p: Product) => p.active);
-        setProducts(activeProducts);
+        setProducts(data.products || []);
       }
     } catch (error) {
       console.error('Failed to fetch featured products:', error);
@@ -42,31 +48,58 @@ export default function FeaturedProducts() {
     }
   };
 
-  // Don't show section if no featured products
-  if (!loading && products.length === 0) {
+  if (loading) {
+    return (
+      <section className="py-16 bg-white">
+        <div className="max-w-7xl mx-auto px-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="bg-gray-200 rounded-2xl h-96 animate-pulse" />
+            ))}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (products.length === 0) {
     return null;
   }
 
   return (
-    <section className="py-16 bg-gray-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        <div className="flex items-center justify-center mb-12">
-          <h2 className="text-3xl md:text-4xl font-bold text-brand-black">
-            Featured Products
-          </h2>
+    <section className="py-16 bg-white">
+      <div className="max-w-7xl mx-auto px-4">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h2 className="text-3xl font-bold text-brand-black mb-2">Featured Products</h2>
+            <p className="text-gray-600">Check out our top picks for you</p>
+          </div>
+          {branch && (
+            <Link
+              href={`/${branch.slug}/shop`}
+              className="hidden md:flex items-center text-brand-orange hover:text-orange-600 font-semibold"
+            >
+              View All
+              <ChevronRight className="w-5 h-5 ml-1" />
+            </Link>
+          )}
         </div>
 
-        {loading ? (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div key={i} className="bg-white rounded-2xl h-96 animate-pulse" />
-            ))}
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
-            {products.map((product) => (
-              <ProductCard key={product._id} product={product} />
-            ))}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+          {products.map((product) => (
+            <ProductCard key={product._id} product={product} />
+          ))}
+        </div>
+
+        {branch && (
+          <div className="mt-8 text-center md:hidden">
+            <Link
+              href={`/${branch.slug}/shop`}
+              className="inline-flex items-center text-brand-orange hover:text-orange-600 font-semibold"
+            >
+              View All Products
+              <ChevronRight className="w-5 h-5 ml-1" />
+            </Link>
           </div>
         )}
       </div>

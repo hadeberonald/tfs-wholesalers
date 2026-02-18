@@ -1,3 +1,4 @@
+// lib/auth-context.tsx
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
@@ -13,8 +14,8 @@ interface User {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
+  login: (email: string, password: string, slug?: string) => Promise<void>;
+  logout: (slug?: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
 }
 
@@ -46,7 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, slug?: string) => {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -61,20 +62,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await res.json();
     setUser(data.user);
     
-    // Redirect based on role
+    // Redirect based on role and slug
     if (data.user.role === 'admin') {
       router.push('/admin');
     } else if (data.user.role === 'picker') {
       router.push('/picker');
     } else {
-      router.push('/account');
+      // Customer - redirect to branch account page if slug provided
+      if (slug) {
+        router.push(`/${slug}/account`);
+      } else {
+        router.push('/account');
+      }
     }
   };
 
-  const logout = async () => {
+  const logout = async (slug?: string) => {
     await fetch('/api/auth/logout', { method: 'POST' });
     setUser(null);
-    router.push('/login');
+    
+    // Redirect to branch login if slug provided
+    if (slug) {
+      router.push(`/${slug}/login`);
+    } else {
+      router.push('/login');
+    }
   };
 
   const register = async (name: string, email: string, password: string) => {
@@ -91,7 +103,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const data = await res.json();
     setUser(data.user);
-    router.push('/account');
   };
 
   return (

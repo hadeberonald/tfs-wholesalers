@@ -1,17 +1,31 @@
-import HeroSection from '../components/home/HeroSection';
-import SpecialsSection from '../components/home/SpecialsSection';
-import CategoriesSection from '../components/home/CategoriesSection';
-import FeaturedProducts from '../components/home/FeaturedProducts';
-import WhyChooseUs from '../components/home/WhyChooseUs';
-import FeaturedCategoriesCarousel from '@/components/FeaturedCategoriesCarousel';
+'use client';
 
-export default function Home() {
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { Loader2 } from 'lucide-react';
+
+export default function RootPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    // Check if user has a saved branch preference
+    const savedBranch = localStorage.getItem('selectedBranch');
+    
+    if (savedBranch) {
+      // Redirect to saved branch
+      router.push(`/${savedBranch}`);
+    } else {
+      // Redirect to branch selector
+      router.push('/select-branch');
+    }
+  }, [router]);
+
   return (
-    <div className="pt-20">
-      <FeaturedCategoriesCarousel />
-      <SpecialsSection />
-      <FeaturedProducts />
-      
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
+      <div className="text-center">
+        <Loader2 className="w-12 h-12 text-brand-orange mx-auto mb-4 animate-spin" />
+        <p className="text-gray-600">Loading...</p>
+      </div>
     </div>
   );
 }

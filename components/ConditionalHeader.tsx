@@ -7,8 +7,9 @@ import AdminHeader from './AdminHeader';
 export default function ConditionalHeader() {
   const pathname = usePathname();
   
-  // Show AdminHeader for all /admin routes
-  const isAdminRoute = pathname.startsWith('/admin');
+  // Match pattern: /{anything}/admin or /admin
+  // This will match both /durban/admin and /admin routes
+  const isAdminRoute = pathname.includes('/admin');
   
   return isAdminRoute ? <AdminHeader /> : <Header />;
 }

@@ -1,3 +1,4 @@
+// app/api/auth/me/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import jwt from 'jsonwebtoken';
@@ -8,7 +9,8 @@ const JWT_SECRET = process.env.NEXTAUTH_SECRET || 'your-secret-key-change-in-pro
 
 export async function GET(request: NextRequest) {
   try {
-    const token = cookies().get('auth-token')?.value;
+    const cookieStore = await cookies();
+    const token = cookieStore.get('auth-token')?.value;
 
     if (!token) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
@@ -43,6 +45,7 @@ export async function GET(request: NextRequest) {
       }
     });
   } catch (error) {
+    console.error('Auth check error:', error);
     return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
   }
 }
