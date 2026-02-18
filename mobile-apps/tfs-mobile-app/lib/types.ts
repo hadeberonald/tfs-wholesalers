@@ -1,4 +1,4 @@
-// types.ts - Updated with special tracking properties
+// types.ts - FIXED VERSION with 'bundle' added to Special type
 
 export interface Product {
   _id: string;
@@ -48,12 +48,13 @@ export interface Category {
   children?: Category[];
 }
 
+// ✅ FIXED: Added 'bundle' to type union
 export interface Special {
   _id: string;
   name: string;
   slug: string;
   description: string;
-  type: 'percentage_off' | 'amount_off' | 'fixed_price' | 'multibuy' | 'buy_x_get_y';
+  type: 'percentage_off' | 'amount_off' | 'fixed_price' | 'multibuy' | 'buy_x_get_y' | 'bundle';
   badgeText?: string;
   images?: string[];
   conditions: {
@@ -76,10 +77,15 @@ export interface Special {
     buyQuantity?: number;
     getProductId?: string;
     getQuantity?: number;
-    getDiscount?: number; // 100 = free, 50 = 50% off
+    getDiscount?: number;
     
     // Bundle
     bundlePrice?: number;
+    bundleProducts?: {
+      productId: string;
+      variantId?: string;
+      quantity: number;
+    }[];
   };
   active: boolean;
   featured: boolean;
@@ -109,11 +115,12 @@ export interface ComboItem {
   quantity: number;
 }
 
+// ✅ FIXED: Added 'super-admin' to role union
 export interface User {
   id: string;
   email: string;
   name: string;
-  role: string;
+  role: 'customer' | 'admin' | 'picker' | 'super-admin';
 }
 
 export interface Branch {
@@ -133,7 +140,6 @@ export interface Branch {
   };
 }
 
-// ✅ UPDATED: CartItem with special tracking
 export interface CartItem {
   id: string;
   variantId?: string;
@@ -144,17 +150,19 @@ export interface CartItem {
   quantity: number;
   sku: string;
   
-  // ✅ NEW: Special pricing info
   appliedSpecialId?: string;
   originalPrice?: number;
   specialDiscount?: number;
   specialDescription?: string;
   meetsSpecialRequirement?: boolean;
   
-  // ✅ NEW: Buy X Get Y tracking
   isFreeItem?: boolean;
+  isMultibuyBonus?: boolean;
   linkedToItemId?: string;
   autoAdded?: boolean;
+  
+  isCombo?: boolean;
+  comboItemCount?: number;
 }
 
 export interface WishlistItem {
@@ -168,7 +176,6 @@ export interface WishlistItem {
   slug: string;
 }
 
-// ✅ NEW: Order types
 export interface Order {
   _id: string;
   orderNumber: string;
