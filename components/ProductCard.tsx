@@ -14,7 +14,6 @@ import {
   isInStock,
   isLowStock,
 } from '@/lib/product-utils';
-import { Product } from '@/types';
 
 interface ProductVariant {
   _id?: string;
@@ -38,28 +37,32 @@ interface Special {
   active: boolean;
 }
 
-// Use Pick to take only what we need from the canonical Product type,
-// then make the fields that aren't always available optional.
-type ProductCardProduct = Pick<
-  Product,
-  'name' | 'slug' | 'price' | 'images' | 'stockLevel' | 'active' | 'hasVariants' | 'lowStockThreshold'
-> & {
+// Loose interface that any page's local Product type can satisfy
+export interface ProductCardProduct {
   _id: string;
+  name: string;
+  slug: string;
   description?: string;
+  price: number;
   specialPrice?: number;
   compareAtPrice?: number;
+  images: string[];
+  stockLevel: number;
+  active: boolean;
   onSpecial?: boolean;
+  hasVariants?: boolean;
   variants?: ProductVariant[];
   categories?: string[];
   specialId?: string;
   unit?: string;
   unitQuantity?: number;
   sku?: string;
+  lowStockThreshold?: number; // optional — defaults to 5 internally
   featured?: boolean;
   branchId?: string;
   createdAt?: Date | string;
   updatedAt?: Date | string;
-};
+}
 
 interface ProductCardProps {
   product: ProductCardProduct;
@@ -96,14 +99,17 @@ export default function ProductCard({ product }: ProductCardProps) {
     }
   };
 
-  const displayPrice = getEffectivePrice(product as unknown as Product, selectedVariant);
-  const comparePrice = getCompareAtPrice(product as unknown as Product, selectedVariant);
+  // Normalize to satisfy product-utils which requires lowStockThreshold
+  const normalizedProduct = { ...product, lowStockThreshold: product.lowStockThreshold ?? 5 };
+
+  const displayPrice = getEffectivePrice(normalizedProduct as any, selectedVariant);
+  const comparePrice = getCompareAtPrice(normalizedProduct as any, selectedVariant);
   const hasDiscount = comparePrice && comparePrice > displayPrice;
-  const discountPercent = getDiscountPercentage(product as unknown as Product, selectedVariant);
-  const primaryImage = getPrimaryImage(product as unknown as Product, selectedVariant);
-  const stock = getStockLevel(product as unknown as Product, selectedVariant);
-  const inStock = isInStock(product as unknown as Product, selectedVariant);
-  const lowStock = isLowStock(product as unknown as Product, selectedVariant);
+  const discountPercent = getDiscountPercentage(normalizedProduct as any, selectedVariant);
+  const primaryImage = getPrimaryImage(normalizedProduct as any, selectedVariant);
+  const stock = getStockLevel(normalizedProduct as any, selectedVariant);
+  const inStock = isInStock(normalizedProduct as any, selectedVariant);
+  const lowStock = isLowStock(normalizedProduct as any, selectedVariant);
 
   const getSpecialBadge = () => {
     if (!special || !special.active) return null;
