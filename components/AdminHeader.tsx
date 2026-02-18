@@ -135,7 +135,7 @@ export default function AdminHeader() {
 
               {/* Logout */}
               <button
-                onClick={logout}
+                onClick={() => logout()}
                 className="hidden md:flex items-center space-x-1 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 rounded-lg transition-colors text-white text-xs"
               >
                 <LogOut className="w-3.5 h-3.5" />

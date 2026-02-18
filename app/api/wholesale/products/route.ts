@@ -32,7 +32,11 @@ export async function GET(request: NextRequest) {
         productQuery.branchId = adminInfo.branchId;
       }
     } else {
-      productQuery.branchId = new ObjectId(branchId);
+      // FIX: branchId is guaranteed non-null here due to the check above,
+      // but TypeScript can't infer it, so we guard explicitly.
+      if (branchId) {
+        productQuery.branchId = new ObjectId(branchId);
+      }
     }
     
     if (category) {
