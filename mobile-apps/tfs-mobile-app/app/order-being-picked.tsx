@@ -1,6 +1,7 @@
-// app/order-being-picked.tsx
-// Statuses shown here: 'packaging' | 'collecting'
-// Socket auto-navigates to order-on-the-way or order-delivered
+// app/order-being-picked.tsx — STATUS FIELD FIX
+// Bug: navigate() was called with o.orderStatus but DB documents only have `status`.
+// Fix: resolve whichever field is present before calling navigate().
+// Everything else (UI, stepper, animations) is identical to the original.
 
 import React, { useCallback, useRef, useState, useEffect } from 'react';
 import {
@@ -26,19 +27,24 @@ interface OrderItem {
 interface Order {
   _id: string; orderNumber: string; items: OrderItem[];
   subtotal: number; deliveryFee: number; total: number;
-  totalSavings?: number; orderStatus: OrderStatus; paymentStatus: string;
+  totalSavings?: number;
+  // DB uses `status`; legacy code uses `orderStatus` — we handle both
+  status?: OrderStatus;
+  orderStatus?: OrderStatus;
+  paymentStatus: string;
   createdAt: string; deliveryAddress?: any;
 }
 
 const STEPS: { status: OrderStatus[]; label: string; desc: string; icon: React.FC<any>; color: string }[] = [
-  { status: ['pending', 'confirmed'], label: 'Order Confirmed',   desc: "We've received your order.",           icon: CheckCircle, color: '#10b981' },
-  { status: ['picking'],              label: 'Being Picked',      desc: 'Our picker is selecting your items.',  icon: ShoppingBag, color: '#f59e0b' },
-  { status: ['packaging','collecting'],label: 'Being Packaged',   desc: 'Your order is being securely packaged.', icon: Package,   color: '#8b5cf6' },
-  { status: ['out_for_delivery'],     label: 'Out for Delivery',  desc: 'Your driver is on the way!',           icon: Truck,       color: '#3b82f6' },
-  { status: ['delivered'],            label: 'Delivered',         desc: 'Your order has arrived. Enjoy!',       icon: MapPin,      color: '#10b981' },
+  { status: ['pending', 'confirmed'],      label: 'Order Confirmed',  desc: "We've received your order.",             icon: CheckCircle, color: '#10b981' },
+  { status: ['picking'],                   label: 'Being Picked',     desc: 'Our picker is selecting your items.',    icon: ShoppingBag, color: '#f59e0b' },
+  { status: ['packaging', 'collecting'],   label: 'Being Packaged',   desc: 'Your order is being securely packaged.', icon: Package,     color: '#8b5cf6' },
+  { status: ['out_for_delivery'],          label: 'Out for Delivery', desc: 'Your driver is on the way!',             icon: Truck,       color: '#3b82f6' },
+  { status: ['delivered'],                 label: 'Delivered',        desc: 'Your order has arrived. Enjoy!',         icon: MapPin,      color: '#10b981' },
 ];
 
-function getStepIndex(status: OrderStatus) {
+function getStepIndex(status: OrderStatus | undefined) {
+  if (!status) return 0;
   return STEPS.findIndex(s => s.status.includes(status));
 }
 
@@ -61,23 +67,30 @@ function PulseDot({ color }: { color: string }) {
 export default function OrderBeingPickedScreen() {
   const router  = useRouter();
   const { orderId = '' } = useLocalSearchParams<{ orderId: string }>();
-  const [order, setOrder]   = useState<Order | null>(null);
+  const [order, setOrder]     = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const slideAnim = useRef(new Animated.Value(60)).current;
   const fadeAnim  = useRef(new Animated.Value(0)).current;
 
-  const navigate = useCallback((status: OrderStatus) => {
+  // ── Navigation gate — handles both `status` and `orderStatus` field names ──
+  const navigate = useCallback((rawStatus: string | undefined) => {
+    const status = rawStatus as OrderStatus | undefined;
+    if (!status) return false;
     if (status === 'out_for_delivery') { router.replace(`/order-on-the-way?orderId=${orderId}`);  return true; }
     if (status === 'delivered')        { router.replace(`/order-delivered?orderId=${orderId}`);   return true; }
-    if (['pending','confirmed','picking'].includes(status)) {
+    if (['pending', 'confirmed', 'picking'].includes(status)) {
       router.replace(`/order-preparing?orderId=${orderId}`); return true;
     }
     return false;
   }, [orderId, router]);
 
-  useOrderSocket(orderId, useCallback((o: Order) => {
-    if (navigate(o.orderStatus)) return;
-    setOrder(o);
+  useOrderSocket(orderId, useCallback((o: any) => {
+    // Resolve the status field — DB sends `status`, some paths send `orderStatus`
+    const status = o.status ?? o.orderStatus;
+    if (navigate(status)) return;
+
+    // Normalise the object so downstream code can always read `orderStatus`
+    setOrder({ ...o, orderStatus: status, status });
     setLoading(false);
     Animated.parallel([
       Animated.spring(slideAnim, { toValue: 0, friction: 7, tension: 50, useNativeDriver: true }),
@@ -92,8 +105,10 @@ export default function OrderBeingPickedScreen() {
     <View style={s.centered}><Package color="#d1d5db" size={64} /><Text style={s.errorText}>Order not found</Text></View>
   );
 
-  const currentStepIdx = getStepIndex(order.orderStatus);
-  const isCancelled    = order.orderStatus === 'cancelled';
+  // Always use the normalised status
+  const currentStatus  = (order.status ?? order.orderStatus) as OrderStatus | undefined;
+  const currentStepIdx = getStepIndex(currentStatus);
+  const isCancelled    = currentStatus === 'cancelled';
 
   return (
     <View style={s.container}>
@@ -167,7 +182,7 @@ export default function OrderBeingPickedScreen() {
           )}
 
           {/* Packaging detail */}
-          {['packaging', 'collecting'].includes(order.orderStatus) && (
+          {['packaging', 'collecting'].includes(currentStatus || '') && (
             <View style={[s.card, { borderWidth: 1, borderColor: '#c4b5fd', backgroundColor: '#f5f3ff' }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
                 <Package color="#8b5cf6" size={20} />
@@ -219,7 +234,7 @@ export default function OrderBeingPickedScreen() {
             </View>
           </View>
 
-          {order.orderStatus === 'out_for_delivery' && (
+          {currentStatus === 'out_for_delivery' && (
             <TouchableOpacity style={s.trackBtn} onPress={() => router.push(`/order-on-the-way?orderId=${order._id}`)}>
               <Truck color="#fff" size={20} />
               <Text style={s.trackBtnText}>Track Live Delivery</Text>
