@@ -71,7 +71,7 @@ export async function POST(
       return NextResponse.json({ success: false, message: 'Concurrent scan — already marked' });
     }
 
-    const serialized = {
+    const serialized: Record<string, any> = {
       ...updatedOrder,
       _id: updatedOrder._id.toString(),
       id:  updatedOrder._id.toString(),
