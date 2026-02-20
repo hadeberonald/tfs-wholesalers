@@ -2,17 +2,10 @@
   "name": "tfs-wholesalers",
   "version": "1.0.0",
   "private": true,
-  "ts-node": {
-    "esm": false,
-    "transpileOnly": true,
-    "compilerOptions": {
-      "module": "commonjs"
-    }
-  },
   "scripts": {
     "dev": "ts-node --transpile-only server.ts",
-    "build": "next build",
-    "start": "ts-node --transpile-only server.ts",
+    "build": "next build && npx tsc server.ts --outDir . --module commonjs --target es2019 --esModuleInterop --skipLibCheck --resolveJsonModule",
+    "start": "node server.js",
     "lint": "next lint",
     "seed:categories": "tsx scripts/seed-categories.ts",
     "migrate:wholesale": "node scripts/migrate-wholesale-db.js"
