@@ -1,13 +1,8 @@
 // lib/socket.ts  (tfs-mobile-app)
-// Singleton Socket.IO client. Uses the same base URL as lib/api.ts.
 
 import { io, Socket } from 'socket.io-client';
 
-// Mirror exactly how api.ts defines this
-const API_URL =
-  process.env.NODE_ENV === 'production'
-    ? 'https://tfs-wholesalers.onrender.com'
-    : 'http://192.168.0.100:3000';
+const API_URL = 'https://tfs-wholesalers.onrender.com';
 
 let socket: Socket | null = null;
 
