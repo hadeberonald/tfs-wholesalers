@@ -11,12 +11,13 @@
       "resizeMode": "contain",
       "backgroundColor": "#FF6B35"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.tfswholesalers.picker"
+      "bundleIdentifier": "com.tfswholesalers.picker",
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -26,8 +27,11 @@
       "package": "com.tfswholesalers.picker",
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.VIBRATE"
-      ]
+        "android.permission.VIBRATE",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.POST_NOTIFICATIONS"
+      ],
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -38,11 +42,22 @@
         {
           "cameraPermission": "Allow TFS Picker to access your camera to scan barcodes and QR codes."
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#FF6B35",
+          "androidMode": "default",
+          "androidCollapsedTitle": "TFS Picker",
+          "iosDisplayInForeground": true,
+          "sounds": ["./assets/notification.wav"]
+        }
       ]
     ],
     "extra": {
       "eas": {
-        "projectId": "your-project-id-here"
+        "projectId": "YOUR_EAS_PROJECT_ID_HERE"
       }
     }
   }

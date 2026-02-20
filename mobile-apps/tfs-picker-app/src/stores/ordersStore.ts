@@ -1,100 +1,181 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-interface CartItem {
-  id: string; // Product ID
-  variantId?: string; // Optional variant ID
+const API_URL = 'https://tfs-wholesalers.onrender.com';
+
+interface OrderItem {
+  productId: string;
   name: string;
-  variantName?: string; // Optional variant name for display
+  sku: string;
+  quantity: number;
   price: number;
   image: string;
-  quantity: number;
+  barcode?: string;
+  description?: string;
+  scanned?: boolean;
 }
 
-interface CartStore {
-  items: CartItem[];
-  addItem: (item: CartItem) => void;
-  removeItem: (id: string, variantId?: string) => void;
-  updateQuantity: (id: string, quantity: number, variantId?: string) => void;
-  clearCart: () => void;
-  getTotal: () => number;
+interface Order {
+  _id: string;
+  orderNumber: string;
+  customerInfo: {
+    name: string;
+    email: string;
+    phone: string;
+  };
+  items: OrderItem[];
+  total: number;
+  status: string;
+  pickingStatus?: 'pending' | 'assigned' | 'picking' | 'packed' | 'ready';
+  assignedPicker?: string;
+  packages?: Package[];
+  createdAt: string;
 }
 
-export const useCartStore = create<CartStore>()(
-  persist(
-    (set, get) => ({
-      items: [],
-      
-      addItem: (item) => {
-        set((state) => {
-          // Find existing item by product ID and variant ID (if applicable)
-          const existingItem = state.items.find((i) => {
-            if (item.variantId) {
-              return i.id === item.id && i.variantId === item.variantId;
-            }
-            return i.id === item.id && !i.variantId;
-          });
-          
-          if (existingItem) {
-            // Update quantity if item already exists
-            return {
-              items: state.items.map((i) => {
-                if (item.variantId) {
-                  return (i.id === item.id && i.variantId === item.variantId)
-                    ? { ...i, quantity: i.quantity + item.quantity }
-                    : i;
-                }
-                return (i.id === item.id && !i.variantId)
-                  ? { ...i, quantity: i.quantity + item.quantity }
-                  : i;
-              }),
-            };
-          }
-          
-          // Add new item
-          return { items: [...state.items, item] };
-        });
-      },
-      
-      removeItem: (id, variantId) => {
-        set((state) => ({
-          items: state.items.filter((item) => {
-            if (variantId) {
-              return !(item.id === id && item.variantId === variantId);
-            }
-            return !(item.id === id && !item.variantId);
-          }),
-        }));
-      },
-      
-      updateQuantity: (id, quantity, variantId) => {
-        set((state) => ({
-          items: state.items.map((item) => {
-            if (variantId) {
-              return (item.id === id && item.variantId === variantId)
-                ? { ...item, quantity }
-                : item;
-            }
-            return (item.id === id && !item.variantId)
-              ? { ...item, quantity }
-              : item;
-          }),
-        }));
-      },
-      
-      clearCart: () => {
-        set({ items: [] });
-      },
-      
-      getTotal: () => {
-        return get().items.reduce(
-          (sum, item) => sum + (item.price * item.quantity),
-          0
-        );
-      },
-    }),
-    {
-      name: 'cart-storage',
+interface Package {
+  qrCode: string;
+  items: string[]; // Product IDs
+  packageNumber: number;
+  totalPackages: number;
+  scannedAt?: Date;
+}
+
+interface OrdersState {
+  orders: Order[];
+  currentOrder: Order | null;
+  loading: boolean;
+  fetchOrders: () => Promise<void>;
+  assignOrder: (orderId: string, pickerId: string) => Promise<void>;
+  scanProduct: (orderId: string, sku: string) => Promise<boolean>;
+  createPackage: (orderId: string, qrCode: string, itemIds: string[], packageNum: number, total: number) => Promise<void>;
+  completeOrder: (orderId: string) => Promise<void>;
+}
+
+export const useOrdersStore = create<OrdersState>((set, get) => ({
+  orders: [],
+  currentOrder: null,
+  loading: false,
+
+  fetchOrders: async () => {
+    try {
+      set({ loading: true });
+      const token = await AsyncStorage.getItem('auth_token');
+
+      const response = await axios.get(`${API_URL}/api/orders?picking=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      set({ orders: response.data.orders, loading: false });
+    } catch (error) {
+      console.error('Failed to fetch orders:', error);
+      set({ loading: false });
     }
-  )
-);
+  },
+
+  assignOrder: async (orderId: string, pickerId: string) => {
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+
+      await axios.patch(
+        `${API_URL}/api/orders/${orderId}`,
+        {
+          pickingStatus: 'assigned',
+          assignedPicker: pickerId,
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      await get().fetchOrders();
+    } catch (error) {
+      console.error('Failed to assign order:', error);
+      throw error;
+    }
+  },
+
+  scanProduct: async (orderId: string, sku: string) => {
+    try {
+      const { currentOrder } = get();
+      if (!currentOrder || currentOrder._id !== orderId) {
+        throw new Error('Order not found');
+      }
+
+      const itemIndex = currentOrder.items.findIndex(
+        (item) => item.sku === sku && !item.scanned
+      );
+
+      if (itemIndex === -1) {
+        return false;
+      }
+
+      const updatedItems = [...currentOrder.items];
+      updatedItems[itemIndex].scanned = true;
+
+      set({
+        currentOrder: {
+          ...currentOrder,
+          items: updatedItems,
+        },
+      });
+
+      return true;
+    } catch (error) {
+      console.error('Failed to scan product:', error);
+      return false;
+    }
+  },
+
+  createPackage: async (
+    orderId: string,
+    qrCode: string,
+    itemIds: string[],
+    packageNum: number,
+    total: number
+  ) => {
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+
+      await axios.post(
+        `${API_URL}/api/packages`,
+        {
+          orderId,
+          qrCode,
+          items: itemIds,
+          packageNumber: packageNum,
+          totalPackages: total,
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+    } catch (error) {
+      console.error('Failed to create package:', error);
+      throw error;
+    }
+  },
+
+  completeOrder: async (orderId: string) => {
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+
+      await axios.patch(
+        `${API_URL}/api/orders/${orderId}`,
+        {
+          pickingStatus: 'ready',
+          status: 'ready_for_delivery',
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      set({ currentOrder: null });
+      await get().fetchOrders();
+    } catch (error) {
+      console.error('Failed to complete order:', error);
+      throw error;
+    }
+  },
+}));

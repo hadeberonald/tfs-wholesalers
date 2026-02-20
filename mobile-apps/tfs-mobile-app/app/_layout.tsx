@@ -1,3 +1,4 @@
+// app/_layout.tsx  (customer app — Expo Router)
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
@@ -18,23 +19,20 @@ export default function RootLayout() {
   const loadStoredData = async () => {
     try {
       console.log('[ROOT LAYOUT] Loading stored data...');
-      
-      // Load user
+
       const userStr = await AsyncStorage.getItem('user');
       if (userStr) {
         setUser(JSON.parse(userStr));
         console.log('[ROOT LAYOUT] User loaded');
       }
 
-      // Load saved branch
       const branchSlug = await AsyncStorage.getItem('selectedBranch');
       console.log('[ROOT LAYOUT] Saved branch slug:', branchSlug);
-      
+
       if (branchSlug) {
-        // Fetch full branch details from API
         const response = await api.get(`/api/mobile/branches/${branchSlug}`);
         console.log('[ROOT LAYOUT] Branch API response:', response.data);
-        
+
         if (response.data.success && response.data.branch) {
           setBranch(response.data.branch);
           console.log('[ROOT LAYOUT] Branch loaded:', response.data.branch.name);
@@ -69,6 +67,7 @@ export default function RootLayout() {
           contentStyle: { backgroundColor: '#f9fafb' },
         }}
       >
+        {/* ── existing screens (unchanged) ── */}
         <Stack.Screen name="index" />
         <Stack.Screen name="branch-select" />
         <Stack.Screen name="(tabs)" />
@@ -82,7 +81,44 @@ export default function RootLayout() {
         <Stack.Screen name="login" />
         <Stack.Screen name="product/[slug]" />
         <Stack.Screen name="special/[slug]" />
-        <Stack.Screen name="combo/[slug]"/>
+        <Stack.Screen name="combo/[slug]" />
+
+        {/* ── checkout & payment ── */}
+        <Stack.Screen name="checkout" />
+        <Stack.Screen
+          name="address-picker"
+          options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+        />
+        <Stack.Screen
+          name="payment"
+          options={{ gestureEnabled: false }}
+        />
+
+        {/* ── order tracking flow ── */}
+        {/* Step 1: pending → confirmed → picking */}
+        <Stack.Screen
+          name="order-preparing"
+          options={{ gestureEnabled: false }}
+        />
+        {/* Step 2: packaging → ready (driver being assigned) */}
+        <Stack.Screen
+          name="order-ready"
+          options={{ gestureEnabled: false }}
+        />
+        {/* Step 3: out_for_delivery | collecting (live map) */}
+        <Stack.Screen
+          name="order-on-the-way"
+          options={{ gestureEnabled: false }}
+        />
+        {/* Step 4: delivered (confetti + rating) */}
+        <Stack.Screen
+          name="order-delivered"
+          options={{ gestureEnabled: false }}
+        />
+
+        {/* ── legacy / misc order screens ── */}
+        <Stack.Screen name="orders" />
+        <Stack.Screen name="order-being-picked" />
       </Stack>
     </>
   );
