@@ -36,28 +36,33 @@ interface HeaderProps {
 export default function Header({ showBack, title }: HeaderProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const cart = useStore((state) => state.cart);
-  const wishlist = useStore((state) => state.wishlist || []);
-  const user = useStore((state) => state.user);
-  const isAuthenticated = useStore((state) => state.isAuthenticated);
-  const logout = useStore((state) => state.logout);
-  const branch = useStore((state) => state.branch);
+
+  // ✅ Correct selectors — store uses `items` not `cart`, no `wishlist`, isAuthenticated is a fn
+  const items   = useStore((state) => state.items);
+  const user    = useStore((state) => state.user);
+  const branch  = useStore((state) => state.branch);
+  const logout  = useStore((state) => state.logout);
+
+  const isAuthenticated = !!user;
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [shopExpanded, setShopExpanded] = useState(false);
   const [accountExpanded, setAccountExpanded] = useState(false);
 
   // Menu slide animation
-  const menuAnim = useRef(new Animated.Value(0)).current;
+  const menuAnim  = useRef(new Animated.Value(0)).current;
   // Hamburger → X animations
   const bar2Opacity = useRef(new Animated.Value(1)).current;
-  const bar1Y = useRef(new Animated.Value(0)).current;
-  const bar3Y = useRef(new Animated.Value(0)).current;
-  const bar1Rot = useRef(new Animated.Value(0)).current;
-  const bar3Rot = useRef(new Animated.Value(0)).current;
+  const bar1Y       = useRef(new Animated.Value(0)).current;
+  const bar3Y       = useRef(new Animated.Value(0)).current;
+  const bar1Rot     = useRef(new Animated.Value(0)).current;
+  const bar3Rot     = useRef(new Animated.Value(0)).current;
 
-  const cartItemCount = cart.reduce((sum, item) => item.autoAdded ? sum : sum + item.quantity, 0);
-  const wishlistCount = wishlist.length;
+  // ✅ items is always an array (store initialises to []), safe to reduce
+  const cartItemCount = items.reduce(
+    (sum, item) => (item.autoAdded ? sum : sum + item.quantity),
+    0
+  );
 
   const openMenu = () => {
     setMenuOpen(true);
@@ -95,7 +100,6 @@ export default function Header({ showBack, title }: HeaderProps) {
     setTimeout(() => router.push('/'), 200);
   };
 
-  // Animated bar styles for hamburger → X
   const animBar1 = {
     transform: [
       { translateY: bar1Y },
@@ -109,60 +113,50 @@ export default function Header({ showBack, title }: HeaderProps) {
     ],
   };
 
-  // Menu panel slide + fade
   const menuTranslateY = menuAnim.interpolate({ inputRange: [0, 1], outputRange: [-16, 0] });
 
   return (
     <View style={styles.outerWrap}>
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* ── Header bar ── */}
-      <View style={styles.headerRow}>
-        {/* Left */}
-        <View style={styles.left}>
-          {showBack ? (
-            <TouchableOpacity
-              onPress={() => (router.canGoBack() ? router.back() : router.push('/(tabs)'))}
-              style={styles.iconBtn}
-            >
-              <ArrowLeft color="#1f2937" size={24} />
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        {/* ── Header bar ── */}
+        <View style={styles.headerRow}>
+          {/* Left */}
+          <View style={styles.left}>
+            {showBack ? (
+              <TouchableOpacity
+                onPress={() => (router.canGoBack() ? router.back() : router.push('/(tabs)'))}
+                style={styles.iconBtn}
+              >
+                <ArrowLeft color="#1f2937" size={24} />
+              </TouchableOpacity>
+            ) : (
+              <Image source={require('@/assets/logo.png')} style={styles.logo} resizeMode="contain" />
+            )}
+            {title && <Text style={styles.titleText}>{title}</Text>}
+          </View>
+
+          {/* Right */}
+          <View style={styles.right}>
+            <TouchableOpacity onPress={() => router.push('/(tabs)/cart')} style={styles.iconBtn}>
+              <ShoppingCart color="#1f2937" size={22} />
+              {cartItemCount > 0 && <Badge count={cartItemCount} />}
             </TouchableOpacity>
-          ) : (
-            <Image source={require('@/assets/logo.png')} style={styles.logo} resizeMode="contain" />
-          )}
-          {title && <Text style={styles.titleText}>{title}</Text>}
-        </View>
 
-        {/* Right */}
-        <View style={styles.right}>
-          {isAuthenticated && (
-            <TouchableOpacity onPress={() => router.push('/wishlist')} style={styles.iconBtn}>
-              <Heart color="#1f2937" size={22} />
-              {wishlistCount > 0 && <Badge count={wishlistCount} />}
+            {/* Hamburger → X */}
+            <TouchableOpacity onPress={toggleMenu} style={styles.iconBtn}>
+              <View style={styles.hamburgerWrap}>
+                <Animated.View style={[styles.hamburgerBar, animBar1]} />
+                <Animated.View style={[styles.hamburgerBar, { opacity: bar2Opacity }]} />
+                <Animated.View style={[styles.hamburgerBar, animBar3]} />
+              </View>
             </TouchableOpacity>
-          )}
-
-          <TouchableOpacity onPress={() => router.push('/(tabs)/cart')} style={styles.iconBtn}>
-            <ShoppingCart color="#1f2937" size={22} />
-            {cartItemCount > 0 && <Badge count={cartItemCount} />}
-          </TouchableOpacity>
-
-          {/* Hamburger → X button */}
-          <TouchableOpacity onPress={toggleMenu} style={styles.iconBtn}>
-            <View style={styles.hamburgerWrap}>
-              <Animated.View style={[styles.hamburgerBar, animBar1]} />
-              <Animated.View style={[styles.hamburgerBar, { opacity: bar2Opacity }]} />
-              <Animated.View style={[styles.hamburgerBar, animBar3]} />
-            </View>
-          </TouchableOpacity>
+          </View>
         </View>
       </View>
 
-    </View>
-
-      {/* ── Slide-down menu — sibling of header, not inside it ── */}
+      {/* ── Slide-down menu ── */}
       {menuOpen && (
         <>
-          {/* Tap-outside backdrop */}
           <Pressable style={styles.backdrop} onPress={closeMenu} />
 
           <Animated.View
@@ -171,8 +165,11 @@ export default function Header({ showBack, title }: HeaderProps) {
               { opacity: menuAnim, transform: [{ translateY: menuTranslateY }] },
             ]}
           >
-            <ScrollView showsVerticalScrollIndicator={false} bounces={false} contentContainerStyle={{ paddingTop: 8 }}>
-
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+              contentContainerStyle={{ paddingTop: 8 }}
+            >
               {/* Profile / sign-in */}
               {isAuthenticated && user ? (
                 <View style={styles.profileRow}>
@@ -201,7 +198,9 @@ export default function Header({ showBack, title }: HeaderProps) {
               {branch && (
                 <View style={styles.branchPill}>
                   <Store color="#FF6B35" size={15} />
-                  <Text style={styles.branchPillText} numberOfLines={1}>{branch.displayName}</Text>
+                  <Text style={styles.branchPillText} numberOfLines={1}>
+                    {branch.displayName}
+                  </Text>
                 </View>
               )}
 
@@ -216,7 +215,7 @@ export default function Header({ showBack, title }: HeaderProps) {
               >
                 <MenuRow icon={<Home color="#FF6B35" size={18} />} label="Home" onPress={() => navigate('/(tabs)')} />
                 <MenuRow icon={<ShoppingBag color="#FF6B35" size={18} />} label="All Products" onPress={() => navigate('/(tabs)/shop')} />
-                <MenuRow icon={<Tag color="#FF6B35" size={18} />} label="Specials" onPress={() => navigate('/(tabs)/shop')} />
+                <MenuRow icon={<Tag color="#FF6B35" size={18} />} label="Specials" onPress={() => navigate('/specials')} />
               </AccordionSection>
 
               {/* Account accordion */}
@@ -231,16 +230,26 @@ export default function Header({ showBack, title }: HeaderProps) {
                   <MenuRow icon={<Heart color="#FF6B35" size={18} />} label="Wishlist" onPress={() => navigate('/wishlist')} />
                   <MenuRow icon={<MapPin color="#FF6B35" size={18} />} label="Addresses" onPress={() => navigate('/addresses')} />
                   <MenuRow icon={<CreditCard color="#FF6B35" size={18} />} label="Payment Methods" onPress={() => navigate('/payment-methods')} />
+                  <MenuRow icon={<ShoppingBag color="#FF6B35" size={18} />} label="My Orders" onPress={() => navigate('/orders')} />
                 </AccordionSection>
               )}
 
               <View style={styles.divider} />
 
               {branch && (
-                <MenuRow icon={<Store color="#6b7280" size={18} />} label="Change Branch" onPress={() => navigate('/branch-select')} />
+                <MenuRow
+                  icon={<Store color="#6b7280" size={18} />}
+                  label="Change Branch"
+                  onPress={() => navigate('/branch-select')}
+                />
               )}
               {isAuthenticated && (
-                <MenuRow icon={<LogOut color="#ef4444" size={18} />} label="Sign Out" onPress={handleLogout} danger />
+                <MenuRow
+                  icon={<LogOut color="#ef4444" size={18} />}
+                  label="Sign Out"
+                  onPress={handleLogout}
+                  danger
+                />
               )}
 
               <View style={{ height: 12 }} />
@@ -252,7 +261,7 @@ export default function Header({ showBack, title }: HeaderProps) {
   );
 }
 
-// ── Badge ────────────────────────────────────────────────────────────────────
+// ── Badge ─────────────────────────────────────────────────────────────────────
 
 function Badge({ count }: { count: number }) {
   return (
@@ -262,7 +271,7 @@ function Badge({ count }: { count: number }) {
   );
 }
 
-// ── Accordion section ────────────────────────────────────────────────────────
+// ── Accordion section ─────────────────────────────────────────────────────────
 
 function AccordionSection({
   label,
@@ -306,7 +315,7 @@ function AccordionSection({
   );
 }
 
-// ── Menu row ─────────────────────────────────────────────────────────────────
+// ── Menu row ──────────────────────────────────────────────────────────────────
 
 function MenuRow({
   icon,
@@ -331,19 +340,14 @@ function MenuRow({
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  // Outer wrap — position relative so panel can absolute-position below header
   outerWrap: {
     zIndex: 100,
   },
-
-  // Container — must NOT clip overflow so panel renders outside
   container: {
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
   },
-
-  // Header row
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -374,8 +378,6 @@ const styles = StyleSheet.create({
     position: 'relative',
     padding: 8,
   },
-
-  // Animated hamburger
   hamburgerWrap: {
     width: 22,
     height: 16,
@@ -387,8 +389,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#1f2937',
     borderRadius: 2,
   },
-
-  // Badge
   badge: {
     position: 'absolute',
     top: 2,
@@ -406,8 +406,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
   },
-
-  // Backdrop
   backdrop: {
     position: 'absolute',
     top: '100%',
@@ -416,8 +414,6 @@ const styles = StyleSheet.create({
     height: 2000,
     zIndex: 99,
   },
-
-  // Slide-down panel
   menuPanel: {
     position: 'absolute',
     top: '100%',
@@ -436,8 +432,6 @@ const styles = StyleSheet.create({
     zIndex: 100,
     overflow: 'hidden',
   },
-
-  // Profile
   profileRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -468,8 +462,6 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     marginTop: 2,
   },
-
-  // Sign in
   signInRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -495,8 +487,6 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     marginTop: 2,
   },
-
-  // Branch pill
   branchPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -514,14 +504,11 @@ const styles = StyleSheet.create({
     color: '#1f2937',
     flex: 1,
   },
-
   divider: {
     height: 1,
     backgroundColor: '#f3f4f6',
     marginVertical: 4,
   },
-
-  // Accordion
   accordionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -540,8 +527,6 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     letterSpacing: 0.8,
   },
-
-  // Menu row
   menuRow: {
     flexDirection: 'row',
     alignItems: 'center',

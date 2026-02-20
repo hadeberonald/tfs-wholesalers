@@ -1,3 +1,8 @@
+// src/screens/PackagingScreen.tsx
+// Every item is shown grouped (regular / special / combo / bonus) with
+// full special info so the packer can verify what goes in each box.
+// Items are selectable per-package. Status advances to 'collecting' on completion.
+
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -8,11 +13,22 @@ import {
   Alert,
   ScrollView,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
-import { Package, QrCode, CheckCircle, Gift, Tag } from 'lucide-react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import {
+  Package,
+  QrCode,
+  CheckCircle,
+  Gift,
+  Tag,
+  Layers,
+  ShoppingBag,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react-native';
+import { useRoute } from '@react-navigation/native';
 import { useOrdersStore } from '../stores/ordersStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
@@ -20,6 +36,7 @@ import StatusStepper from '../components/StatusStepper';
 
 const API_URL = 'https://tfs-wholesalers.onrender.com';
 
+// ─── Types ────────────────────────────────────────────────────────────────────
 interface OrderItem {
   productId: string;
   name: string;
@@ -27,52 +44,170 @@ interface OrderItem {
   quantity: number;
   price: number;
   variantName?: string;
-  appliedSpecialId?: string;
-  isBonusItem?: boolean;
   specialType?: string;
   specialConditions?: any;
+  specialDescription?: string;
+  isBonusItem?: boolean;
+  isFreeItem?: boolean;
+  isMultibuyBonus?: boolean;
+  autoAdded?: boolean;
   isComboItem?: boolean;
-  comboId?: string;
   comboName?: string;
-  comboItems?: Array<{
-    productId: string;
-    productName: string;
-    quantity: number;
-  }>;
+  comboItems?: Array<{ productId: string; productName: string; quantity: number }>;
 }
 
+// ─── Item type helpers (same logic as PickingScreen) ─────────────────────────
+type GroupKey = 'regular' | 'special' | 'combo' | 'bonus';
+
+interface ItemGroup {
+  key: GroupKey;
+  title: string;
+  color: string;
+  bgColor: string;
+  borderColor: string;
+  Icon: React.FC<any>;
+  items: OrderItem[];
+}
+
+function classifyItems(items: OrderItem[]): ItemGroup[] {
+  const regular: OrderItem[] = [];
+  const special: OrderItem[] = [];
+  const combo:   OrderItem[] = [];
+  const bonus:   OrderItem[] = [];
+
+  for (const item of items) {
+    if (item.isComboItem) combo.push(item);
+    else if (item.isBonusItem || item.isFreeItem || item.isMultibuyBonus || item.autoAdded) bonus.push(item);
+    else if (item.specialType) special.push(item);
+    else regular.push(item);
+  }
+
+  const groups: ItemGroup[] = [];
+  if (regular.length) groups.push({ key: 'regular', title: 'Regular Items', color: '#1a1a1a', bgColor: '#f9fafb', borderColor: '#e5e7eb', Icon: ShoppingBag, items: regular });
+  if (special.length) groups.push({ key: 'special', title: 'Promo / Special Items', color: '#b45309', bgColor: '#fffbeb', borderColor: '#fde68a', Icon: Tag, items: special });
+  if (combo.length)   groups.push({ key: 'combo',   title: 'Combo Deal Items',     color: '#6d28d9', bgColor: '#f5f3ff', borderColor: '#c4b5fd', Icon: Layers, items: combo });
+  if (bonus.length)   groups.push({ key: 'bonus',   title: '🎁 Free / Bonus Items', color: '#065f46', bgColor: '#ecfdf5', borderColor: '#6ee7b7', Icon: Gift, items: bonus });
+  return groups;
+}
+
+function getSpecialLabel(item: OrderItem): string | null {
+  if (item.isComboItem && item.comboName) return `📦 Part of "${item.comboName}"`;
+  if (item.isBonusItem || item.isFreeItem || item.isMultibuyBonus || item.autoAdded) return '🎁 Free bonus — must be included';
+  if (!item.specialType) return null;
+  switch (item.specialType) {
+    case 'percentage_off': return `${item.specialConditions?.discountPercentage}% OFF`;
+    case 'amount_off':     return `R${item.specialConditions?.discountAmount} OFF`;
+    case 'fixed_price':    return `Special price: R${item.specialConditions?.newPrice}`;
+    case 'multibuy':       return `${item.specialConditions?.requiredQuantity} for R${item.specialConditions?.specialPrice}`;
+    case 'buy_x_get_y': {
+      const d = item.specialConditions?.getDiscount || 100;
+      return d === 100
+        ? `Buy ${item.specialConditions?.buyQuantity}, get ${item.specialConditions?.getQuantity} FREE`
+        : `Buy ${item.specialConditions?.buyQuantity}, get ${item.specialConditions?.getQuantity} at ${d}% off`;
+    }
+    default: return item.specialDescription || 'Special offer';
+  }
+}
+
+// ─── Collapsible item group for the "Select items for this package" UI ────────
+function ItemGroupSelector({
+  group,
+  selectedIds,
+  onToggle,
+}: {
+  group: ItemGroup;
+  selectedIds: Set<string>;
+  onToggle: (productId: string) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const selectedInGroup = group.items.filter(i => selectedIds.has(i.productId)).length;
+
+  return (
+    <View style={[igs.wrapper, { borderColor: group.borderColor }]}>
+      <TouchableOpacity
+        style={[igs.header, { backgroundColor: group.bgColor }]}
+        onPress={() => setOpen(o => !o)}
+      >
+        <group.Icon size={16} color={group.color} />
+        <Text style={[igs.title, { color: group.color }]}>{group.title}</Text>
+        <Text style={[igs.count, { color: group.color }]}>
+          {selectedInGroup}/{group.items.length}
+        </Text>
+        {open ? <ChevronUp size={16} color={group.color} /> : <ChevronDown size={16} color={group.color} />}
+      </TouchableOpacity>
+
+      {open && group.items.map((item, idx) => {
+        const isSelected = selectedIds.has(item.productId);
+        const label = getSpecialLabel(item);
+        const isFree = item.isBonusItem || item.isFreeItem || item.isMultibuyBonus || item.autoAdded;
+
+        return (
+          <TouchableOpacity
+            key={`${item.productId}-${idx}`}
+            style={[igs.itemRow, isSelected && igs.itemRowSelected, { borderColor: isSelected ? '#10b981' : group.borderColor }]}
+            onPress={() => onToggle(item.productId)}
+          >
+            <View style={{ flex: 1 }}>
+              <View style={igs.nameRow}>
+                <Text style={igs.itemName}>
+                  {item.name}
+                  {item.variantName ? <Text style={igs.variant}> — {item.variantName}</Text> : null}
+                </Text>
+                {isFree && (
+                  <View style={igs.freePill}>
+                    <Text style={igs.freePillText}>FREE</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={igs.itemSku}>SKU: {item.sku}  |  Qty: {item.quantity}</Text>
+              {label && <Text style={[igs.specialLabel, { color: group.color }]}>{label}</Text>}
+              {item.isComboItem && item.comboItems?.length ? (
+                <View style={igs.comboList}>
+                  {item.comboItems.map((ci, i) => (
+                    <Text key={i} style={igs.comboListItem}>• {ci.quantity}× {ci.productName}</Text>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+            <View style={[igs.checkbox, isSelected && igs.checkboxSelected]}>
+              {isSelected && <CheckCircle size={22} color="#10b981" />}
+            </View>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function PackagingScreen({ navigation: navProp }: any) {
   const navigation = navProp as any;
-
   const route = useRoute();
   const params = route.params as { orderId?: string; orderNumber?: string } | undefined;
   const orderId = params?.orderId;
 
   const { completeOrder } = useOrdersStore();
+
   const [order, setOrder] = useState<any>(null);
+  const [groups, setGroups] = useState<ItemGroup[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [permission, requestPermission] = useCameraPermissions();
-  const [scanning, setScanning] = useState(false);
+  const [scanning, setScanning]         = useState(false);
   const [totalPackages, setTotalPackages] = useState('1');
-  const [packages, setPackages] = useState<any[]>([]);
-  const [currentPackageItems, setCurrentPackageItems] = useState<string[]>([]);
+  const [packages, setPackages]         = useState<any[]>([]);
+  const [currentPackageItems, setCurrentPackageItems] = useState<Set<string>>(new Set());
 
-  // ── fetch order & ensure status is 'packaging' ──────────────────────────
+  // ── Fetch order ─────────────────────────────────────────────────────────────
   useEffect(() => {
     const fetchOrder = async () => {
-      if (!orderId) {
-        setLoading(false);
-        return;
-      }
-
+      if (!orderId) { setLoading(false); return; }
       try {
         const token = await AsyncStorage.getItem('auth_token');
-        const response = await axios.get(`${API_URL}/api/orders/${orderId}`, {
+        const res = await axios.get(`${API_URL}/api/orders/${orderId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-
-        const fetched = response.data.order;
+        const fetched = res.data.order;
 
         if (fetched.status !== 'packaging') {
           await axios.patch(
@@ -84,129 +219,68 @@ export default function PackagingScreen({ navigation: navProp }: any) {
         }
 
         setOrder(fetched);
-      } catch (error: any) {
-        console.error('Failed to fetch order:', error.response?.data || error.message);
+        setGroups(classifyItems(fetched.items));
+      } catch (err: any) {
+        console.error('PackagingScreen fetch error:', err.response?.data || err.message);
         Alert.alert('Error', 'Failed to load order details');
       } finally {
         setLoading(false);
       }
     };
-
     fetchOrder();
   }, [orderId]);
 
-  // ── Helper to get item badge ────────────────────────────────────────────
-  const getItemBadge = (item: OrderItem) => {
-    if (item.isComboItem) {
-      return 'COMBO';
+  // ── Select all items by default for first package ──────────────────────────
+  useEffect(() => {
+    if (order && packages.length === 0) {
+      const allIds = new Set<string>(order.items.map((i: OrderItem) => i.productId));
+      setCurrentPackageItems(allIds);
     }
-    if (item.isBonusItem) {
-      return 'FREE';
-    }
-    if (!item.specialType) return null;
+  }, [order]);
 
-    switch (item.specialType) {
-      case 'percentage_off':
-        return `${item.specialConditions?.discountPercentage}% OFF`;
-      case 'amount_off':
-        return `R${item.specialConditions?.discountAmount} OFF`;
-      case 'multibuy':
-        return 'MULTIBUY';
-      case 'buy_x_get_y':
-        return 'PROMO';
-      default:
-        return 'SPECIAL';
-    }
-  };
-
-  // ── Helper to get item description ──────────────────────────────────────
-  const getItemDescription = (item: OrderItem) => {
-    if (item.isComboItem && item.comboName) {
-      return `Part of ${item.comboName}`;
-    }
-    if (item.isBonusItem) {
-      return 'Bonus item from promotion';
-    }
-    if (!item.specialType) return null;
-
-    switch (item.specialType) {
-      case 'buy_x_get_y':
-        const discount = item.specialConditions?.getDiscount || 100;
-        if (discount === 100) {
-          return `Buy ${item.specialConditions?.buyQuantity}, get ${item.specialConditions?.getQuantity} FREE!`;
-        }
-        return `Buy ${item.specialConditions?.buyQuantity}, get ${item.specialConditions?.getQuantity} at ${discount}% off`;
-      case 'multibuy':
-        return `${item.specialConditions?.requiredQuantity} for R${item.specialConditions?.specialPrice}`;
-      case 'percentage_off':
-        return `${item.specialConditions?.discountPercentage}% discount applied`;
-      case 'amount_off':
-        return `R${item.specialConditions?.discountAmount} discount applied`;
-      default:
-        return 'Special offer applied';
-    }
-  };
-
-  // ── QR scan handler ──────────────────────────────────────────────────────
+  // ── QR scan ─────────────────────────────────────────────────────────────────
   const handleQRScanned = async ({ data }: any) => {
     if (!scanning) return;
     setScanning(false);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-    const packageNum = packages.length + 1;
-    const total = parseInt(totalPackages);
+    const packageNum  = packages.length + 1;
+    const total       = parseInt(totalPackages, 10);
 
     const newPackage = {
-      qrCode: data,
+      qrCode:        data,
       packageNumber: packageNum,
       totalPackages: total,
-      items: currentPackageItems,
+      items:         Array.from(currentPackageItems),
     };
 
-    const existingPackages = order.packages || [];
-    const updatedPackages = [...existingPackages, newPackage];
-
-    console.log('📦 ── createPackage payload ──────────────────');
-    console.log('   orderId         :', orderId);
-    console.log('   newPackage      :', JSON.stringify(newPackage, null, 2));
-    console.log('─────────────────────────────────────────────');
+    const updatedPackages = [...(order.packages || []), newPackage];
 
     try {
       const token = await AsyncStorage.getItem('auth_token');
-
-      const response = await axios.patch(
+      await axios.patch(
         `${API_URL}/api/orders/${orderId}`,
         { packages: updatedPackages },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      console.log('✅ createPackage success');
-
       setOrder((prev: any) => ({ ...prev, packages: updatedPackages }));
+      setPackages(prev => [...prev, newPackage]);
+      setCurrentPackageItems(new Set());
 
-      setPackages([...packages, newPackage]);
-      setCurrentPackageItems([]);
-
-      Alert.alert('Success', `Package ${packageNum} of ${total} created successfully!`);
+      Alert.alert('✓ Package Created', `Package ${packageNum} of ${total} sealed.`);
 
       if (packageNum === total) {
-        handleCompleteOrder();
+        handleCompleteOrder(updatedPackages);
       }
-    } catch (error: any) {
-      console.error('❌ createPackage FAILED');
-      console.error('   response.data :', JSON.stringify(error.response?.data, null, 2));
-
-      const serverMessage =
-        error.response?.data?.message ||
-        error.response?.data?.error ||
-        'Failed to create package';
-
-      Alert.alert('Error', serverMessage);
+    } catch (err: any) {
+      const msg = err.response?.data?.message || err.response?.data?.error || 'Failed to create package';
+      Alert.alert('Error', msg);
     }
   };
 
-  // ── mark packaging done & move status → collecting ──────────────────────
-  const handleCompleteOrder = async () => {
+  // ── Complete packaging ───────────────────────────────────────────────────────
+  const handleCompleteOrder = async (finalPackages?: any[]) => {
     try {
       const token = await AsyncStorage.getItem('auth_token');
       await axios.patch(
@@ -214,42 +288,42 @@ export default function PackagingScreen({ navigation: navProp }: any) {
         { status: 'collecting', packagingCompletedAt: new Date().toISOString() },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-
       await completeOrder(orderId!);
-
-      Alert.alert('Order Packaged!', 'Order is now ready for collection', [
-        {
-          text: 'OK',
-          onPress: () => navigation.navigate('Main', { screen: 'Orders' }),
-        },
+      Alert.alert('Order Packaged! 📦', 'Ready for driver collection.', [
+        { text: 'OK', onPress: () => navigation.navigate('Main', { screen: 'Orders' }) },
       ]);
-    } catch (error) {
-      console.error('Complete order error:', error);
+    } catch {
       Alert.alert('Error', 'Failed to complete packaging');
     }
   };
 
-  // ── item toggle ──────────────────────────────────────────────────────────
-  const toggleItemForPackage = (itemId: string) => {
-    setCurrentPackageItems((prev) =>
-      prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]
-    );
+  const toggleItemForPackage = (productId: string) => {
+    setCurrentPackageItems(prev => {
+      const next = new Set(prev);
+      next.has(productId) ? next.delete(productId) : next.add(productId);
+      return next;
+    });
   };
 
-  // ── loading / error guards ───────────────────────────────────────────────
+  const selectAllItems = () => {
+    if (!order) return;
+    setCurrentPackageItems(new Set(order.items.map((i: OrderItem) => i.productId)));
+  };
+
+  // ── Loading / error ──────────────────────────────────────────────────────────
   if (loading) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color="#FF6B35" />
-        <Text style={styles.loadingText}>Loading order...</Text>
+        <Text style={styles.loadingText}>Loading order…</Text>
       </View>
     );
   }
 
-  if (!orderId) {
+  if (!orderId || !order) {
     return (
       <View style={styles.centered}>
-        <Text style={styles.errorText}>No order ID provided</Text>
+        <Text style={styles.errorText}>{!orderId ? 'No order ID provided' : 'Order not found'}</Text>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Text style={styles.backButtonText}>← Go Back</Text>
         </TouchableOpacity>
@@ -257,26 +331,15 @@ export default function PackagingScreen({ navigation: navProp }: any) {
     );
   }
 
-  if (!order) {
-    return (
-      <View style={styles.centered}>
-        <Text style={styles.errorText}>Order not found</Text>
-        <Text style={styles.errorSubtext}>Order ID: {orderId}</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.backButtonText}>← Go Back</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  const allPackagesCreated = packages.length === parseInt(totalPackages);
-  const hasComboItems = order.items.some((item: OrderItem) => item.isComboItem);
-  const hasSpecialItems = order.items.some(
-    (item: OrderItem) => item.isBonusItem || item.specialType
-  );
+  const allPackagesCreated = packages.length === parseInt(totalPackages, 10);
+  const selectedCount      = currentPackageItems.size;
+  const totalItems         = order.items.length;
+  const bonusCount  = order.items.filter((i: OrderItem) => i.isBonusItem || i.isFreeItem || i.isMultibuyBonus || i.autoAdded).length;
+  const comboCount  = order.items.filter((i: OrderItem) => i.isComboItem).length;
+  const specialCount= order.items.filter((i: OrderItem) => i.specialType && !i.isComboItem && !i.isBonusItem).length;
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
@@ -286,154 +349,99 @@ export default function PackagingScreen({ navigation: navProp }: any) {
         <Text style={styles.orderNumber}>{order.orderNumber}</Text>
       </View>
 
-      {/* STATUS STEPPER */}
       <StatusStepper currentStatus={order.status} />
 
-      {/* Total Packages Input */}
+      {/* Order composition summary */}
+      <View style={styles.summaryCard}>
+        <Text style={styles.summaryTitle}>Order Composition</Text>
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryChip}>
+            <ShoppingBag size={14} color="#374151" />
+            <Text style={styles.summaryChipText}>{totalItems - bonusCount - comboCount - specialCount} Regular</Text>
+          </View>
+          {specialCount > 0 && (
+            <View style={[styles.summaryChip, { backgroundColor: '#fffbeb', borderColor: '#fde68a' }]}>
+              <Tag size={14} color="#b45309" />
+              <Text style={[styles.summaryChipText, { color: '#b45309' }]}>{specialCount} Promo</Text>
+            </View>
+          )}
+          {comboCount > 0 && (
+            <View style={[styles.summaryChip, { backgroundColor: '#f5f3ff', borderColor: '#c4b5fd' }]}>
+              <Layers size={14} color="#6d28d9" />
+              <Text style={[styles.summaryChipText, { color: '#6d28d9' }]}>{comboCount} Combo</Text>
+            </View>
+          )}
+          {bonusCount > 0 && (
+            <View style={[styles.summaryChip, { backgroundColor: '#ecfdf5', borderColor: '#6ee7b7' }]}>
+              <Gift size={14} color="#065f46" />
+              <Text style={[styles.summaryChipText, { color: '#065f46' }]}>{bonusCount} Free</Text>
+            </View>
+          )}
+        </View>
+        {bonusCount > 0 && (
+          <View style={styles.warningRow}>
+            <Text style={styles.warningText}>
+              ⚠️ {bonusCount} free/bonus item{bonusCount > 1 ? 's' : ''} MUST be included in a package
+            </Text>
+          </View>
+        )}
+      </View>
+
+      {/* Package count input */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Total Number of Packages</Text>
+        <Text style={styles.sectionTitle}>Total Packages</Text>
         <TextInput
           style={styles.input}
           value={totalPackages}
           onChangeText={setTotalPackages}
           keyboardType="number-pad"
           editable={packages.length === 0}
+          placeholder="How many boxes/bags?"
         />
       </View>
 
       {/* Progress */}
       <View style={styles.progressSection}>
-        <Text style={styles.progressText}>
-          Packages Created: {packages.length} / {totalPackages}
-        </Text>
         <View style={styles.progressBar}>
           <View
             style={[
               styles.progressFill,
-              { width: `${(packages.length / parseInt(totalPackages)) * 100}%` },
+              { width: `${(packages.length / parseInt(totalPackages, 10)) * 100}%` },
             ]}
           />
         </View>
+        <Text style={styles.progressText}>
+          {packages.length} / {totalPackages} packages sealed
+        </Text>
       </View>
 
-      {/* Current Package */}
+      {/* Current package builder */}
       {!allPackagesCreated && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            Package {packages.length + 1} of {totalPackages}
+          <View style={styles.sectionTitleRow}>
+            <Text style={styles.sectionTitle}>
+              Package {packages.length + 1} of {totalPackages} — Select Items
+            </Text>
+            <TouchableOpacity style={styles.selectAllBtn} onPress={selectAllItems}>
+              <Text style={styles.selectAllText}>Select All</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.sectionHint}>
+            {selectedCount} of {totalItems} items selected for this package
           </Text>
 
-          {/* Item Selection */}
-          <Text style={styles.label}>Select items for this package:</Text>
-          {order.items.map((item: OrderItem, index: number) => {
-            const itemBadge = getItemBadge(item);
-            const itemDesc = getItemDescription(item);
-            const isSelected = currentPackageItems.includes(item.productId);
+          {/* Grouped item checkboxes */}
+          {groups.map(grp => (
+            <ItemGroupSelector
+              key={grp.key}
+              group={grp}
+              selectedIds={currentPackageItems}
+              onToggle={toggleItemForPackage}
+            />
+          ))}
 
-            return (
-              <TouchableOpacity
-                key={index}
-                style={[
-                  styles.itemCheckbox,
-                  isSelected && styles.itemCheckboxSelected,
-                  item.isComboItem && styles.itemCheckboxCombo,
-                  item.isBonusItem && styles.itemCheckboxBonus,
-                  item.specialType && !item.isBonusItem && !item.isComboItem && styles.itemCheckboxSpecial,
-                ]}
-                onPress={() => toggleItemForPackage(item.productId)}
-              >
-                <View style={styles.itemInfo}>
-                  <View style={styles.itemNameRow}>
-                    <Text style={styles.itemName}>{item.name}</Text>
-                    {item.variantName && (
-                      <Text style={styles.variantName}> - {item.variantName}</Text>
-                    )}
-                  </View>
-
-                  {/* Badge */}
-                  {itemBadge && (
-                    <View
-                      style={[
-                        styles.specialBadge,
-                        item.isComboItem
-                          ? styles.specialBadgeCombo
-                          : item.isBonusItem
-                          ? styles.specialBadgeFree
-                          : styles.specialBadgePromo,
-                      ]}
-                    >
-                      {item.isComboItem ? (
-                        <Package size={12} color="#9333EA" />
-                      ) : item.isBonusItem ? (
-                        <Gift size={12} color="#10B981" />
-                      ) : (
-                        <Tag size={12} color="#FF6B35" />
-                      )}
-                      <Text
-                        style={[
-                          styles.specialBadgeText,
-                          item.isComboItem
-                            ? styles.specialBadgeTextCombo
-                            : item.isBonusItem
-                            ? styles.specialBadgeTextFree
-                            : styles.specialBadgeTextPromo,
-                        ]}
-                      >
-                        {itemBadge}
-                      </Text>
-                    </View>
-                  )}
-
-                  {/* Description */}
-                  {itemDesc && <Text style={styles.specialDesc}>{itemDesc}</Text>}
-
-                  {/* Combo Items Breakdown */}
-                  {item.isComboItem && item.comboItems && item.comboItems.length > 0 && (
-                    <View style={styles.comboItemsBox}>
-                      <Text style={styles.comboItemsTitle}>Includes:</Text>
-                      {item.comboItems.map((comboItem, idx) => (
-                        <Text key={idx} style={styles.comboItemText}>
-                          • {comboItem.quantity}× {comboItem.productName}
-                        </Text>
-                      ))}
-                    </View>
-                  )}
-
-                  <View style={styles.itemBottomRow}>
-                    <Text style={styles.itemQuantity}>Qty: {item.quantity}</Text>
-                    {item.sku && <Text style={styles.itemSku}>SKU: {item.sku}</Text>}
-                  </View>
-                </View>
-
-                {isSelected && <CheckCircle size={24} color="#10B981" />}
-              </TouchableOpacity>
-            );
-          })}
-
-          {/* Important Notice for Special/Combo Items */}
-          {(hasComboItems || hasSpecialItems) && (
-            <View style={styles.noticeBox}>
-              <Package size={20} color="#9333EA" />
-              <View style={styles.noticeContent}>
-                <Text style={styles.noticeTitle}>
-                  {hasComboItems && hasSpecialItems
-                    ? 'Combo & Promotional Items'
-                    : hasComboItems
-                    ? 'Combo Items Notice'
-                    : 'Promotional Items Notice'}
-                </Text>
-                <Text style={styles.noticeText}>
-                  {hasComboItems && hasSpecialItems
-                    ? 'This order contains combo deals and promotional items. Ensure ALL items are scanned and packaged.'
-                    : hasComboItems
-                    ? 'This order contains combo deals. Each combo includes multiple items - ensure all items are packaged.'
-                    : 'This order contains promotional items. Ensure ALL items (including free/bonus items) are scanned and packaged.'}
-                </Text>
-              </View>
-            </View>
-          )}
-
-          {/* QR Scanner or Scan Button */}
+          {/* QR Scanner */}
           {scanning ? (
             <View style={styles.scannerContainer}>
               <CameraView
@@ -443,77 +451,74 @@ export default function PackagingScreen({ navigation: navProp }: any) {
               />
               <View style={styles.scannerOverlay}>
                 <View style={styles.scannerFrame} />
-                <Text style={styles.scannerText}>Scan package QR code</Text>
-                <TouchableOpacity
-                  style={styles.cancelScanButton}
-                  onPress={() => setScanning(false)}
-                >
+                <Text style={styles.scannerText}>Scan the package QR label</Text>
+                <TouchableOpacity style={styles.cancelScanButton} onPress={() => setScanning(false)}>
                   <Text style={styles.cancelScanText}>Cancel</Text>
                 </TouchableOpacity>
               </View>
             </View>
           ) : (
             <TouchableOpacity
-              style={[
-                styles.scanButton,
-                currentPackageItems.length === 0 && styles.scanButtonDisabled,
-              ]}
+              style={[styles.scanButton, selectedCount === 0 && styles.scanButtonDisabled]}
               onPress={() => {
                 if (!permission?.granted) requestPermission();
                 else setScanning(true);
               }}
-              disabled={currentPackageItems.length === 0}
+              disabled={selectedCount === 0}
             >
-              <QrCode size={24} color="#fff" />
+              <QrCode size={22} color="#fff" />
               <Text style={styles.scanButtonText}>
-                Scan QR Code for Package {packages.length + 1}
+                Scan QR Label — Package {packages.length + 1}
               </Text>
             </TouchableOpacity>
           )}
         </View>
       )}
 
-      {/* Created Packages */}
+      {/* Created packages list */}
       {packages.length > 0 && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Created Packages</Text>
-          {packages.map((pkg, index) => (
-            <View key={index} style={styles.packageCard}>
+          <Text style={styles.sectionTitle}>Sealed Packages</Text>
+          {packages.map((pkg, i) => (
+            <View key={i} style={styles.packageCard}>
               <View style={styles.packageHeader}>
-                <Package size={24} color="#10B981" />
+                <Package size={22} color="#10b981" />
                 <Text style={styles.packageTitle}>
                   Package {pkg.packageNumber} of {pkg.totalPackages}
                 </Text>
-                <CheckCircle size={24} color="#10B981" />
+                <CheckCircle size={22} color="#10b981" />
               </View>
               <Text style={styles.packageQR}>QR: {pkg.qrCode}</Text>
-              <Text style={styles.packageItems}>{pkg.items.length} items packaged</Text>
+              <Text style={styles.packageItems}>{pkg.items.length} product types inside</Text>
             </View>
           ))}
         </View>
       )}
 
-      {/* Complete Button */}
+      {/* Complete button */}
       {allPackagesCreated && (
-        <TouchableOpacity style={styles.completeButton} onPress={handleCompleteOrder}>
+        <TouchableOpacity style={styles.completeButton} onPress={() => handleCompleteOrder()}>
           <CheckCircle size={24} color="#fff" />
           <Text style={styles.completeButtonText}>Complete Packaging</Text>
         </TouchableOpacity>
       )}
+
+      <View style={{ height: 40 }} />
     </ScrollView>
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   loadingText: { marginTop: 12, fontSize: 16, color: '#666' },
   errorText: { fontSize: 18, fontWeight: 'bold', color: '#666', marginBottom: 8 },
-  errorSubtext: { fontSize: 14, color: '#999', marginBottom: 20 },
+
   header: {
     backgroundColor: '#fff',
     padding: 24,
-    paddingTop: 60,
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
     borderBottomWidth: 1,
     borderBottomColor: '#e5e5e5',
   },
@@ -521,86 +526,66 @@ const styles = StyleSheet.create({
   backButtonText: { fontSize: 16, color: '#FF6B35', fontWeight: '600', marginBottom: 12 },
   headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 4 },
   orderNumber: { fontSize: 16, color: '#666' },
-  section: { backgroundColor: '#fff', padding: 16, marginTop: 12 },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 12 },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, fontSize: 16 },
-  progressSection: { backgroundColor: '#fff', padding: 16, marginTop: 12 },
-  progressText: { fontSize: 16, fontWeight: '600', color: '#333', marginBottom: 8 },
-  progressBar: { height: 8, backgroundColor: '#e5e5e5', borderRadius: 4, overflow: 'hidden' },
-  progressFill: { height: '100%', backgroundColor: '#10B981' },
-  label: { fontSize: 14, fontWeight: '600', color: '#333', marginBottom: 8 },
-  itemCheckbox: {
+
+  summaryCard: {
+    backgroundColor: '#fff',
+    margin: 16,
+    marginBottom: 0,
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  summaryTitle: { fontSize: 13, fontWeight: '700', color: '#374151', marginBottom: 10 },
+  summaryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  summaryChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 12,
-    borderWidth: 2,
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  summaryChipText: { fontSize: 12, fontWeight: '700', color: '#374151' },
+  warningRow: {
+    marginTop: 10,
+    backgroundColor: '#fef3c7',
+    borderRadius: 8,
+    padding: 10,
+  },
+  warningText: { fontSize: 12, color: '#92400e', fontWeight: '600' },
+
+  section: { backgroundColor: '#fff', padding: 16, marginTop: 12, marginHorizontal: 0 },
+  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#1a1a1a' },
+  sectionHint: { fontSize: 12, color: '#6b7280', marginBottom: 12 },
+  selectAllBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#fff7ed',
+    borderWidth: 1,
+    borderColor: '#fed7aa',
+  },
+  selectAllText: { fontSize: 12, color: '#FF6B35', fontWeight: '700' },
+
+  input: {
+    borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 8,
-    marginBottom: 8,
-  },
-  itemCheckboxSelected: { borderColor: '#10B981', backgroundColor: '#F0FDF4' },
-  itemCheckboxCombo: { borderColor: '#9333EA', backgroundColor: '#FAF5FF' },
-  itemCheckboxBonus: { borderColor: '#10B981', backgroundColor: '#ECFDF5' },
-  itemCheckboxSpecial: { borderColor: '#FF6B35', backgroundColor: '#FFF7ED' },
-  itemInfo: { flex: 1 },
-  itemNameRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 },
-  itemName: { fontSize: 16, fontWeight: '600', color: '#1a1a1a' },
-  variantName: { fontSize: 14, color: '#666', fontStyle: 'italic' },
-  specialBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    marginVertical: 4,
-    gap: 4,
-  },
-  specialBadgeCombo: { backgroundColor: '#E9D5FF' },
-  specialBadgeFree: { backgroundColor: '#D1FAE5' },
-  specialBadgePromo: { backgroundColor: '#FED7AA' },
-  specialBadgeText: { fontSize: 11, fontWeight: 'bold' },
-  specialBadgeTextCombo: { color: '#7E22CE' },
-  specialBadgeTextFree: { color: '#059669' },
-  specialBadgeTextPromo: { color: '#EA580C' },
-  specialDesc: { fontSize: 12, color: '#666', fontStyle: 'italic', marginTop: 2, marginBottom: 4 },
-  comboItemsBox: {
-    backgroundColor: '#F5F3FF',
-    borderRadius: 6,
-    padding: 8,
-    marginTop: 4,
-    marginBottom: 4,
-  },
-  comboItemsTitle: {
-    fontSize: 11,
-    fontWeight: 'bold',
-    color: '#7E22CE',
-    marginBottom: 4,
-  },
-  comboItemText: {
-    fontSize: 11,
-    color: '#6B21A8',
-    marginBottom: 2,
-  },
-  itemBottomRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4 },
-  itemQuantity: { fontSize: 14, color: '#666' },
-  itemSku: { fontSize: 12, color: '#999' },
-  noticeBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: '#FAF5FF',
-    borderWidth: 2,
-    borderColor: '#9333EA',
-    borderRadius: 8,
     padding: 12,
-    marginTop: 12,
-    marginBottom: 8,
-    gap: 12,
+    fontSize: 16,
+    backgroundColor: '#f9fafb',
   },
-  noticeContent: { flex: 1 },
-  noticeTitle: { fontSize: 14, fontWeight: 'bold', color: '#7E22CE', marginBottom: 4 },
-  noticeText: { fontSize: 13, color: '#6B21A8', lineHeight: 18 },
+
+  progressSection: { backgroundColor: '#fff', padding: 16, marginTop: 12 },
+  progressBar: { height: 8, backgroundColor: '#e5e5e5', borderRadius: 4, overflow: 'hidden', marginBottom: 8 },
+  progressFill: { height: '100%', backgroundColor: '#10b981' },
+  progressText: { fontSize: 14, color: '#666', textAlign: 'center' },
+
   scannerContainer: {
     height: 300,
     backgroundColor: '#000',
@@ -623,6 +608,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   cancelScanText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+
   scanButton: {
     backgroundColor: '#FF6B35',
     flexDirection: 'row',
@@ -633,22 +619,24 @@ const styles = StyleSheet.create({
     marginTop: 16,
     gap: 8,
   },
-  scanButtonDisabled: { opacity: 0.5 },
+  scanButtonDisabled: { opacity: 0.4 },
   scanButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+
   packageCard: {
-    backgroundColor: '#F0FDF4',
+    backgroundColor: '#f0fdf4',
     borderWidth: 2,
-    borderColor: '#10B981',
+    borderColor: '#10b981',
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
   },
   packageHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  packageTitle: { flex: 1, fontSize: 16, fontWeight: 'bold', color: '#1a1a1a' },
-  packageQR: { fontSize: 14, color: '#666', marginBottom: 4 },
-  packageItems: { fontSize: 14, fontWeight: '600', color: '#333' },
+  packageTitle: { flex: 1, fontSize: 15, fontWeight: 'bold', color: '#1a1a1a' },
+  packageQR: { fontSize: 13, color: '#666', marginBottom: 2 },
+  packageItems: { fontSize: 13, fontWeight: '600', color: '#374151' },
+
   completeButton: {
-    backgroundColor: '#10B981',
+    backgroundColor: '#10b981',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -658,4 +646,53 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   completeButtonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+});
+
+// ─── Item group selector styles ───────────────────────────────────────────────
+const igs = StyleSheet.create({
+  wrapper: { borderRadius: 12, borderWidth: 1.5, overflow: 'hidden', marginBottom: 12 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
+  },
+  title: { flex: 1, fontSize: 13, fontWeight: '700' },
+  count: { fontSize: 12, fontWeight: '700', marginRight: 4 },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: 12,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#f3f4f6',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  itemRowSelected: { backgroundColor: '#f0fdf4' },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 2 },
+  itemName: { fontSize: 14, fontWeight: '600', color: '#1a1a1a', flex: 1 },
+  variant: { fontWeight: '400', color: '#6b7280' },
+  itemSku: { fontSize: 11, color: '#9ca3af', marginBottom: 3 },
+  specialLabel: { fontSize: 12, fontWeight: '600', marginBottom: 4 },
+  freePill: {
+    backgroundColor: '#d1fae5',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  freePillText: { fontSize: 10, fontWeight: '800', color: '#065f46' },
+  comboList: { marginTop: 4 },
+  comboListItem: { fontSize: 11, color: '#6d28d9', marginBottom: 1 },
+  checkbox: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#d1d5db',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  checkboxSelected: { borderColor: '#10b981', backgroundColor: '#f0fdf4' },
 });
