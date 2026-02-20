@@ -2,6 +2,13 @@
   "name": "tfs-wholesalers",
   "version": "1.0.0",
   "private": true,
+  "ts-node": {
+    "esm": false,
+    "transpileOnly": true,
+    "compilerOptions": {
+      "module": "commonjs"
+    }
+  },
   "scripts": {
     "dev": "ts-node --transpile-only server.ts",
     "build": "next build",
