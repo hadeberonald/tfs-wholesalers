@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "ts-node --transpile-only server.ts",
     "build": "next build",
-    "start": "next start",
+    "start": "ts-node --transpile-only server.ts",
     "lint": "next lint",
     "seed:categories": "tsx scripts/seed-categories.ts",
     "migrate:wholesale": "node scripts/migrate-wholesale-db.js"
@@ -38,6 +38,7 @@
     "react-leaflet": "^4.2.1",
     "socket.io": "^4.8.3",
     "tailwindcss": "^3.3.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5",
     "zustand": "^4.4.7"
   }
