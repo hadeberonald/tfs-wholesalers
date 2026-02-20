@@ -1,8 +1,4 @@
 // lib/verify-mobile-token.ts
-// Verifies a JWT issued by /api/auth/mobile-login.
-// Always re-fetches the user from DB so activeBranchId changes
-// (from POST /api/auth/set-branch) take effect immediately without re-login.
-
 import jwt from 'jsonwebtoken';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
@@ -17,13 +13,34 @@ export interface MobileUser {
 }
 
 export async function verifyMobileToken(token: string): Promise<MobileUser | null> {
-  if (!token || !JWT_SECRET) return null;
+  console.log('[verifyMobileToken] called, token length:', token?.length ?? 0);
+  console.log('[verifyMobileToken] JWT_SECRET length:', JWT_SECRET.length);
+
+  if (!token) {
+    console.warn('[verifyMobileToken] No token provided');
+    return null;
+  }
+
+  if (!JWT_SECRET) {
+    console.error('[verifyMobileToken] JWT_SECRET is empty — check Render env vars');
+    return null;
+  }
+
+  let decoded: any;
+  try {
+    decoded = jwt.verify(token, JWT_SECRET);
+    console.log('[verifyMobileToken] JWT decoded ok, id:', decoded?.id);
+  } catch (err: any) {
+    console.error('[verifyMobileToken] JWT verify failed:', err.name, err.message);
+    return null;
+  }
+
+  if (!decoded?.id) {
+    console.warn('[verifyMobileToken] No id in decoded token');
+    return null;
+  }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
-    if (!decoded?.id) return null;
-
-    // Re-fetch from DB to get the latest activeBranchId
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
 
@@ -32,7 +49,12 @@ export async function verifyMobileToken(token: string): Promise<MobileUser | nul
       { projection: { role: 1, email: 1, activeBranchId: 1 } }
     );
 
-    if (!user) return null;
+    if (!user) {
+      console.warn('[verifyMobileToken] User not found in DB:', decoded.id);
+      return null;
+    }
+
+    console.log('[verifyMobileToken] Success:', user.email, '| activeBranchId:', user.activeBranchId?.toString() ?? 'none');
 
     return {
       id:             decoded.id,
@@ -40,7 +62,8 @@ export async function verifyMobileToken(token: string): Promise<MobileUser | nul
       role:           user.role            || decoded.role,
       activeBranchId: user.activeBranchId?.toString() || decoded.activeBranchId || undefined,
     };
-  } catch {
-    return null; // JWT expired or invalid
+  } catch (err: any) {
+    console.error('[verifyMobileToken] DB lookup failed:', err.message);
+    return null;
   }
 }
