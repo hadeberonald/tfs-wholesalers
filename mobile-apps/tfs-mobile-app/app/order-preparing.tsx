@@ -140,8 +140,7 @@ export default function OrderPreparingScreen() {
     // Normalise — DB field is `status`, customer app Order type calls it `orderStatus`
     const status = o.status ?? o.orderStatus;
     if (navigate(status)) return;
-    setOrder({ ...o, orderStatus: status });  // ensure both fields set
-    setOrder(o);
+    setOrder({ ...o, status, orderStatus: status });  // normalise both field names
     setLoading(false);
     // Re-sync scanned state from server
     setScannedIds(new Set(o.items.filter(i => i.scanned).map(i => i.productId)));
@@ -153,10 +152,11 @@ export default function OrderPreparingScreen() {
 
   // ── Socket: per-item scan ─────────────────────────────────────────────────
   const handleItemScanned = useCallback((payload: any) => {
-    // Animate the specific item immediately without waiting for a full re-fetch
     setScannedIds(prev => new Set([...prev, payload.productId]));
-    // Also update the full order so counts are correct
-    if (payload.order) setOrder(payload.order);
+    if (payload.order) {
+      const s = payload.order.status ?? payload.order.orderStatus;
+      setOrder({ ...payload.order, status: s, orderStatus: s });
+    }
   }, []);
 
   useOrderSocket(orderId, handleOrderUpdate, handleItemScanned);
