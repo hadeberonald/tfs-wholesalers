@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
@@ -13,7 +13,6 @@ import {
   LogOut,
   Menu,
   X,
-  ChevronRight,
   Tag,
   Gift,
   FileText,
@@ -21,14 +20,31 @@ import {
   Truck,
   Store,
   UserCheck,
-  BoxIcon
+  BoxIcon,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  DollarSign,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 
 export default function AdminHeader() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isNavExpanded, setIsNavExpanded] = useState(true);
   const pathname = usePathname();
   const { user, logout } = useAuth();
+
+  // Persist nav state in localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem('adminNavExpanded');
+    if (saved !== null) setIsNavExpanded(saved === 'true');
+  }, []);
+
+  const toggleNav = () => {
+    const next = !isNavExpanded;
+    setIsNavExpanded(next);
+    localStorage.setItem('adminNavExpanded', String(next));
+  };
 
   const slug = useMemo(() => {
     const pathParts = pathname.split('/').filter(Boolean);
@@ -63,6 +79,13 @@ export default function AdminHeader() {
           { href: `${basePrefix}/admin/purchase-orders`, label: 'POs', icon: FileText },
           { href: `${basePrefix}/admin/suppliers`, label: 'Suppliers', icon: Truck },
           { href: `${basePrefix}/admin/stock-takes`, label: 'Stock', icon: ClipboardCheck },
+          { href: `${basePrefix}/admin/resolutions`, label: 'Resolutions', icon: AlertTriangle },
+        ]
+      },
+      { 
+        label: 'Finance', 
+        items: [
+          { href: `${basePrefix}/admin/revenue`, label: 'Revenue', icon: DollarSign },
         ]
       },
       { 
@@ -84,9 +107,7 @@ export default function AdminHeader() {
   }, [slug]);
 
   const isActive = (href: string) => {
-    if (href.endsWith('/admin')) {
-      return pathname === href;
-    }
+    if (href.endsWith('/admin')) return pathname === href;
     return pathname.startsWith(href);
   };
 
@@ -96,10 +117,10 @@ export default function AdminHeader() {
     <>
       <header className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-r from-gray-900 to-gray-800 shadow-xl">
         <div className="max-w-7xl mx-auto px-4">
-          {/* Top Bar */}
-          <div className="flex items-center justify-between h-14 border-b border-white/10">
-            {/* Logo & Title */}
-            <Link href={`${slug}/admin`} className="flex items-center space-x-2 group">
+          {/* Top Bar - always visible */}
+          <div className="flex items-center justify-between h-14">
+            {/* Logo */}
+            <Link href={`/${slug}/admin`} className="flex items-center space-x-2">
               <div className="w-8 h-8 flex items-center justify-center">
                 <img src="/logo.png" alt="TFS Logo" className="w-full h-full object-contain" />
               </div>
@@ -109,10 +130,10 @@ export default function AdminHeader() {
               </div>
             </Link>
 
-            {/* Right Actions */}
+            {/* Right side */}
             <div className="flex items-center space-x-2">
               {/* User Info - Desktop */}
-              <div className="hidden lg:flex items-center space-x-2">
+              <div className="hidden lg:flex items-center space-x-2 mr-2">
                 <div className="text-right">
                   <p className="text-white text-xs font-medium">{user?.name}</p>
                   <p className="text-gray-400 text-[10px]">{user?.email}</p>
@@ -142,6 +163,25 @@ export default function AdminHeader() {
                 <span>Logout</span>
               </button>
 
+              {/* ── Toggle Nav (Desktop) ── */}
+              <button
+                onClick={toggleNav}
+                className="hidden md:flex items-center space-x-1 px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-white text-xs border border-white/20"
+                title={isNavExpanded ? 'Collapse navigation' : 'Expand navigation'}
+              >
+                {isNavExpanded ? (
+                  <>
+                    <ChevronUp className="w-3.5 h-3.5" />
+                    <span>Hide Nav</span>
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="w-3.5 h-3.5" />
+                    <span>Show Nav</span>
+                  </>
+                )}
+              </button>
+
               {/* Mobile Menu Button */}
               <button
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -156,18 +196,21 @@ export default function AdminHeader() {
             </div>
           </div>
 
-          {/* Desktop Navigation - Grouped */}
-          <nav className="hidden md:block py-2">
-            <div className="grid grid-cols-5 gap-3">
+          {/* ── Desktop Nav — collapsible ── */}
+          <div
+            className={`hidden md:block overflow-hidden transition-all duration-300 ease-in-out ${
+              isNavExpanded ? 'max-h-40 opacity-100 py-2' : 'max-h-0 opacity-0 py-0'
+            }`}
+          >
+            <div className="grid grid-cols-6 gap-3 border-t border-white/10 pt-2">
               {adminNavItems.map((group, groupIndex) => (
-                <div key={groupIndex} className="space-y-1">
+                <div key={groupIndex} className="space-y-0.5">
                   <p className="text-gray-400 text-[10px] uppercase font-semibold tracking-wider px-2 mb-1">
                     {group.label}
                   </p>
                   {group.items.map((item) => {
                     const Icon = item.icon;
                     const active = isActive(item.href);
-                    
                     return (
                       <Link
                         key={item.href}
@@ -186,10 +229,24 @@ export default function AdminHeader() {
                 </div>
               ))}
             </div>
-          </nav>
+          </div>
+
+          {/* Collapsed indicator bar (desktop) */}
+          {!isNavExpanded && (
+            <div className="hidden md:flex items-center justify-center py-1 border-t border-white/10">
+              <button
+                onClick={toggleNav}
+                className="flex items-center space-x-2 text-gray-400 hover:text-white text-xs transition-colors"
+              >
+                <ChevronDown className="w-3 h-3" />
+                <span>Expand navigation</span>
+                <ChevronDown className="w-3 h-3" />
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Mobile Menu */}
+        {/* ── Mobile Menu ── */}
         {isMobileMenuOpen && (
           <div className="md:hidden bg-gray-800 border-t border-white/10 max-h-[calc(100vh-56px)] overflow-y-auto">
             <nav className="max-w-7xl mx-auto px-4 py-4">
@@ -202,7 +259,6 @@ export default function AdminHeader() {
                     {group.items.map((item) => {
                       const Icon = item.icon;
                       const active = isActive(item.href);
-                      
                       return (
                         <Link
                           key={item.href}
@@ -232,12 +288,8 @@ export default function AdminHeader() {
                   <Store className="w-5 h-5" />
                   <span className="font-medium">Back to Store</span>
                 </Link>
-                
                 <button
-                  onClick={() => {
-                    logout();
-                    setIsMobileMenuOpen(false);
-                  }}
+                  onClick={() => { logout(); setIsMobileMenuOpen(false); }}
                   className="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-white transition-all"
                 >
                   <LogOut className="w-5 h-5" />
@@ -248,9 +300,9 @@ export default function AdminHeader() {
           </div>
         )}
       </header>
-      
-      {/* Spacer to prevent content from going under fixed header */}
-      <div className="h-[112px] md:h-[120px]" />
+
+      {/* Dynamic spacer based on nav state */}
+      <div className={`transition-all duration-300 ${isNavExpanded ? 'h-[120px] md:h-[128px]' : 'h-[62px] md:h-[68px]'}`} />
     </>
   );
 }

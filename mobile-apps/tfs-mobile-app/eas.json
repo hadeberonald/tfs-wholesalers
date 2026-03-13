@@ -14,12 +14,19 @@
       }
     },
     "production": {
+      "ios": {
+        "simulator": false
+      },
       "android": {
         "buildType": "app-bundle"
       }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "ascAppId": "6759480829"
+      }
+    }
   }
 }
