@@ -480,7 +480,7 @@ export default function CheckoutScreen() {
         <View style={styles.deliveryInfoRow}>
           <Truck color="#6b7280" size={16} />
           <Text style={styles.deliveryInfoText}>
-            Delivered by TFS Wholesalers. Estimated 1–3 hours after order is confirmed.
+            Delivered by TFS Wholesalers.
           </Text>
         </View>
 

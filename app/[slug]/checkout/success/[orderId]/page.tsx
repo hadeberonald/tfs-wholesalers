@@ -190,7 +190,7 @@ export default function OrderSuccessPage() {
               <div className="flex-1">
                 <h3 className="font-semibold text-brand-black mb-1 text-base md:text-lg">Order Processing</h3>
                 <p className="text-sm md:text-base text-gray-600">
-                  Our team at {branch?.displayName || 'our store'} is preparing your order. This usually takes a few hours.
+                  Our team at {branch?.displayName || 'our store'} is preparing your order. 
                 </p>
               </div>
             </div>
@@ -203,7 +203,6 @@ export default function OrderSuccessPage() {
                 <h3 className="font-semibold text-brand-black mb-1 text-base md:text-lg">Delivery</h3>
                 <p className="text-sm md:text-base text-gray-600">
                   Once ready, your order will be delivered to your address. 
-                  Expected delivery: <strong>1-3 hours</strong>.
                 </p>
               </div>
             </div>

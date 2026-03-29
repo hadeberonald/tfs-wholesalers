@@ -79,6 +79,7 @@ export default function RootLayout() {
         <Stack.Screen name="addresses" />
         <Stack.Screen name="payment-methods" />
         <Stack.Screen name="login" />
+        <Stack.Screen name="register" />
         <Stack.Screen name="product/[slug]" />
         <Stack.Screen name="special/[slug]" />
         <Stack.Screen name="combo/[slug]" />

@@ -11,13 +11,27 @@ export async function PUT(
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
 
-    const { _id, ...updateData } = body;
+    if (!body.branchId) {
+      return NextResponse.json({ error: 'branchId is required' }, { status: 400 });
+    }
+
+    const { _id, branchId, ...updateData } = body;
     updateData.updatedAt = new Date();
 
-    await db.collection('hero_banners').updateOne(
-      { _id: new ObjectId(params.id) },
+    const result = await db.collection('hero_banners').updateOne(
+      {
+        _id: new ObjectId(params.id),
+        branchId: new ObjectId(branchId), // Ensures a branch can only edit its own banners
+      },
       { $set: updateData }
     );
+
+    if (result.matchedCount === 0) {
+      return NextResponse.json(
+        { error: 'Banner not found or does not belong to this branch' },
+        { status: 404 }
+      );
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -31,10 +45,27 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    const { searchParams } = new URL(request.url);
+    const branchId = searchParams.get('branchId');
+
+    if (!branchId) {
+      return NextResponse.json({ error: 'branchId is required' }, { status: 400 });
+    }
+
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
 
-    await db.collection('hero_banners').deleteOne({ _id: new ObjectId(params.id) });
+    const result = await db.collection('hero_banners').deleteOne({
+      _id: new ObjectId(params.id),
+      branchId: new ObjectId(branchId), // Ensures a branch can only delete its own banners
+    });
+
+    if (result.deletedCount === 0) {
+      return NextResponse.json(
+        { error: 'Banner not found or does not belong to this branch' },
+        { status: 404 }
+      );
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

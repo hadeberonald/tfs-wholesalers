@@ -1,9 +1,8 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 
-// ✅ FIXED: Added 'super-admin' to role union
 interface User {
   id: string;
   email: string;
@@ -15,7 +14,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string, slug?: string) => Promise<void>;
-  logout: (slug?: string) => Promise<void>;
+  logout: () => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
 }
 
@@ -25,7 +24,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
-  const pathname = usePathname();
 
   useEffect(() => {
     checkAuth();
@@ -61,8 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const data = await res.json();
     setUser(data.user);
-    
-    // ✅ FIXED: Added super-admin routing
+
     if (data.user.role === 'super-admin') {
       router.push('/super-admin');
     } else if (data.user.role === 'admin') {
@@ -70,7 +67,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } else if (data.user.role === 'picker') {
       router.push('/picker');
     } else {
-      // Customer - redirect to branch account page if slug provided
       if (slug) {
         router.push(`/${slug}/account`);
       } else {
@@ -79,16 +75,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const logout = async (slug?: string) => {
+  // Caller is responsible for redirecting after logout
+  const logout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
     setUser(null);
-    
-    // Redirect to branch login if slug provided
-    if (slug) {
-      router.push(`/${slug}/login`);
-    } else {
-      router.push('/login');
-    }
   };
 
   const register = async (name: string, email: string, password: string) => {

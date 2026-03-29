@@ -23,30 +23,42 @@ interface ProductCardProps {
 export default function ProductCard({ product }: ProductCardProps) {
   const router = useRouter();
 
-  // ✅ One selector per call — no object literals
-  const addToCart         = useStore((s) => s.addToCart);
-  const addToWishlist     = useStore((s) => s.addToWishlist);
+  const addToCart          = useStore((s) => s.addToCart);
+  const addToWishlist      = useStore((s) => s.addToWishlist);
   const removeFromWishlist = useStore((s) => s.removeFromWishlist);
-  const wishlist          = useStore((s) => s.wishlist);
-  const user              = useStore((s) => s.user);
-  const isAuthenticated   = !!user;
+  const wishlist           = useStore((s) => s.wishlist);
+  const user               = useStore((s) => s.user);
+  const isAuthenticated    = !!user;
 
   const [quantity, setQuantity] = useState(1);
-  const [selectedVariant, setSelectedVariant] = useState(
-    product.hasVariants && product.variants?.length ? product.variants[0] : undefined
-  );
+  // No variant selected by default — base product is the default
+  const [selectedVariant, setSelectedVariant] = useState<typeof product.variants extends Array<infer V> ? V : never | undefined>(undefined as any);
 
-  const displayPrice   = selectedVariant?.price || product.specialPrice || product.price;
-  const comparePrice   = selectedVariant?.compareAtPrice || product.compareAtPrice;
-  const hasDiscount    = comparePrice && comparePrice > displayPrice;
+  // ── Derived display values — always fall back to base product ───────────────
+  const displayPrice = selectedVariant
+    ? (selectedVariant.specialPrice || selectedVariant.price || product.price)
+    : (product.specialPrice || product.price);
+
+  const comparePrice = selectedVariant
+    ? (selectedVariant.compareAtPrice || product.compareAtPrice)
+    : product.compareAtPrice;
+
+  const hasDiscount     = !!(comparePrice && comparePrice > displayPrice);
   const discountPercent = hasDiscount
-    ? Math.round(((comparePrice - displayPrice) / comparePrice) * 100)
+    ? Math.round(((comparePrice! - displayPrice) / comparePrice!) * 100)
     : 0;
-  const primaryImage = selectedVariant?.images?.[0] || product.images[0];
-  const stock        = selectedVariant?.stockLevel ?? product.stockLevel;
-  const inStock      = stock > 0;
 
-  const isInWishlist = wishlist.some((item) =>
+  // Base product image first, switch to variant image only when variant selected
+  const primaryImage = selectedVariant?.images?.length
+    ? selectedVariant.images[0]
+    : (product.images?.[0] || '');
+
+  const stock   = selectedVariant ? selectedVariant.stockLevel : (product.stockLevel ?? 0);
+  const inStock = stock > 0;
+  const lowStock = stock > 0 && stock <= 10;
+  // ───────────────────────────────────────────────────────────────────────────
+
+  const isInWishlist = wishlist.some((item: any) =>
     selectedVariant
       ? item.id === product._id && item.variantId === selectedVariant._id
       : item.id === product._id && !item.variantId
@@ -85,7 +97,7 @@ export default function ProductCard({ product }: ProductCardProps) {
       image:       primaryImage || '',
       quantity,
     });
-    Alert.alert('Added to Cart', `${quantity} × ${product.name} added to your cart`);
+    Alert.alert('Added to Cart', `${quantity} × ${product.name}${selectedVariant ? ` (${selectedVariant.name})` : ''} added to your cart`);
     setQuantity(1);
   };
 
@@ -97,6 +109,16 @@ export default function ProductCard({ product }: ProductCardProps) {
   const decrementQuantity = (e: any) => {
     e.stopPropagation();
     if (quantity > 1) setQuantity((q) => q - 1);
+  };
+
+  const handleVariantSelect = (variant: any) => {
+    // If tapping already-selected variant, deselect back to base product
+    if (selectedVariant?._id === variant._id) {
+      setSelectedVariant(undefined);
+    } else {
+      setSelectedVariant(variant);
+    }
+    setQuantity(1);
   };
 
   return (
@@ -146,8 +168,8 @@ export default function ProductCard({ product }: ProductCardProps) {
           </TouchableOpacity>
         )}
 
-        {/* Low stock */}
-        {stock < 10 && stock > 0 && (
+        {/* Only show stock count when low (under 10) */}
+        {lowStock && (
           <View style={styles.stockWarning}>
             <Text style={styles.stockWarningText}>{stock} left</Text>
           </View>
@@ -171,6 +193,23 @@ export default function ProductCard({ product }: ProductCardProps) {
           <Text style={styles.description} numberOfLines={2}>{product.description}</Text>
         )}
 
+        {/* Variant selector — base product is default, tap variant to select, tap again to deselect */}
+        {product.hasVariants && product.variants && product.variants.length > 0 && (
+          <View style={styles.variantsRow}>
+            {product.variants.filter((v: any) => v.active).map((variant: any) => (
+              <TouchableOpacity
+                key={variant._id}
+                style={[styles.variantChip, selectedVariant?._id === variant._id && styles.variantChipActive]}
+                onPress={(e) => { e.stopPropagation(); handleVariantSelect(variant); }}
+              >
+                <Text style={[styles.variantChipText, selectedVariant?._id === variant._id && styles.variantChipTextActive]}>
+                  {variant.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
         <View style={styles.priceContainer}>
           <Text style={styles.price}>R{displayPrice.toFixed(2)}</Text>
           {hasDiscount && (
@@ -178,27 +217,17 @@ export default function ProductCard({ product }: ProductCardProps) {
           )}
         </View>
         {hasDiscount && (
-          <Text style={styles.savings}>
-            Save R{(comparePrice! - displayPrice).toFixed(2)}
-          </Text>
+          <Text style={styles.savings}>Save R{(comparePrice! - displayPrice).toFixed(2)}</Text>
         )}
 
         {inStock ? (
           <View style={styles.cartActions} onStartShouldSetResponder={() => true}>
             <View style={styles.quantityControl}>
-              <TouchableOpacity
-                style={styles.quantityButton}
-                onPress={decrementQuantity}
-                disabled={quantity <= 1}
-              >
+              <TouchableOpacity style={styles.quantityButton} onPress={decrementQuantity} disabled={quantity <= 1}>
                 <Minus color="#6b7280" size={16} />
               </TouchableOpacity>
               <Text style={styles.quantityText}>{quantity}</Text>
-              <TouchableOpacity
-                style={styles.quantityButton}
-                onPress={incrementQuantity}
-                disabled={quantity >= stock}
-              >
+              <TouchableOpacity style={styles.quantityButton} onPress={incrementQuantity} disabled={quantity >= stock}>
                 <Plus color="#6b7280" size={16} />
               </TouchableOpacity>
             </View>
@@ -259,6 +288,14 @@ const styles = StyleSheet.create({
   variantName: { color: '#6b7280', fontWeight: '400' },
   unitText: { fontSize: 11, color: '#6b7280', marginBottom: 4 },
   description: { fontSize: 11, color: '#6b7280', marginBottom: 6 },
+  variantsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 8 },
+  variantChip: {
+    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6,
+    borderWidth: 1, borderColor: '#e5e7eb', backgroundColor: '#f9fafb',
+  },
+  variantChipActive: { borderColor: '#FF6B35', backgroundColor: '#fef3e9' },
+  variantChipText: { fontSize: 10, color: '#6b7280', fontWeight: '500' },
+  variantChipTextActive: { color: '#FF6B35', fontWeight: '600' },
   priceContainer: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
   price: { fontSize: 18, fontWeight: 'bold', color: '#FF6B35' },
   oldPrice: { fontSize: 12, color: '#9ca3af', textDecorationLine: 'line-through' },
