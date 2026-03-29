@@ -87,15 +87,17 @@ export interface ProductVariant {
   attributes?: { [key: string]: string };
 }
 
-export type SpecialType = 
+export type SpecialType =
   | 'percentage_off'
   | 'amount_off'
   | 'buy_x_get_y'
   | 'multibuy'
   | 'bundle'
-  | 'fixed_price';
+  | 'fixed_price'
+  | 'conditional_add_on_price';
 
 export interface SpecialCondition {
+  // buy_x_get_y
   buyProductId?: string;
   buyProductVariantId?: string;
   buyQuantity?: number;
@@ -103,19 +105,37 @@ export interface SpecialCondition {
   getProductVariantId?: string;
   getQuantity?: number;
   getDiscount?: number;
+
+  // multibuy
   requiredQuantity?: number;
   specialPrice?: number;
+
+  // bundle
   bundleProducts?: {
     productId: string;
     variantId?: string;
     quantity: number;
   }[];
   bundlePrice?: number;
+
+  // percentage_off / amount_off
   discountPercentage?: number;
   discountAmount?: number;
-  newPrice?: number;
-  minimumPurchase?: number;
   maximumDiscount?: number;
+
+  // fixed_price
+  newPrice?: number;
+
+  // conditional_add_on_price
+  triggerProductId?: string;
+  triggerQuantity?: number;
+  triggerPrice?: number;
+  targetProductId?: string;
+  targetQuantity?: number;
+  overridePrice?: number;
+
+  // shared / misc
+  minimumPurchase?: number;
   limitPerCustomer?: number;
   applyToAll?: boolean;
 }
