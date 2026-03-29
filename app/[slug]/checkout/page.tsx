@@ -438,7 +438,7 @@ export default function CheckoutPage() {
 
             {!user ? (
               <Link
-                href={`/login?redirect=/${branch.slug}/checkout`}
+  href={`/${branch.slug}/login?redirect=checkout`}
                 className="bg-white rounded-2xl p-8 border-2 border-gray-200 hover:border-brand-orange transition-colors text-left group"
               >
                 <User className="w-12 h-12 text-gray-400 group-hover:text-brand-orange mb-4" />
@@ -688,7 +688,7 @@ export default function CheckoutPage() {
                     </label>
                   )}
 
-                  <label className="flex items-center space-x-3 p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand-orange transition-colors opacity-50">
+                  {/*<label className="flex items-center space-x-3 p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand-orange transition-colors opacity-50">
                     <input
                       type="radio"
                       name="payment"
@@ -700,7 +700,7 @@ export default function CheckoutPage() {
                       <p className="font-semibold text-brand-black">EFT / Bank Transfer</p>
                       <p className="text-sm text-gray-600">Coming Soon</p>
                     </div>
-                  </label>
+                  </label>*/}
                 </div>
               </div>
 

@@ -5,15 +5,6 @@ import Link from 'next/link';
 import { ShoppingCart, Plus, Minus, Package, Check, Tag } from 'lucide-react';
 import { useCartStore } from '@/lib/store';
 import { useBranch } from '@/lib/branch-context';
-import {
-  getEffectivePrice,
-  getCompareAtPrice,
-  getDiscountPercentage,
-  getPrimaryImage,
-  getStockLevel,
-  isInStock,
-  isLowStock,
-} from '@/lib/product-utils';
 
 interface ProductVariant {
   _id?: string;
@@ -26,6 +17,9 @@ interface ProductVariant {
   stockLevel: number;
   images: string[];
   active: boolean;
+  description?: string;
+  unit?: string;
+  weight?: number;
 }
 
 interface Special {
@@ -37,7 +31,6 @@ interface Special {
   active: boolean;
 }
 
-// Loose interface that any page's local Product type can satisfy
 export interface ProductCardProduct {
   _id: string;
   name: string;
@@ -57,7 +50,7 @@ export interface ProductCardProduct {
   unit?: string;
   unitQuantity?: number;
   sku?: string;
-  lowStockThreshold?: number; // optional — defaults to 5 internally
+  lowStockThreshold?: number;
   featured?: boolean;
   branchId?: string;
   createdAt?: Date | string;
@@ -70,11 +63,8 @@ interface ProductCardProps {
 
 export default function ProductCard({ product }: ProductCardProps) {
   const { branch } = useBranch();
-  const [selectedVariant, setSelectedVariant] = useState<ProductVariant | undefined>(
-    product.hasVariants && product.variants && product.variants.length > 0 
-      ? product.variants.find(v => v.active) || product.variants[0]
-      : undefined
-  );
+
+  const [selectedVariant, setSelectedVariant] = useState<ProductVariant | undefined>(undefined);
   const [special, setSpecial] = useState<Special | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [imgError, setImgError] = useState(false);
@@ -99,38 +89,53 @@ export default function ProductCard({ product }: ProductCardProps) {
     }
   };
 
-  // Normalize to satisfy product-utils which requires lowStockThreshold
-  const normalizedProduct = { ...product, lowStockThreshold: product.lowStockThreshold ?? 5 };
+  // ── Derived display values ──────────────────────────────────────────────────
+  const displayName = selectedVariant ? selectedVariant.name : product.name;
 
-  const displayPrice = getEffectivePrice(normalizedProduct as any, selectedVariant);
-  const comparePrice = getCompareAtPrice(normalizedProduct as any, selectedVariant);
-  const hasDiscount = comparePrice && comparePrice > displayPrice;
-  const discountPercent = getDiscountPercentage(normalizedProduct as any, selectedVariant);
-  const primaryImage = getPrimaryImage(normalizedProduct as any, selectedVariant);
-  const stock = getStockLevel(normalizedProduct as any, selectedVariant);
-  const inStock = isInStock(normalizedProduct as any, selectedVariant);
-  const lowStock = isLowStock(normalizedProduct as any, selectedVariant);
+  const displayDescription = selectedVariant?.description
+    ? selectedVariant.description
+    : product.description;
+
+  const displayPrice = selectedVariant
+    ? (selectedVariant.specialPrice || selectedVariant.price || product.price)
+    : (product.specialPrice || product.price);
+
+  const comparePrice = selectedVariant
+    ? (selectedVariant.compareAtPrice || product.compareAtPrice)
+    : product.compareAtPrice;
+
+  const hasDiscount = !!(comparePrice && comparePrice > displayPrice);
+
+  const discountPercent = hasDiscount
+    ? Math.round(((comparePrice! - displayPrice) / comparePrice!) * 100)
+    : 0;
+
+  const primaryImage = selectedVariant?.images?.length
+    ? selectedVariant.images[0]
+    : (product.images?.[0] || '');
+
+  const stock = selectedVariant ? selectedVariant.stockLevel : product.stockLevel;
+  const inStock = stock > 0;
+  const lowStock = stock > 0 && stock <= 10;
+
+  const displayUnit = selectedVariant?.unit || product.unit;
+  const displayWeight = selectedVariant?.weight;
+  const displaySize = displayWeight && displayUnit
+    ? `${displayWeight}${displayUnit}`
+    : (product.unitQuantity && product.unit ? `${product.unitQuantity}${product.unit}` : '');
+  // ───────────────────────────────────────────────────────────────────────────
 
   const getSpecialBadge = () => {
     if (!special || !special.active) return null;
-
     if (special.badgeText) return special.badgeText;
-
     switch (special.type) {
-      case 'percentage_off':
-        return `${special.conditions.discountPercentage}% OFF`;
-      case 'amount_off':
-        return `R${special.conditions.discountAmount} OFF`;
-      case 'fixed_price':
-        return `NOW R${special.conditions.newPrice}`;
-      case 'multibuy':
-        return `${special.conditions.requiredQuantity} FOR R${special.conditions.specialPrice}`;
-      case 'buy_x_get_y':
-        return `BUY ${special.conditions.buyQuantity} GET ${special.conditions.getQuantity}`;
-      case 'bundle':
-        return 'BUNDLE DEAL';
-      default:
-        return 'SPECIAL';
+      case 'percentage_off': return `${special.conditions.discountPercentage}% OFF`;
+      case 'amount_off': return `R${special.conditions.discountAmount} OFF`;
+      case 'fixed_price': return `NOW R${special.conditions.newPrice}`;
+      case 'multibuy': return `${special.conditions.requiredQuantity} FOR R${special.conditions.specialPrice}`;
+      case 'buy_x_get_y': return `BUY ${special.conditions.buyQuantity} GET ${special.conditions.getQuantity}`;
+      case 'bundle': return 'BUNDLE DEAL';
+      default: return 'SPECIAL';
     }
   };
 
@@ -139,16 +144,15 @@ export default function ProductCard({ product }: ProductCardProps) {
     addItem({
       id: product._id,
       variantId: selectedVariant?._id,
-      name: product.name,
+      name: displayName,
       variantName: selectedVariant?.name,
       price: displayPrice,
       image: primaryImage,
-      quantity: quantity,
+      quantity,
       sku: selectedVariant?.sku || product.sku || product.slug,
       appliedSpecialId: special?._id,
       originalPrice: comparePrice,
     });
-    
     setJustAdded(true);
     setTimeout(() => {
       setJustAdded(false);
@@ -158,38 +162,34 @@ export default function ProductCard({ product }: ProductCardProps) {
 
   const incrementQuantity = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (quantity < stock) {
-      setQuantity(q => q + 1);
-    }
+    if (quantity < stock) setQuantity(q => q + 1);
   };
 
   const decrementQuantity = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (quantity > 1) {
-      setQuantity(q => q - 1);
-    }
+    if (quantity > 1) setQuantity(q => q - 1);
   };
 
   const handleVariantChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     e.preventDefault();
     const variantId = e.target.value;
-    const variant = product.variants?.find(v => v._id === variantId);
-    setSelectedVariant(variant);
+    if (!variantId) {
+      setSelectedVariant(undefined);
+    } else {
+      const variant = product.variants?.find(v => v._id === variantId);
+      setSelectedVariant(variant);
+    }
+    setImgError(false);
     setQuantity(1);
   };
 
   const specialBadge = getSpecialBadge();
-
   const productUrl = branch ? `/${branch.slug}/shop/${product.slug}` : `/shop/${product.slug}`;
 
-  const displaySize = product.unitQuantity && product.unit 
-    ? `${product.unitQuantity}${product.unit}` 
-    : '';
-
-  const truncatedDescription = product.description 
-    ? product.description.length > 60 
-      ? product.description.substring(0, 60) + '...' 
-      : product.description
+  const truncatedDescription = displayDescription
+    ? displayDescription.length > 60
+      ? displayDescription.substring(0, 60) + '...'
+      : displayDescription
     : null;
 
   return (
@@ -206,11 +206,12 @@ export default function ProductCard({ product }: ProductCardProps) {
         </div>
       )}
 
+      {/* Image */}
       <div className="relative aspect-[4/3] overflow-hidden bg-gray-100 flex-shrink-0">
         {primaryImage && !imgError ? (
           <img
             src={primaryImage}
-            alt={product.name}
+            alt={displayName}
             className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
             onError={() => setImgError(true)}
             loading="lazy"
@@ -223,7 +224,8 @@ export default function ProductCard({ product }: ProductCardProps) {
             </div>
           </div>
         )}
-        
+
+        {/* Badges */}
         <div className="absolute top-2 left-2 flex flex-col space-y-1">
           {specialBadge && (
             <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg flex items-center space-x-1">
@@ -231,22 +233,17 @@ export default function ProductCard({ product }: ProductCardProps) {
               <span>{specialBadge}</span>
             </span>
           )}
-          
           {!specialBadge && product.onSpecial && (
-            <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-              SPECIAL
-            </span>
+            <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">SPECIAL</span>
           )}
-          
           {hasDiscount && (
             <span className="bg-brand-orange text-white text-xs font-bold px-2 py-0.5 rounded-full">
               {discountPercent}% OFF
             </span>
           )}
-
           {product.hasVariants && product.variants && product.variants.length > 1 && (
             <span className="bg-purple-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-              {product.variants.length} OPTIONS
+              {product.variants.length + 1} OPTIONS
             </span>
           )}
         </div>
@@ -260,25 +257,25 @@ export default function ProductCard({ product }: ProductCardProps) {
         )}
       </div>
 
+      {/* Content */}
       <div className="p-3 md:p-4 flex flex-col flex-grow">
+
+        {/* Name + size — fixed area */}
         <div className="mb-2">
           <h3 className="text-sm md:text-base font-semibold text-brand-black line-clamp-2 group-hover:text-brand-orange transition-colors">
-            {product.name}
-            {selectedVariant && (
-              <span className="text-gray-500 font-normal"> - {selectedVariant.name}</span>
-            )}
+            {displayName}
           </h3>
           {displaySize && (
             <p className="text-xs text-gray-500 mt-0.5">{displaySize}</p>
           )}
         </div>
 
-        {truncatedDescription && (
-          <p className="text-xs text-gray-600 mb-2 line-clamp-2">
-            {truncatedDescription}
-          </p>
-        )}
+        {/* Description — fixed 2-line clamp so height is stable */}
+        <p className="text-xs text-gray-600 mb-2 line-clamp-2 min-h-[2rem]">
+          {truncatedDescription || ''}
+        </p>
 
+        {/* Variant selector */}
         {product.hasVariants && product.variants && product.variants.length > 0 && (
           <div className="mb-2" onClick={(e) => e.preventDefault()}>
             <select
@@ -286,39 +283,46 @@ export default function ProductCard({ product }: ProductCardProps) {
               onChange={handleVariantChange}
               className="w-full text-xs md:text-sm border border-gray-300 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-brand-orange focus:border-transparent bg-white"
             >
+              <option value="">
+                {product.name} — R{product.price.toFixed(2)}
+              </option>
               {product.variants.filter(v => v.active).map((variant) => (
                 <option key={variant._id} value={variant._id}>
                   {variant.name}
-                  {variant.price && ` - R${variant.price.toFixed(2)}`}
-                  {variant.stockLevel === 0 && ' (Out of stock)'}
+                  {variant.price ? ` — R${(variant.specialPrice || variant.price).toFixed(2)}` : ''}
+                  {variant.stockLevel === 0 ? ' (Out of stock)' : ''}
                 </option>
               ))}
             </select>
           </div>
         )}
 
+        {/* Spacer to push price + cart to bottom */}
+        <div className="flex-grow" />
+
+        {/* Price — always at bottom, single line */}
         <div className="mb-2">
-          <div className="flex items-baseline space-x-2">
-            <span className="text-lg md:text-xl font-bold text-brand-orange">
+          <div className="flex items-baseline space-x-2 flex-wrap">
+            <span className="text-lg md:text-xl font-bold text-brand-orange whitespace-nowrap">
               R{displayPrice.toFixed(2)}
             </span>
             {comparePrice && comparePrice > displayPrice && (
-              <span className="text-xs text-gray-500 line-through">
+              <span className="text-xs text-gray-500 line-through whitespace-nowrap">
                 R{comparePrice.toFixed(2)}
               </span>
             )}
+            {hasDiscount && (
+              <span className="text-xs text-green-600 font-semibold whitespace-nowrap">
+                Save R{(comparePrice! - displayPrice).toFixed(2)}
+              </span>
+            )}
           </div>
-          {hasDiscount && (
-            <p className="text-xs text-green-600 font-semibold">
-              Save R{(comparePrice! - displayPrice).toFixed(2)}
-            </p>
-          )}
         </div>
 
         {special && special.type === 'buy_x_get_y' && (
           <div className="mb-2 bg-blue-50 border border-blue-200 rounded-lg p-2">
             <p className="text-xs text-blue-900 font-semibold">
-              Buy {special.conditions.buyQuantity}, Get {special.conditions.getQuantity} 
+              Buy {special.conditions.buyQuantity}, Get {special.conditions.getQuantity}
               {special.conditions.getDiscount === 100 ? ' FREE!' : ` at ${special.conditions.getDiscount}% off`}
             </p>
           </div>
@@ -332,8 +336,7 @@ export default function ProductCard({ product }: ProductCardProps) {
           </div>
         )}
 
-        <div className="flex-grow" />
-
+        {/* Add to cart */}
         {inStock ? (
           <div className="flex items-center space-x-2 mt-auto" onClick={(e) => e.preventDefault()}>
             <div className="flex items-center border border-gray-300 rounded-lg">
@@ -353,7 +356,6 @@ export default function ProductCard({ product }: ProductCardProps) {
                 <Plus className="w-3 h-3 md:w-4 md:h-4 text-gray-600" />
               </button>
             </div>
-
             <button
               onClick={handleAddToCart}
               className="flex-1 flex items-center justify-center space-x-1 bg-brand-orange hover:bg-orange-600 text-white py-2 px-2 md:px-3 rounded-lg transition-colors"

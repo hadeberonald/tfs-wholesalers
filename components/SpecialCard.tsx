@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ShoppingCart, Plus, Minus, Tag, Star } from 'lucide-react';
+import { ShoppingCart, Plus, Minus, Tag, Star, CheckCircle, XCircle } from 'lucide-react';
 import { useCartStore } from '@/lib/store';
 import { useBranch } from '@/lib/branch-context';
 import toast from 'react-hot-toast';
@@ -40,10 +40,12 @@ interface SpecialCardProps {
 export default function SpecialCard({ special }: SpecialCardProps) {
   const { branch } = useBranch();
   const [product, setProduct] = useState<Product | null>(null);
-  // ── For multibuy: track BUNDLE count, not raw item count ──────────────────
+  const [addonProduct, setAddonProduct] = useState<Product | null>(null);
   const [bundleQty, setBundleQty] = useState(1);
   const [imgError, setImgError] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Modal shown after trigger product is added to cart
+  const [showAddonModal, setShowAddonModal] = useState(false);
   const addItem = useCartStore((state) => state.addItem);
 
   useEffect(() => {
@@ -55,8 +57,11 @@ export default function SpecialCard({ special }: SpecialCardProps) {
       setLoading(true);
       try {
         let productId = special.productId || special.productIds?.[0];
+
         if (special.type === 'buy_x_get_y' && special.conditions.buyProductId) {
           productId = special.conditions.buyProductId;
+        } else if (special.type === 'conditional_add_on_price' && special.conditions.triggerProductId) {
+          productId = special.conditions.triggerProductId;
         }
 
         if (!productId) return;
@@ -67,8 +72,15 @@ export default function SpecialCard({ special }: SpecialCardProps) {
         const data = await res.json();
         if (!cancelled) {
           setProduct(data.product);
-          // Always start at 1 bundle for multibuy, 1 item for others
           setBundleQty(1);
+        }
+
+        // For conditional_add_on_price: also fetch the add-on product for the prompt
+        if (!cancelled && special.type === 'conditional_add_on_price' && special.conditions.targetProductId) {
+          fetch(`/api/products/${special.conditions.targetProductId}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => { if (d?.product && !cancelled) setAddonProduct(d.product); })
+            .catch(() => null);
         }
       } catch (error) {
         console.error('Failed to fetch product for special');
@@ -85,13 +97,14 @@ export default function SpecialCard({ special }: SpecialCardProps) {
   const getSpecialBadge = () => {
     if (special.badgeText) return special.badgeText;
     switch (special.type) {
-      case 'percentage_off': return `${special.conditions.discountPercentage}% OFF`;
-      case 'amount_off':     return `R${special.conditions.discountAmount} OFF`;
-      case 'fixed_price':    return `NOW R${special.conditions.newPrice}`;
-      case 'multibuy':       return `${special.conditions.requiredQuantity} FOR R${special.conditions.specialPrice}`;
-      case 'buy_x_get_y':   return `BUY ${special.conditions.buyQuantity} GET ${special.conditions.getQuantity}`;
-      case 'bundle':         return 'BUNDLE DEAL';
-      default:               return 'SPECIAL';
+      case 'percentage_off':           return `${special.conditions.discountPercentage}% OFF`;
+      case 'amount_off':               return `R${special.conditions.discountAmount} OFF`;
+      case 'fixed_price':              return `NOW R${special.conditions.newPrice}`;
+      case 'multibuy':                 return `${special.conditions.requiredQuantity} FOR R${special.conditions.specialPrice}`;
+      case 'buy_x_get_y':              return `BUY ${special.conditions.buyQuantity} GET ${special.conditions.getQuantity}`;
+      case 'bundle':                   return 'BUNDLE DEAL';
+      case 'conditional_add_on_price': return `UNLOCK @ R${special.conditions.overridePrice}`;
+      default:                         return 'SPECIAL';
     }
   };
 
@@ -102,12 +115,13 @@ export default function SpecialCard({ special }: SpecialCardProps) {
         const off = (product.price * (special.conditions.discountPercentage || 0)) / 100;
         return product.price - Math.min(off, special.conditions.maximumDiscount || Infinity);
       }
-      case 'amount_off':  return Math.max(0, product.price - (special.conditions.discountAmount || 0));
-      case 'fixed_price': return special.conditions.newPrice || product.price;
-      case 'multibuy':    return special.conditions.specialPrice || product.price;
-      case 'buy_x_get_y': return product.price;
-      case 'bundle':      return special.conditions.bundlePrice || product.price;
-      default:            return product.specialPrice || product.price;
+      case 'amount_off':               return Math.max(0, product.price - (special.conditions.discountAmount || 0));
+      case 'fixed_price':              return special.conditions.newPrice || product.price;
+      case 'multibuy':                 return special.conditions.specialPrice || product.price;
+      case 'buy_x_get_y':              return product.price;
+      case 'bundle':                   return special.conditions.bundlePrice || product.price;
+      case 'conditional_add_on_price': return special.conditions.triggerPrice ?? product.price;
+      default:                         return product.specialPrice || product.price;
     }
   };
 
@@ -118,19 +132,19 @@ export default function SpecialCard({ special }: SpecialCardProps) {
         const off = (product.price * (special.conditions.discountPercentage || 0)) / 100;
         return product.price - Math.min(off, special.conditions.maximumDiscount || Infinity);
       }
-      case 'amount_off':  return Math.max(0, product.price - (special.conditions.discountAmount || 0));
-      case 'fixed_price': return special.conditions.newPrice || product.price;
-      case 'multibuy':    return (special.conditions.specialPrice || product.price) / (special.conditions.requiredQuantity || 1);
-      case 'buy_x_get_y': return product.price;
-      case 'bundle':      return special.conditions.bundlePrice || product.price;
-      default:            return product.specialPrice || product.price;
+      case 'amount_off':               return Math.max(0, product.price - (special.conditions.discountAmount || 0));
+      case 'fixed_price':              return special.conditions.newPrice || product.price;
+      case 'multibuy':                 return (special.conditions.specialPrice || product.price) / (special.conditions.requiredQuantity || 1);
+      case 'buy_x_get_y':              return product.price;
+      case 'bundle':                   return special.conditions.bundlePrice || product.price;
+      case 'conditional_add_on_price': return special.conditions.triggerPrice ?? product.price;
+      default:                         return product.specialPrice || product.price;
     }
   };
 
-  const isMultibuy = special.type === 'multibuy';
-  const bundleSize = isMultibuy ? (special.conditions.requiredQuantity || 1) : 1;
-
-  // Actual item quantity to add to cart
+  const isMultibuy  = special.type === 'multibuy';
+  const isAddonDeal = special.type === 'conditional_add_on_price';
+  const bundleSize  = isMultibuy ? (special.conditions.requiredQuantity || 1) : 1;
   const actualQuantity = isMultibuy ? bundleQty * bundleSize : bundleQty;
 
   const incrementQuantity = (e: React.MouseEvent) => {
@@ -145,10 +159,11 @@ export default function SpecialCard({ special }: SpecialCardProps) {
     if (bundleQty > 1) setBundleQty(q => q - 1);
   };
 
+  // Step 1: add the trigger product to cart, then open the add-on modal
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     if (!product) { toast.error('Product not available'); return; }
-    
+
     addItem({
       id: product._id,
       name: product.name,
@@ -162,11 +177,40 @@ export default function SpecialCard({ special }: SpecialCardProps) {
 
     if (isMultibuy) {
       toast.success(`Added ${bundleQty} bundle${bundleQty > 1 ? 's' : ''} (${actualQuantity} items) to cart!`);
+      setBundleQty(1);
+    } else if (isAddonDeal) {
+      setShowAddonModal(true);
     } else {
       toast.success(`${actualQuantity} ${product.name} added to your cart`);
+      setBundleQty(1);
     }
-    
-    setBundleQty(1);
+  };
+
+  // Step 2a: customer says yes — add the add-on at the override price
+  const handleAcceptAddon = (e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    if (!addonProduct) return;
+
+    addItem({
+      id: addonProduct._id,
+      name: addonProduct.name,
+      price: special.conditions.overridePrice,
+      image: addonProduct.images[0] || '/placeholder.png',
+      quantity: special.conditions.targetQuantity || 1,
+      sku: addonProduct.sku,
+      appliedSpecialId: special._id,
+      originalPrice: addonProduct.price,
+    });
+
+    toast.success(`${addonProduct.name} added at R${special.conditions.overridePrice}! 🎉`);
+    setShowAddonModal(false);
+  };
+
+  // Step 2b: customer says no — just confirm the trigger was added
+  const handleDeclineAddon = (e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    toast.success(`${product?.name} added to cart!`);
+    setShowAddonModal(false);
   };
 
   const badge        = getSpecialBadge();
@@ -182,12 +226,18 @@ export default function SpecialCard({ special }: SpecialCardProps) {
       return Math.max(0, product.price * reqQty - (special.conditions.specialPrice || product.price));
     }
     if (special.type === 'buy_x_get_y') return 0;
+    if (special.type === 'conditional_add_on_price') {
+      return special.conditions.triggerPrice != null
+        ? Math.max(0, product.price - special.conditions.triggerPrice)
+        : 0;
+    }
     return Math.max(0, product.price - displayPrice);
   })();
 
   const hasBanner =
     special.type === 'buy_x_get_y' ||
     special.type === 'multibuy' ||
+    special.type === 'conditional_add_on_price' ||
     (special.type === 'bundle' && savings > 0);
 
   const specialUrl = branch
@@ -263,6 +313,9 @@ export default function SpecialCard({ special }: SpecialCardProps) {
                 <span className="text-lg font-bold text-brand-orange">
                   R{displayPrice.toFixed(2)}
                 </span>
+                {savings > 0 && (
+                  <span className="text-xs text-gray-400 line-through">R{product.price.toFixed(2)}</span>
+                )}
               </div>
 
               {special.type === 'buy_x_get_y' && (
@@ -292,10 +345,18 @@ export default function SpecialCard({ special }: SpecialCardProps) {
                 </div>
               )}
 
+              {special.type === 'conditional_add_on_price' && (
+                <div className="bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5">
+                  <p className="text-[10px] text-amber-800 font-semibold truncate">
+                    🔓 Unlocks add-on @ R{special.conditions.overridePrice}
+                  </p>
+                </div>
+              )}
+
               {!hasBanner && <div className="h-[1.625rem]" />}
             </div>
 
-            {/* Cart actions */}
+            {/* ── Cart actions — identical UI for all special types ──────── */}
             {inStock ? (
               <div className="flex items-center gap-2" onClick={(e) => e.preventDefault()}>
                 <div className="flex items-center border border-gray-200 rounded-lg">
@@ -338,6 +399,83 @@ export default function SpecialCard({ special }: SpecialCardProps) {
           </>
         )}
       </div>
+
+      {/* ── Add-On Modal ─────────────────────────────────────────────────── */}
+      {showAddonModal && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden">
+            {/* Header */}
+            <div className="bg-amber-50 border-b border-amber-200 px-5 py-4 flex items-start justify-between">
+              <div>
+                <p className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-0.5">🔓 Special Unlocked!</p>
+                <h2 className="text-lg font-bold text-brand-black leading-tight">Would you like to add this?</h2>
+              </div>
+              <button
+                onClick={handleDeclineAddon}
+                className="p-1 text-gray-400 hover:text-gray-600 transition-colors ml-3 flex-shrink-0"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Add-on product details */}
+            <div className="p-5">
+              <div className="flex items-start gap-3 mb-5">
+                {addonProduct?.images[0] ? (
+                  <div className="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 border-2 border-amber-200">
+                    <img src={addonProduct.images[0]} alt={addonProduct.name} className="w-full h-full object-cover" />
+                  </div>
+                ) : (
+                  <div className="w-16 h-16 rounded-xl bg-amber-50 flex items-center justify-center flex-shrink-0 border-2 border-amber-200">
+                    <Tag className="w-6 h-6 text-amber-400" />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-0.5">Add-On Product</p>
+                  <h3 className="font-bold text-base text-brand-black leading-tight mb-1">
+                    {addonProduct?.name ?? 'Unlocked Add-On'}
+                  </h3>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-xl font-bold text-brand-orange">
+                      R{Number(special.conditions.overridePrice).toFixed(2)}
+                    </span>
+                    {addonProduct && addonProduct.price > special.conditions.overridePrice && (
+                      <span className="text-sm text-gray-400 line-through">
+                        R{addonProduct.price.toFixed(2)}
+                      </span>
+                    )}
+                  </div>
+                  {addonProduct && addonProduct.price > special.conditions.overridePrice && (
+                    <p className="text-xs text-green-600 font-semibold mt-0.5">
+                      Save R{(addonProduct.price - special.conditions.overridePrice).toFixed(2)}!
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div className="space-y-2">
+                <button
+                  onClick={handleAcceptAddon}
+                  className="w-full flex items-center justify-center gap-2 bg-brand-orange hover:bg-orange-600 text-white font-bold py-3 rounded-xl transition-colors"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  Yes, add for R{Number(special.conditions.overridePrice).toFixed(2)}!
+                </button>
+                <button
+                  onClick={handleDeclineAddon}
+                  className="w-full flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 rounded-xl transition-colors"
+                >
+                  No thanks
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

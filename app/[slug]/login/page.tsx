@@ -5,7 +5,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
-import { Lock, Mail, AlertCircle } from 'lucide-react';
+import { Lock, Mail, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 function LoginForm() {
@@ -14,6 +14,7 @@ function LoginForm() {
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [branch, setBranch] = useState<any>(null);
@@ -31,7 +32,6 @@ function LoginForm() {
 
   useEffect(() => {
     if (user && branch) {
-      // User is already logged in, redirect them
       if (redirect) {
         router.push(`/${slug}/${redirect}`);
       } else {
@@ -71,7 +71,6 @@ function LoginForm() {
       await login(email, password, slug);
       toast.success('Welcome back!');
       
-      // Redirect after login
       if (redirect) {
         router.push(`/${slug}/${redirect}`);
       } else {
@@ -115,10 +114,7 @@ function LoginForm() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center px-4 py-12">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-brand-orange rounded-2xl mb-4">
-            <span className="text-white font-bold text-2xl">TFS</span>
-          </div>
-          <h1 className="text-3xl font-bold text-brand-black mb-2">Welcome Back</h1>
+          <h1 className="text-3xl font-bold text-brand-black mb-2 mt-8">Welcome Back</h1>
           <p className="text-gray-600">Sign in to {branch.name || 'TFS Wholesalers'}</p>
         </div>
 
@@ -131,16 +127,17 @@ function LoginForm() {
               </div>
             )}
 
+            {/* Email */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Email Address
               </label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                
                 <input
                   type="email"
                   required
-                  className="input-field pl-10"
+                  className="input-field pl-10 pr-4"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
@@ -149,21 +146,35 @@ function LoginForm() {
               </div>
             </div>
 
+            {/* Password */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Password
               </label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   required
-                  className="input-field pl-10"
+                  className="input-field pl-10 pr-10"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter your password"
                   autoComplete="current-password"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                  tabIndex={-1}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? (
+                    <EyeOff className="w-5 h-5" />
+                  ) : (
+                    <Eye className="w-5 h-5" />
+                  )}
+                </button>
               </div>
             </div>
 

@@ -18,18 +18,17 @@ export default function Header() {
   const router = useRouter();
   const pathname = usePathname();
   
-  // Extract slug from URL pathname (like AdminHeader does)
   const slugFromUrl = useMemo(() => {
     const pathParts = pathname.split('/').filter(Boolean);
     if (pathParts.length > 0) {
       const firstPart = pathParts[0];
-      // Check if this is a branch route (not /admin, /login, etc.)
       if (!['admin', 'login', 'register', 'super-admin', 'select-branch'].includes(firstPart)) {
         return firstPart;
       }
     }
     return null;
   }, [pathname]);
+
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isBranchMenuOpen, setIsBranchMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
@@ -38,11 +37,9 @@ export default function Header() {
   const branchMenuRef = useRef<HTMLDivElement>(null);
   
   const cartItems = useCartStore((state) => state.items);
-  // ── Count total quantity of REAL items only (excludes auto-added bonus rows) ──
   const cartItemCount = cartItems.reduce((sum, item) => item.autoAdded ? sum : sum + item.quantity, 0);
   const { user, logout } = useAuth();
 
-  // Detect current branch from URL
   useEffect(() => {
     if (slugFromUrl) {
       fetchBranches(slugFromUrl);
@@ -59,7 +56,6 @@ export default function Header() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Close branch menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (branchMenuRef.current && !branchMenuRef.current.contains(event.target as Node)) {
@@ -86,7 +82,6 @@ export default function Header() {
           const branch = data.branches.find((b: Branch) => b.slug === currentSlug);
           setCurrentBranch(branch || null);
         } else {
-          // Check localStorage for saved branch
           const savedBranch = localStorage.getItem('selectedBranch');
           if (savedBranch) {
             const branch = data.branches.find((b: Branch) => b.slug === savedBranch);
@@ -103,19 +98,21 @@ export default function Header() {
     localStorage.setItem('selectedBranch', branchSlug);
     setIsBranchMenuOpen(false);
     
-    // Redirect to new branch
     const pathParts = pathname.split('/').filter(Boolean);
     if (pathParts.length > 0 && branches.some(b => b.slug === pathParts[0])) {
-      // Replace current branch in URL
       pathParts[0] = branchSlug;
       router.push('/' + pathParts.join('/'));
     } else {
-      // Go to branch home
       router.push(`/${branchSlug}`);
     }
   };
 
-  // Don't show branch selector on certain pages
+  const handleLogout = () => {
+    logout();
+    const destination = slugFromUrl ? `/${slugFromUrl}/login` : '/select-branch';
+    router.push(destination);
+  };
+
   const hideBranchSelector = pathname.startsWith('/super-admin') || 
                              pathname.startsWith('/select-branch') ||
                              pathname === '/login' || 
@@ -146,7 +143,6 @@ export default function Header() {
                 <ChevronDown className={`w-4 h-4 text-gray-600 transition-transform ${isBranchMenuOpen ? 'rotate-180' : ''}`} />
               </button>
 
-              {/* Branch Dropdown */}
               {isBranchMenuOpen && (
                 <div className="absolute top-full mt-2 left-0 bg-white rounded-xl shadow-2xl border border-gray-200 py-2 min-w-[200px] animate-fade-in">
                   <div className="px-4 py-2 border-b border-gray-100">
@@ -233,7 +229,7 @@ export default function Header() {
                 </Link>
 
                 <button
-                  onClick={() => logout()}
+                  onClick={handleLogout}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors hidden sm:flex"
                   aria-label="Logout"
                 >
@@ -371,8 +367,8 @@ export default function Header() {
                   </Link>
                   <button
                     onClick={() => {
-                      logout();
                       setIsMenuOpen(false);
+                      handleLogout();
                     }}
                     className="flex items-center space-x-2 py-2 text-brand-black hover:text-brand-orange transition-colors font-medium w-full text-left text-sm"
                   >

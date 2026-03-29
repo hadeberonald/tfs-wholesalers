@@ -13,7 +13,8 @@ type SpecialType =
   | 'buy_x_get_y'
   | 'multibuy'
   | 'bundle'
-  | 'fixed_price';
+  | 'fixed_price'
+  | 'conditional_add_on_price';
 
 interface SpecialCondition {
   buyProductId?: string;
@@ -38,6 +39,12 @@ interface SpecialCondition {
   maximumDiscount?: number;
   limitPerCustomer?: number;
   applyToAll?: boolean;
+  triggerProductId?: string;
+  triggerQuantity?: number;
+  triggerPrice?: number;
+  targetProductId?: string;
+  targetQuantity?: number;
+  overridePrice?: number;
 }
 
 interface Special {
@@ -82,6 +89,7 @@ const SPECIAL_TYPES = [
   { value: 'multibuy', label: 'Multibuy (e.g., 2 for R50)' },
   { value: 'bundle', label: 'Bundle Deal (e.g., Buy together save)' },
   { value: 'fixed_price', label: 'Fixed Price (e.g., Now R79.99)' },
+  { value: 'conditional_add_on_price', label: 'Conditional Add-On Price (Upsell Unlock)' },
 ];
 
 export default function AdminSpecialsPage() {
@@ -104,6 +112,8 @@ export default function AdminSpecialsPage() {
   const [buyProductFilterTerm, setBuyProductFilterTerm] = useState('');
   const [getProductFilterTerm, setGetProductFilterTerm] = useState('');
   const [bundleFilterTerms, setBundleFilterTerms] = useState<{[key: number]: string}>({});
+  const [triggerProductFilterTerm, setTriggerProductFilterTerm] = useState('');
+  const [targetProductFilterTerm, setTargetProductFilterTerm] = useState('');
   
   // Pagination for products
   const [productPage, setProductPage] = useState(1);
@@ -141,6 +151,12 @@ export default function AdminSpecialsPage() {
       minimumPurchase: '',
       maximumDiscount: '',
       limitPerCustomer: '',
+      triggerProductId: '',
+      triggerQuantity: '',
+      triggerPrice: '',
+      targetProductId: '',
+      targetQuantity: '',
+      overridePrice: '',
     }
   });
 
@@ -279,12 +295,20 @@ export default function AdminSpecialsPage() {
         minimumPurchase: '',
         maximumDiscount: '',
         limitPerCustomer: '',
+        triggerProductId: '',
+        triggerQuantity: '',
+        triggerPrice: '',
+        targetProductId: '',
+        targetQuantity: '',
+        overridePrice: '',
       }
     });
     setProductFilterTerm('');
     setBuyProductFilterTerm('');
     setGetProductFilterTerm('');
     setBundleFilterTerms({});
+    setTriggerProductFilterTerm('');
+    setTargetProductFilterTerm('');
   };
 
   const handleEdit = (special: Special) => {
@@ -320,6 +344,12 @@ export default function AdminSpecialsPage() {
         minimumPurchase: special.conditions.minimumPurchase?.toString() || '',
         maximumDiscount: special.conditions.maximumDiscount?.toString() || '',
         limitPerCustomer: special.conditions.limitPerCustomer?.toString() || '',
+        triggerProductId: special.conditions.triggerProductId || '',
+        triggerQuantity: special.conditions.triggerQuantity?.toString() || '',
+        triggerPrice: special.conditions.triggerPrice?.toString() || '',
+        targetProductId: special.conditions.targetProductId || '',
+        targetQuantity: special.conditions.targetQuantity?.toString() || '',
+        overridePrice: special.conditions.overridePrice?.toString() || '',
       }
     });
     setShowModal(true);
@@ -447,6 +477,27 @@ export default function AdminSpecialsPage() {
           conditions.bundleProducts = formData.conditions.bundleProducts;
           conditions.bundlePrice = parseFloat(formData.conditions.bundlePrice);
           break;
+
+        case 'conditional_add_on_price':
+          if (
+            !formData.conditions.triggerProductId ||
+            !formData.conditions.triggerQuantity ||
+            !formData.conditions.triggerPrice ||
+            !formData.conditions.targetProductId ||
+            !formData.conditions.targetQuantity ||
+            !formData.conditions.overridePrice
+          ) {
+            toast.error('Please fill in all Conditional Add-On Price fields');
+            setSaving(false);
+            return;
+          }
+          conditions.triggerProductId = formData.conditions.triggerProductId;
+          conditions.triggerQuantity = parseInt(formData.conditions.triggerQuantity);
+          conditions.triggerPrice = parseFloat(formData.conditions.triggerPrice);
+          conditions.targetProductId = formData.conditions.targetProductId;
+          conditions.targetQuantity = parseInt(formData.conditions.targetQuantity);
+          conditions.overridePrice = parseFloat(formData.conditions.overridePrice);
+          break;
       }
 
       if (formData.conditions.minimumPurchase) {
@@ -512,6 +563,7 @@ export default function AdminSpecialsPage() {
       case 'fixed_price': return `NOW R${special.conditions.newPrice}`;
       case 'multibuy': return `${special.conditions.requiredQuantity} FOR R${special.conditions.specialPrice}`;
       case 'buy_x_get_y': return `BUY ${special.conditions.buyQuantity} GET ${special.conditions.getQuantity}`;
+      case 'conditional_add_on_price': return `UNLOCK @ R${special.conditions.overridePrice}`;
       default: return 'SPECIAL';
     }
   };
@@ -909,6 +961,145 @@ export default function AdminSpecialsPage() {
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Bundle Price (R) *</label>
                         <input type="number" step="0.01" required className="input-field" value={formData.conditions.bundlePrice} onChange={(e) => setFormData({ ...formData, conditions: { ...formData.conditions, bundlePrice: e.target.value } })} placeholder="150.00" />
+                      </div>
+                    </div>
+                  )}
+
+                  {formData.type === 'conditional_add_on_price' && (
+                    <div className="space-y-4">
+                      <div className="bg-amber-50 p-4 rounded-lg">
+                        <p className="text-sm text-amber-900 font-semibold mb-2">Conditional Add-On Price (Upsell Unlock)</p>
+                        <p className="text-xs text-amber-700">Example: Buy Kellogg's Corn Flakes → unlock Milk (6x1L) for R69.99. The add-on product is optional and not auto-added to cart.</p>
+                      </div>
+
+                      <div className="grid md:grid-cols-3 gap-4">
+                        {/* Trigger Product */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Trigger Product (Customer Must Buy) *</label>
+                          <input
+                            type="text"
+                            className="input-field mb-2"
+                            value={triggerProductFilterTerm}
+                            onChange={(e) => setTriggerProductFilterTerm(e.target.value)}
+                            placeholder="Filter products..."
+                          />
+                          <select
+                            required
+                            className="input-field h-40 overflow-y-auto"
+                            size={8}
+                            value={formData.conditions.triggerProductId}
+                            onChange={(e) => setFormData({ ...formData, conditions: { ...formData.conditions, triggerProductId: e.target.value } })}
+                          >
+                            <option value="">Select trigger product</option>
+                            {products
+                              .filter(p => p.name.toLowerCase().includes(triggerProductFilterTerm.toLowerCase()))
+                              .map((p) => (
+                                <option key={p._id} value={p._id}>{p.name} {p.price ? `- R${p.price.toFixed(2)}` : ''}</option>
+                              ))}
+                          </select>
+                          <div className="flex items-center justify-between text-xs text-gray-500 mt-1">
+                            <span>{products.filter(p => p.name.toLowerCase().includes(triggerProductFilterTerm.toLowerCase())).length} products shown</span>
+                            {hasMoreProducts && (
+                              <button type="button" onClick={loadMoreProducts} disabled={loadingMoreProducts} className="text-brand-orange hover:text-orange-600 font-medium">
+                                {loadingMoreProducts ? 'Loading...' : 'Load More'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Trigger Quantity *</label>
+                          <input
+                            type="number"
+                            min="1"
+                            required
+                            className="input-field"
+                            value={formData.conditions.triggerQuantity}
+                            onChange={(e) => setFormData({ ...formData, conditions: { ...formData.conditions, triggerQuantity: e.target.value } })}
+                            placeholder="1"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Minimum quantity of trigger product required</p>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Trigger Product Price (R) *</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            required
+                            className="input-field"
+                            value={formData.conditions.triggerPrice}
+                            onChange={(e) => setFormData({ ...formData, conditions: { ...formData.conditions, triggerPrice: e.target.value } })}
+                            placeholder="59.99"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Special price customer pays for the trigger product</p>
+                        </div>
+                      </div>
+
+                      <div className="grid md:grid-cols-3 gap-4">
+                        {/* Target Product */}
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Add-On Product (Unlocked at Special Price) *</label>
+                          <input
+                            type="text"
+                            className="input-field mb-2"
+                            value={targetProductFilterTerm}
+                            onChange={(e) => setTargetProductFilterTerm(e.target.value)}
+                            placeholder="Filter products..."
+                          />
+                          <select
+                            required
+                            className="input-field h-40 overflow-y-auto"
+                            size={8}
+                            value={formData.conditions.targetProductId}
+                            onChange={(e) => setFormData({ ...formData, conditions: { ...formData.conditions, targetProductId: e.target.value } })}
+                          >
+                            <option value="">Select add-on product</option>
+                            {products
+                              .filter(p => p.name.toLowerCase().includes(targetProductFilterTerm.toLowerCase()))
+                              .map((p) => (
+                                <option key={p._id} value={p._id}>{p.name} {p.price ? `- R${p.price.toFixed(2)}` : ''}</option>
+                              ))}
+                          </select>
+                          <div className="flex items-center justify-between text-xs text-gray-500 mt-1">
+                            <span>{products.filter(p => p.name.toLowerCase().includes(targetProductFilterTerm.toLowerCase())).length} products shown</span>
+                            {hasMoreProducts && (
+                              <button type="button" onClick={loadMoreProducts} disabled={loadingMoreProducts} className="text-brand-orange hover:text-orange-600 font-medium">
+                                {loadingMoreProducts ? 'Loading...' : 'Load More'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Add-On Quantity *</label>
+                            <input
+                              type="number"
+                              min="1"
+                              required
+                              className="input-field"
+                              value={formData.conditions.targetQuantity}
+                              onChange={(e) => setFormData({ ...formData, conditions: { ...formData.conditions, targetQuantity: e.target.value } })}
+                              placeholder="1"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Override Price (R) *</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              required
+                              className="input-field"
+                              value={formData.conditions.overridePrice}
+                              onChange={(e) => setFormData({ ...formData, conditions: { ...formData.conditions, overridePrice: e.target.value } })}
+                              placeholder="69.99"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Exact price customer pays for the add-on</p>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}

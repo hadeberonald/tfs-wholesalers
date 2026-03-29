@@ -48,7 +48,8 @@ interface CartStore {
 
 function calculateItemPrice(
   item: CartItem,
-  special: Special | undefined
+  special: Special | undefined,
+  allItems?: CartItem[]
 ): { price: number; discount: number; description: string; meetsRequirement: boolean } {
   const basePrice = item.originalPrice ?? item.price;
 
@@ -118,6 +119,52 @@ function calculateItemPrice(
       const { bundlePrice } = special.conditions;
       if (!bundlePrice) return { price: basePrice, discount: 0, description: '', meetsRequirement: false };
       return { price: bundlePrice, discount: Math.max(0, (basePrice - bundlePrice) * qty), description: `Bundle price: R${bundlePrice}`, meetsRequirement: true };
+    }
+
+    case 'conditional_add_on_price': {
+      const { triggerProductId, triggerQuantity = 1, triggerPrice, targetProductId, overridePrice } = special.conditions;
+
+      // ── This item is the TRIGGER product ────────────────────────────────
+      if (item.id === triggerProductId) {
+        if (triggerPrice == null) return { price: basePrice, discount: 0, description: '', meetsRequirement: false };
+        const discount = Math.max(0, (basePrice - triggerPrice) * qty);
+        return {
+          price: triggerPrice,
+          discount,
+          description: `Special price — unlocks add-on offer`,
+          meetsRequirement: true,
+        };
+      }
+
+      // ── This item is the ADD-ON (target) product ─────────────────────────
+      if (item.id === targetProductId) {
+        if (overridePrice == null) return { price: basePrice, discount: 0, description: '', meetsRequirement: false };
+
+        // Check that the trigger product is actually in the cart at the required quantity
+        const triggerInCart = (allItems ?? []).find(
+          (i) => i.id === triggerProductId && !i.autoAdded && i.quantity >= triggerQuantity
+        );
+
+        if (!triggerInCart) {
+          // Trigger not present — revert to original price and warn
+          return {
+            price: basePrice,
+            discount: 0,
+            description: `Add ${special.conditions.triggerQuantity ?? 1}× trigger product to unlock this special price`,
+            meetsRequirement: false,
+          };
+        }
+
+        const discount = Math.max(0, (basePrice - overridePrice) * qty);
+        return {
+          price: overridePrice,
+          discount,
+          description: `Special add-on price with ${special.name}`,
+          meetsRequirement: true,
+        };
+      }
+
+      return { price: basePrice, discount: 0, description: '', meetsRequirement: false };
     }
 
     default:
@@ -317,21 +364,48 @@ export const useCartStore = create<CartStore>()(
         let updatedItems = await processBuyXGetYSpecials(state.items, state.specials);
         updatedItems = await processMultibuySpecials(updatedItems, state.specials);
 
+        // Pass the full item list into calculateItemPrice so conditional_add_on_price
+        // can check whether the trigger product is present in cart.
         updatedItems = updatedItems.map((item) => {
           if (item.autoAdded) return item;
-
           if (item.isCombo) return item;
 
-          const special = state.specials.find(
-            (s: Special) => s.active && (s.productId === item.id || s.productIds?.includes(item.id))
-          );
+          // ── Find which special applies to this item ─────────────────────
+          // For conditional_add_on_price the item can be either the trigger
+          // product or the target (add-on) product, so we search both roles.
+          const special = state.specials.find((s: Special) => {
+            if (!s.active) return false;
+
+            if (s.type === 'conditional_add_on_price') {
+              return (
+                s.conditions.triggerProductId === item.id ||
+                s.conditions.targetProductId === item.id
+              );
+            }
+
+            return s.productId === item.id || s.productIds?.includes(item.id);
+          });
 
           if (!special) {
-            return { ...item, price: item.originalPrice ?? item.price, appliedSpecialId: undefined, specialDiscount: undefined, specialDescription: undefined, meetsSpecialRequirement: undefined };
+            return {
+              ...item,
+              price: item.originalPrice ?? item.price,
+              appliedSpecialId: undefined,
+              specialDiscount: undefined,
+              specialDescription: undefined,
+              meetsSpecialRequirement: undefined,
+            };
           }
 
-          const result = calculateItemPrice(item, special);
-          return { ...item, price: result.price, appliedSpecialId: result.meetsRequirement ? special._id?.toString() : undefined, specialDiscount: result.discount, specialDescription: result.description, meetsSpecialRequirement: result.meetsRequirement };
+          const result = calculateItemPrice(item, special, updatedItems);
+          return {
+            ...item,
+            price: result.price,
+            appliedSpecialId: result.meetsRequirement ? special._id?.toString() : undefined,
+            specialDiscount: result.discount,
+            specialDescription: result.description,
+            meetsSpecialRequirement: result.meetsRequirement,
+          };
         });
 
         set({ items: updatedItems });

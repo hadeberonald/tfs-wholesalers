@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { 
   LayoutDashboard, 
   Package, 
@@ -29,12 +29,12 @@ import {
 import { useAuth } from '@/lib/auth-context';
 
 export default function AdminHeader() {
+  const router = useRouter();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isNavExpanded, setIsNavExpanded] = useState(true);
   const pathname = usePathname();
   const { user, logout } = useAuth();
 
-  // Persist nav state in localStorage
   useEffect(() => {
     const saved = localStorage.getItem('adminNavExpanded');
     if (saved !== null) setIsNavExpanded(saved === 'true');
@@ -101,6 +101,7 @@ export default function AdminHeader() {
           { href: `${basePrefix}/admin/users`, label: 'Users', icon: Users },
           { href: `${basePrefix}/admin/categories`, label: 'Categories', icon: FolderTree },
           { href: `${basePrefix}/admin/settings`, label: 'Settings', icon: Settings },
+          { href: `${basePrefix}/admin/hero-banners`, label: 'Hero Banners', icon: LayoutDashboard },
         ]
       },
     ];
@@ -113,11 +114,17 @@ export default function AdminHeader() {
 
   const storeUrl = slug ? `/${slug}` : '/';
 
+  const handleLogout = () => {
+    logout();
+    const destination = slug ? `/${slug}/login` : '/select-branch';
+    router.push(destination);
+  };
+
   return (
     <>
       <header className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-r from-gray-900 to-gray-800 shadow-xl">
         <div className="max-w-7xl mx-auto px-4">
-          {/* Top Bar - always visible */}
+          {/* Top Bar */}
           <div className="flex items-center justify-between h-14">
             {/* Logo */}
             <Link href={`/${slug}/admin`} className="flex items-center space-x-2">
@@ -156,14 +163,14 @@ export default function AdminHeader() {
 
               {/* Logout */}
               <button
-                onClick={() => logout()}
+                onClick={handleLogout}
                 className="hidden md:flex items-center space-x-1 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 rounded-lg transition-colors text-white text-xs"
               >
                 <LogOut className="w-3.5 h-3.5" />
                 <span>Logout</span>
               </button>
 
-              {/* ── Toggle Nav (Desktop) ── */}
+              {/* Toggle Nav */}
               <button
                 onClick={toggleNav}
                 className="hidden md:flex items-center space-x-1 px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-white text-xs border border-white/20"
@@ -196,7 +203,7 @@ export default function AdminHeader() {
             </div>
           </div>
 
-          {/* ── Desktop Nav — collapsible ── */}
+          {/* Desktop Nav — collapsible */}
           <div
             className={`hidden md:block overflow-hidden transition-all duration-300 ease-in-out ${
               isNavExpanded ? 'max-h-40 opacity-100 py-2' : 'max-h-0 opacity-0 py-0'
@@ -231,7 +238,7 @@ export default function AdminHeader() {
             </div>
           </div>
 
-          {/* Collapsed indicator bar (desktop) */}
+          {/* Collapsed indicator bar */}
           {!isNavExpanded && (
             <div className="hidden md:flex items-center justify-center py-1 border-t border-white/10">
               <button
@@ -246,7 +253,7 @@ export default function AdminHeader() {
           )}
         </div>
 
-        {/* ── Mobile Menu ── */}
+        {/* Mobile Menu */}
         {isMobileMenuOpen && (
           <div className="md:hidden bg-gray-800 border-t border-white/10 max-h-[calc(100vh-56px)] overflow-y-auto">
             <nav className="max-w-7xl mx-auto px-4 py-4">
@@ -289,7 +296,10 @@ export default function AdminHeader() {
                   <span className="font-medium">Back to Store</span>
                 </Link>
                 <button
-                  onClick={() => { logout(); setIsMobileMenuOpen(false); }}
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    handleLogout();
+                  }}
                   className="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-white transition-all"
                 >
                   <LogOut className="w-5 h-5" />
@@ -301,7 +311,7 @@ export default function AdminHeader() {
         )}
       </header>
 
-      {/* Dynamic spacer based on nav state */}
+      {/* Dynamic spacer */}
       <div className={`transition-all duration-300 ${isNavExpanded ? 'h-[120px] md:h-[128px]' : 'h-[62px] md:h-[68px]'}`} />
     </>
   );
