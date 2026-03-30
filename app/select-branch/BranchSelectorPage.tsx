@@ -27,38 +27,52 @@ export default function BranchSelectorPage() {
   const [loading, setLoading] = useState(true);
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchBranches();
-    
-    const redirect = searchParams.get('redirect');
-    if (redirect) {
-      const savedBranch = localStorage.getItem('selectedBranch');
-      if (savedBranch) {
-        router.push(redirect);
-      }
-    }
-  }, []);
-
-  const fetchBranches = async () => {
+  // Fetch branches and return them so they can be used immediately for validation
+  const fetchBranches = async (): Promise<Branch[]> => {
     try {
       const res = await fetch('/api/branches');
       if (res.ok) {
         const data = await res.json();
-        setBranches(data.branches.filter((b: Branch) => b.status === 'active'));
+        const active = data.branches.filter((b: Branch) => b.status === 'active');
+        setBranches(active);
+        return active;
       }
     } catch (error) {
       console.error('Failed to fetch branches:', error);
     } finally {
       setLoading(false);
     }
+    return [];
   };
+
+  useEffect(() => {
+    fetchBranches().then((activeBranches) => {
+      const redirect = searchParams.get('redirect');
+      if (!redirect) return;
+
+      const savedBranch = localStorage.getItem('selectedBranch');
+      if (!savedBranch) return;
+
+      // Validate the saved branch still exists and is active before redirecting.
+      // Without this check, a deleted/paused branch slug in localStorage would
+      // auto-redirect the user to a 404.
+      const isStillActive = activeBranches.some((b) => b.slug === savedBranch);
+
+      if (isStillActive) {
+        router.push(redirect);
+      } else {
+        // Clear the stale branch — force the user to pick a valid one
+        localStorage.removeItem('selectedBranch');
+      }
+    });
+  }, []);
 
   const handleSelectBranch = (slug: string) => {
     setSelectedBranch(slug);
     localStorage.setItem('selectedBranch', slug);
-    
+
     const redirect = searchParams.get('redirect');
-    
+
     setTimeout(() => {
       if (redirect) {
         router.push(redirect);
@@ -111,7 +125,7 @@ export default function BranchSelectorPage() {
                 }`}
               >
                 <div className="absolute inset-0 bg-gradient-to-br from-brand-orange/5 to-orange-100/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                
+
                 <div className="relative">
                   <div className="w-14 h-14 bg-orange-100 rounded-xl flex items-center justify-center mb-4 group-hover:bg-brand-orange transition-colors duration-300">
                     <Store className="w-7 h-7 text-brand-orange group-hover:text-white transition-colors duration-300" />
@@ -120,7 +134,7 @@ export default function BranchSelectorPage() {
                   <h3 className="text-2xl font-bold text-brand-black mb-2 group-hover:text-brand-orange transition-colors">
                     {branch.name}
                   </h3>
-                  
+
                   <div className="space-y-2 mb-6">
                     <div className="flex items-start space-x-2 text-sm text-gray-600">
                       <MapPin className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
@@ -145,7 +159,11 @@ export default function BranchSelectorPage() {
                   <div className="absolute top-4 right-4">
                     <div className="w-8 h-8 bg-brand-orange rounded-full flex items-center justify-center animate-scale-in">
                       <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                        <path
+                          fillRule="evenodd"
+                          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                          clipRule="evenodd"
+                        />
                       </svg>
                     </div>
                   </div>
