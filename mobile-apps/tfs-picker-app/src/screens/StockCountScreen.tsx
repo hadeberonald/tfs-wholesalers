@@ -5,6 +5,15 @@
 //   1. PENDING COUNTS  - list of scheduled stock takes (including OOS-triggered ones)
 //   2. COUNT SESSION   - scan or manually count items in a stock take
 //   3. VERIFY OOS      - special flow for OOS-triggered takes: confirm 0 or correct the count
+//
+// Flow:
+//   Picker taps a stock take -> enters count session -> scans barcode to increment count
+//   OR manually enters quantity -> submits -> server updates stock level in DB.
+//
+// For OOS-triggered takes:
+//   Picker is shown a prominent "Verify Out-of-Stock" card -> goes to dedicated verify screen
+//   If confirmed 0 -> stock set to 0, OOS validated
+//   If stock found -> stock corrected, order OOS flag can be reviewed by admin
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -139,7 +148,7 @@ export default function StockCountScreen({ navigation }: any) {
   const [countNotes, setCountNotes]   = useState('');
   const [submitting, setSubmitting]   = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
-  const [scanCount, setScanCount]     = useState(0);
+  const [scanCount, setScanCount]     = useState(0); // how many scans in this session
 
   // Fetch stock takes ------------------------------------------------------
   const fetchStockTakes = useCallback(async (silent = false) => {
@@ -148,6 +157,7 @@ export default function StockCountScreen({ navigation }: any) {
       const res = await axios.get(`${API_URL}/api/stock-takes?status=pending`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      // Enrich each take with product barcode so we can verify scans
       const takes: StockTake[] = res.data.stockTakes || [];
       const enriched = await Promise.all(takes.map(async (st) => {
         try {
@@ -192,19 +202,21 @@ export default function StockCountScreen({ navigation }: any) {
   };
 
   // Barcode scan during count ----------------------------------------------
+  // Each scan of the correct barcode increments the count by 1 unit.
   const handleCountScan = (scannedBarcode: string) => {
     setScannerOpen(false);
     if (!activeTake) return;
 
     if (activeTake.barcode && scannedBarcode !== activeTake.barcode) {
       Alert.alert(
-        'Wrong Item',
-        `Scanned barcode does not match ${activeTake.productName}.\n\nExpected: ${activeTake.barcode}\nScanned: ${scannedBarcode}`,
+        'x Wrong Item',
+        `Scanned barcode doesn't match ${activeTake.productName}.\n\nExpected: ${activeTake.barcode}\nScanned:  ${scannedBarcode}`,
         [{ text: 'OK' }]
       );
       return;
     }
 
+    // If no barcode on record, accept any scan and count it
     setScanCount(prev => prev + 1);
     setCountedQty(prev => prev + 1);
   };
@@ -216,7 +228,9 @@ export default function StockCountScreen({ navigation }: any) {
     const finalQty = confirmedZero ? 0 : countedQty;
     const variance = finalQty - activeTake.expectedStock;
 
-    if (!confirmedZero && Math.abs(variance) > 0) {
+    if (!confirmedZero && finalQty === activeTake.expectedStock) {
+      // No variance - quick confirm
+    } else if (!confirmedZero && Math.abs(variance) > 0) {
       const sign = variance > 0 ? '+' : '';
       const action = await new Promise<boolean>(resolve => {
         Alert.alert(
@@ -249,7 +263,7 @@ export default function StockCountScreen({ navigation }: any) {
         ? `Stock count matches - ${finalQty} units confirmed.`
         : `Stock updated from ${activeTake.expectedStock} to ${finalQty} units (${variance > 0 ? '+' : ''}${variance}).`;
 
-      Alert.alert('Count Submitted', msg, [
+      Alert.alert('v Count Submitted', msg, [
         {
           text: 'OK',
           onPress: () => {
@@ -278,15 +292,18 @@ export default function StockCountScreen({ navigation }: any) {
       st.sku.toLowerCase().includes(search.toLowerCase())
     );
 
-  const oosPending = stockTakes.filter(st => st.triggeredByOOS).length;
-  const overdueCnt = stockTakes.filter(isOverdue).length;
+  const oosPending  = stockTakes.filter(st => st.triggeredByOOS).length;
+  const overdueCnt  = stockTakes.filter(isOverdue).length;
 
-  // ── RENDER: Count session ────────────────────────────────────────────────
+  // 
+  // RENDER: Count session
+  // 
 
   if (mode === 'count' && activeTake) {
     const variance = countedQty - activeTake.expectedStock;
     return (
       <View style={styles.container}>
+        {/* Header */}
         <View style={sess.header}>
           <TouchableOpacity onPress={closeSession} style={sess.backBtn}>
             <Ionicons name="arrow-back" size={22} color="#fff" />
@@ -299,6 +316,7 @@ export default function StockCountScreen({ navigation }: any) {
         </View>
 
         <ScrollView contentContainerStyle={sess.body} keyboardShouldPersistTaps="handled">
+          {/* Expected vs counted */}
           <View style={sess.statsRow}>
             <View style={sess.statCard}>
               <Text style={sess.statCardLabel}>Expected</Text>
@@ -319,6 +337,7 @@ export default function StockCountScreen({ navigation }: any) {
             </View>
           </View>
 
+          {/* Scan count badge */}
           {scanCount > 0 && (
             <View style={sess.scanBadge}>
               <ScanLine size={16} color="#FF6B35" />
@@ -326,6 +345,7 @@ export default function StockCountScreen({ navigation }: any) {
             </View>
           )}
 
+          {/* Manual qty control */}
           <View style={sess.qtySection}>
             <Text style={sess.qtySectionTitle}>Counted Quantity</Text>
             <Text style={sess.qtySectionHint}>Scan barcodes to auto-increment, or adjust manually below</Text>
@@ -337,6 +357,7 @@ export default function StockCountScreen({ navigation }: any) {
               >
                 <Minus size={22} color={countedQty === 0 ? '#d1d5db' : '#1a1a1a'} />
               </TouchableOpacity>
+
               <TextInput
                 style={sess.qtyInput}
                 value={String(countedQty)}
@@ -344,12 +365,14 @@ export default function StockCountScreen({ navigation }: any) {
                 keyboardType="number-pad"
                 selectTextOnFocus
               />
+
               <TouchableOpacity style={sess.qtyBtn} onPress={() => setCountedQty(q => q + 1)}>
                 <Plus size={22} color="#1a1a1a" />
               </TouchableOpacity>
             </View>
           </View>
 
+          {/* Scan button */}
           <TouchableOpacity style={sess.scanBtn} onPress={() => setScannerOpen(true)}>
             <ScanLine size={20} color="#fff" />
             <Text style={sess.scanBtnText}>
@@ -364,6 +387,7 @@ export default function StockCountScreen({ navigation }: any) {
             </View>
           )}
 
+          {/* Notes */}
           <View style={sess.notesSection}>
             <Text style={sess.qtySectionTitle}>Notes (optional)</Text>
             <TextInput
@@ -378,6 +402,7 @@ export default function StockCountScreen({ navigation }: any) {
           </View>
         </ScrollView>
 
+        {/* Footer */}
         <View style={sess.footer}>
           <TouchableOpacity
             style={[sess.submitBtn, submitting && sess.submitBtnDisabled]}
@@ -403,12 +428,15 @@ export default function StockCountScreen({ navigation }: any) {
     );
   }
 
-  // ── RENDER: OOS Verification ─────────────────────────────────────────────
+  // 
+  // RENDER: OOS Verification
+  // 
 
   if (mode === 'verify_oos' && activeTake) {
     const variance = countedQty - activeTake.expectedStock;
     return (
       <View style={styles.container}>
+        {/* Header */}
         <View style={[sess.header, { backgroundColor: '#ef4444' }]}>
           <TouchableOpacity onPress={closeSession} style={sess.backBtn}>
             <Ionicons name="arrow-back" size={22} color="#fff" />
@@ -420,23 +448,25 @@ export default function StockCountScreen({ navigation }: any) {
         </View>
 
         <ScrollView contentContainerStyle={sess.body} keyboardShouldPersistTaps="handled">
-          <View style={oosStyles.contextCard}>
+          {/* OOS context card */}
+          <View style={oos.contextCard}>
             <ShieldAlert size={28} color="#ef4444" />
-            <Text style={oosStyles.contextTitle}>OOS Reported During Picking</Text>
-            <Text style={oosStyles.contextDesc}>
+            <Text style={oos.contextTitle}>OOS Reported During Picking</Text>
+            <Text style={oos.contextDesc}>
               A picker marked this item as out of stock on order #{activeTake.triggeredByOrderNum}.{'\n\n'}
               Please physically locate this product and count how many units are actually on the shelf.
             </Text>
-            <View style={oosStyles.contextSku}>
-              <Text style={oosStyles.contextSkuLabel}>SKU</Text>
-              <Text style={oosStyles.contextSkuValue}>{activeTake.sku}</Text>
+            <View style={oos.contextSku}>
+              <Text style={oos.contextSkuLabel}>SKU</Text>
+              <Text style={oos.contextSkuValue}>{activeTake.sku}</Text>
             </View>
-            <View style={oosStyles.contextSku}>
-              <Text style={oosStyles.contextSkuLabel}>System says</Text>
-              <Text style={oosStyles.contextSkuValue}>{activeTake.expectedStock} units</Text>
+            <View style={oos.contextSku}>
+              <Text style={oos.contextSkuLabel}>System says</Text>
+              <Text style={oos.contextSkuValue}>{activeTake.expectedStock} units</Text>
             </View>
           </View>
 
+          {/* Stats */}
           <View style={sess.statsRow}>
             <View style={sess.statCard}>
               <Text style={sess.statCardLabel}>System Stock</Text>
@@ -450,6 +480,7 @@ export default function StockCountScreen({ navigation }: any) {
             </View>
           </View>
 
+          {/* Scan */}
           <TouchableOpacity style={sess.scanBtn} onPress={() => setScannerOpen(true)}>
             <ScanLine size={20} color="#fff" />
             <Text style={sess.scanBtnText}>
@@ -464,6 +495,7 @@ export default function StockCountScreen({ navigation }: any) {
             </View>
           )}
 
+          {/* Manual control */}
           <View style={sess.qtySection}>
             <Text style={sess.qtySectionTitle}>Physical Count</Text>
             <View style={sess.qtyRow}>
@@ -487,6 +519,7 @@ export default function StockCountScreen({ navigation }: any) {
             </View>
           </View>
 
+          {/* Notes */}
           <View style={sess.notesSection}>
             <Text style={sess.qtySectionTitle}>Notes</Text>
             <TextInput
@@ -500,9 +533,11 @@ export default function StockCountScreen({ navigation }: any) {
             />
           </View>
 
-          <View style={oosStyles.actionRow}>
+          {/* Two action paths */}
+          <View style={oos.actionRow}>
+            {/* Path A: truly zero */}
             <TouchableOpacity
-              style={[oosStyles.actionBtn, oosStyles.actionBtnRed, submitting && sess.submitBtnDisabled]}
+              style={[oos.actionBtn, oos.actionBtnRed, submitting && sess.submitBtnDisabled]}
               onPress={() => {
                 Alert.alert(
                   'Confirm Zero Stock',
@@ -516,11 +551,12 @@ export default function StockCountScreen({ navigation }: any) {
               disabled={submitting}
             >
               <XCircle size={20} color="#fff" />
-              <Text style={oosStyles.actionBtnText}>Confirm Zero{'\n'}(OOS Validated)</Text>
+              <Text style={oos.actionBtnText}>Confirm Zero{'\n'}(OOS Validated)</Text>
             </TouchableOpacity>
 
+            {/* Path B: found some stock */}
             <TouchableOpacity
-              style={[oosStyles.actionBtn, oosStyles.actionBtnGreen, (submitting || countedQty === 0) && sess.submitBtnDisabled]}
+              style={[oos.actionBtn, oos.actionBtnGreen, (submitting || countedQty === 0) && sess.submitBtnDisabled]}
               onPress={() => {
                 if (countedQty === 0) {
                   Alert.alert('No Count', 'Enter or scan the quantity you found, then tap this button.');
@@ -531,11 +567,11 @@ export default function StockCountScreen({ navigation }: any) {
               disabled={submitting || countedQty === 0}
             >
               <CheckCircle size={20} color="#fff" />
-              <Text style={oosStyles.actionBtnText}>Found {countedQty} Units{'\n'}(Correct Stock)</Text>
+              <Text style={oos.actionBtnText}>Found {countedQty} Units{'\n'}(Correct Stock)</Text>
             </TouchableOpacity>
           </View>
 
-          <Text style={oosStyles.footerNote}>
+          <Text style={oos.footerNote}>
             Either action will update the stock level in the database and close this verification.
             If stock was found, admin will be notified of the false OOS report.
           </Text>
@@ -550,10 +586,13 @@ export default function StockCountScreen({ navigation }: any) {
     );
   }
 
-  // ── RENDER: List ─────────────────────────────────────────────────────────
+  // 
+  // RENDER: List
+  // 
 
   return (
     <View style={styles.container}>
+      {/* Header */}
       <View style={list.header}>
         <Text style={list.title}>Stock Counts</Text>
         <TouchableOpacity onPress={() => fetchStockTakes()} style={list.refreshBtn}>
@@ -561,6 +600,7 @@ export default function StockCountScreen({ navigation }: any) {
         </TouchableOpacity>
       </View>
 
+      {/* Alert banners */}
       {oosPending > 0 && (
         <TouchableOpacity style={list.oosBanner} onPress={() => setFilter('oos')}>
           <ShieldAlert size={18} color="#ef4444" />
@@ -578,6 +618,7 @@ export default function StockCountScreen({ navigation }: any) {
         </TouchableOpacity>
       )}
 
+      {/* Search */}
       <View style={list.searchRow}>
         <View style={list.searchBox}>
           <Search size={16} color="#9ca3af" />
@@ -596,8 +637,9 @@ export default function StockCountScreen({ navigation }: any) {
         </View>
       </View>
 
+      {/* Filter chips */}
       <View style={list.filterRow}>
-        {(['all', 'oos', 'overdue'] as const).map((f) => (
+        {(['all', 'oos', 'overdue'] as Array<'all' | 'oos' | 'overdue'>).map((f) => (
           <TouchableOpacity
             key={f}
             style={[list.filterChip, filter === f && list.filterChipActive]}
@@ -635,6 +677,8 @@ export default function StockCountScreen({ navigation }: any) {
           renderItem={({ item }) => <StockTakeCard item={item} onPress={() => openTake(item)} />}
           contentContainerStyle={{ padding: 16 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchStockTakes(); }} tintColor="#FF6B35" />}
+          // OOS items always at the top
+          // (already sorted server-side; client-side sort as safety)
           ListHeaderComponent={
             filtered.some(st => st.triggeredByOOS) && filter === 'all' ? (
               <View style={list.sectionLabel}>
@@ -782,8 +826,7 @@ const sess = StyleSheet.create({
   submitBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
 });
 
-// FIXED: renamed from 'oos' to 'oosStyles' to avoid conflict with state variable name
-const oosStyles = StyleSheet.create({
+const oos = StyleSheet.create({
   contextCard: {
     backgroundColor: '#fff', borderRadius: 16, padding: 20,
     borderWidth: 2, borderColor: '#fca5a5', marginBottom: 16,

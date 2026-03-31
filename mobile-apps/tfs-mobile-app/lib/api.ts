@@ -1,7 +1,7 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export const API_URL = 'https://tfs-wholesalers.onrender.com';
+export const API_URL = 'https://tfs-wholesalers-ifad.onrender.com';
 
 const api = axios.create({
   baseURL: API_URL,

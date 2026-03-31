@@ -65,7 +65,7 @@ export async function POST(
         $set: {
           [`items.${itemIndex}.oos`]:      true,
           [`items.${itemIndex}.oosAt`]:    new Date(),
-          [`items.${itemIndex}.oosBy`]:    mobileUser.userId || mobileUser.id,
+          [`items.${itemIndex}.oosBy`]:    mobileUser.id,
           updatedAt:                        new Date(),
         },
       },
@@ -237,31 +237,33 @@ async function issueRefund({
   const refundDoc = await db.collection('refunds').insertOne(refundRecord);
   const refundId  = refundDoc.insertedId.toString();
 
-  
-  
-   if (order.paymentMethod === 'paystack' && paymentRef) {
-   const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
-   const paystackRes = await fetch('https://api.paystack.co/refund', {
-    method: 'POST',
+  // Paystack refund -------------------------------------------------------
+  // Paystack supports partial refunds via their Refund API.
+  // Uncomment and configure once your Paystack secret key is available.
+  //
+  if (order.paymentMethod === 'paystack' && paymentRef) {
+  const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
+ const paystackRes = await fetch('https://api.paystack.co/refund', {
+   method: 'POST',
      headers: {
        Authorization: `Bearer ${paystackSecret}`,
-        'Content-Type': 'application/json',
-       },
-       body: JSON.stringify({
+     'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
          transaction: paymentRef,
-         amount: Math.round(refundAmount * 100), // Paystack uses kobo/cents
+       amount: Math.round(refundAmount * 100), // Paystack uses kobo/cents
          merchant_note: `OOS refund for ${itemName || oosItem.sku} on order ${order.orderNumber}`,
        }),
-     });
+    });
      const paystackData = await paystackRes.json();
      if (!paystackData.status) throw new Error(paystackData.message);
      // Mark refund as processed
-     await db.collection('refunds').updateOne(
-     { _id: refundDoc.insertedId },
+    await db.collection('refunds').updateOne(
+       { _id: refundDoc.insertedId },
        { $set: { status: 'processed', providerRef: paystackData.data?.id, updatedAt: new Date() } }
-    );
-    return { refundId, providerRef: paystackData.data?.id };
-  }
+     );
+     return { refundId, providerRef: paystackData.data?.id };
+   }
 
   // For cash orders or unimplemented providers - mark as manual
   if (order.paymentMethod === 'cash') {

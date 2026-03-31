@@ -1,9 +1,9 @@
 // src/screens/PickingScreen.tsx
 // CHANGES:
 // 1. Combo items are flattened into individual items for picking
-// 2. OOS (out of stock) button on each item — triggers confirmation alert,
+// 2. OOS (out of stock) button on each item - triggers confirmation alert,
 //    creates a stock-take record, and fires a refund via POST /api/orders/:id/refund-item
-// 3. Stock-due badge shown when product stock ≤ lowStockThreshold
+// 3. Stock-due badge shown when product stock <= lowStockThreshold
 // 4. markScanned calls POST /api/orders/:id/scan-item for real-time customer updates
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -24,7 +24,7 @@ import StatusStepper from '../components/StatusStepper';
 
 const API_URL = 'https://tfs-wholesalers-ifad.onrender.com';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// Types --------------------------------------------------------------------
 
 interface OrderItem {
   productId: string; name: string; sku: string; quantity: number;
@@ -36,7 +36,7 @@ interface OrderItem {
   autoAdded?: boolean; linkedToItemId?: string;
   isComboItem?: boolean; comboId?: string; comboName?: string;
   comboItems?: Array<{ productId: string; productName: string; quantity: number; sku?: string; barcode?: string; image?: string }>;
-  // Flattened from combo — internal only
+  // Flattened from combo - internal only
   _flattenedFromCombo?: boolean;
   _comboParentName?: string;
   stockLevel?: number;
@@ -59,25 +59,27 @@ interface ItemGroup {
   Icon: React.FC<any>; items: OrderItem[];
 }
 
-// ─── Flatten combo items into individual picking rows ─────────────────────────
+// Flatten combo items into individual picking rows -------------------------
+// Each combo "slot" becomes its own row so the picker handles them one by one.
 function flattenItems(items: OrderItem[]): OrderItem[] {
   const result: OrderItem[] = [];
   for (const item of items) {
     if (item.isComboItem && item.comboItems && item.comboItems.length > 0) {
+      // Emit one row per combo sub-item
       for (const ci of item.comboItems) {
         result.push({
-          productId:           ci.productId,
-          name:                ci.productName,
-          sku:                 ci.sku || ci.productId,
-          quantity:            ci.quantity,
-          price:               0,
-          barcode:             ci.barcode,
-          image:               ci.image,
-          isBonusItem:         false,
-          isFreeItem:          false,
-          isComboItem:         false,
-          _flattenedFromCombo: true,
-          _comboParentName:    item.comboName || item.name,
+          productId:          ci.productId,
+          name:               ci.productName,
+          sku:                ci.sku || ci.productId,
+          quantity:           ci.quantity,
+          price:              0, // price lives on the parent combo
+          barcode:            ci.barcode,
+          image:              ci.image,
+          isBonusItem:        false,
+          isFreeItem:         false,
+          isComboItem:        false, // treated as regular for picking purposes
+          _flattenedFromCombo:true,
+          _comboParentName:   item.comboName || item.name,
         });
       }
     } else {
@@ -98,10 +100,10 @@ function classifyItems(items: OrderItem[]): ItemGroup[] {
     else regular.push(item);
   }
   const groups: ItemGroup[] = [];
-  if (regular.length) groups.push({ key: 'regular', title: 'Regular Items', subtitle: `${regular.length} item${regular.length !== 1 ? 's' : ''} — scan each one`, color: '#1a1a1a', bgColor: '#f9fafb', borderColor: '#e5e7eb', Icon: ShoppingBag, items: regular });
-  if (special.length) groups.push({ key: 'special', title: 'Special / Promo Items', subtitle: `${special.length} item${special.length !== 1 ? 's' : ''} — discounted, must all be scanned`, color: '#b45309', bgColor: '#fffbeb', borderColor: '#fde68a', Icon: Tag, items: special });
+  if (regular.length) groups.push({ key: 'regular', title: 'Regular Items', subtitle: `${regular.length} item${regular.length !== 1 ? 's' : ''} - scan each one`, color: '#1a1a1a', bgColor: '#f9fafb', borderColor: '#e5e7eb', Icon: ShoppingBag, items: regular });
+  if (special.length) groups.push({ key: 'special', title: 'Special / Promo Items', subtitle: `${special.length} item${special.length !== 1 ? 's' : ''} - discounted, must all be scanned`, color: '#b45309', bgColor: '#fffbeb', borderColor: '#fde68a', Icon: Tag, items: special });
   if (combo.length)   groups.push({ key: 'combo',   title: 'Combo Deal Items', subtitle: `${combo.length} individual item${combo.length !== 1 ? 's' : ''} from combo bundles`, color: '#6d28d9', bgColor: '#f5f3ff', borderColor: '#c4b5fd', Icon: Layers, items: combo });
-  if (bonus.length)   groups.push({ key: 'bonus',   title: '🎁 Free / Bonus Items', subtitle: `${bonus.length} item${bonus.length !== 1 ? 's' : ''} — MUST be included`, color: '#065f46', bgColor: '#ecfdf5', borderColor: '#6ee7b7', Icon: Gift, items: bonus });
+  if (bonus.length)   groups.push({ key: 'bonus',   title: ' Free / Bonus Items', subtitle: `${bonus.length} item${bonus.length !== 1 ? 's' : ''} - MUST be included`, color: '#065f46', bgColor: '#ecfdf5', borderColor: '#6ee7b7', Icon: Gift, items: bonus });
   return groups;
 }
 
@@ -111,7 +113,7 @@ function itemScanKey(item: OrderItem, index: number): string {
 
 function getSpecialLabel(item: OrderItem): { badge: string; desc: string; color: string; bg: string } | null {
   if (item._flattenedFromCombo) return { badge: 'COMBO', desc: `From "${item._comboParentName}"`, color: '#6d28d9', bg: '#ede9fe' };
-  if (item.isBonusItem || item.isFreeItem || item.isMultibuyBonus || item.autoAdded) return { badge: 'FREE', desc: 'Bonus item — include at no charge', color: '#065f46', bg: '#d1fae5' };
+  if (item.isBonusItem || item.isFreeItem || item.isMultibuyBonus || item.autoAdded) return { badge: 'FREE', desc: 'Bonus item - include at no charge', color: '#065f46', bg: '#d1fae5' };
   if (!item.specialType) return null;
   switch (item.specialType) {
     case 'percentage_off': { const p = item.specialConditions?.discountPercentage; return { badge: `${p}% OFF`, desc: `${p}% discount applied`, color: '#92400e', bg: '#fef3c7' }; }
@@ -124,7 +126,7 @@ function getSpecialLabel(item: OrderItem): { badge: string; desc: string; color:
   }
 }
 
-// ─── ItemCard ─────────────────────────────────────────────────────────────────
+// ItemCard -----------------------------------------------------------------
 
 interface ItemCardProps {
   item: OrderItem; scanKey: string;
@@ -145,16 +147,16 @@ function ItemCard({ item, scanKey, isScanned, isOOS, onScan, onManual, onOOS, gr
     <View style={[ic.card, { borderColor: isOOS ? '#ef4444' : isScanned ? '#10b981' : groupColor + '55' }, isScanned && ic.cardScanned, isOOS && ic.cardOOS]}>
       {isScanned && !isOOS && (<View style={ic.scannedBanner}><CheckCircle size={14} color="#fff" /><Text style={ic.scannedBannerText}>PICKED</Text></View>)}
       {isOOS && (<View style={ic.oosBanner}><XCircle size={14} color="#fff" /><Text style={ic.oosBannerText}>OUT OF STOCK</Text></View>)}
-      {lowStock && !isScanned && !isOOS && (<View style={ic.lowStockBadge}><AlertCircle size={12} color="#f59e0b" /><Text style={ic.lowStockText}>Low stock — verify count</Text></View>)}
+      {lowStock && !isScanned && !isOOS && (<View style={ic.lowStockBadge}><AlertCircle size={12} color="#f59e0b" /><Text style={ic.lowStockText}>Low stock - verify count</Text></View>)}
 
       <View style={ic.row}>
         {item.image ? <Image source={{ uri: item.image }} style={ic.img} /> : <View style={[ic.img, ic.imgFb, { backgroundColor: groupBg }]}><PackageIcon size={22} color={groupColor} /></View>}
         <View style={ic.info}>
-          <Text style={ic.name} numberOfLines={2}>{item.name}{item.variantName ? <Text style={ic.variant}> — {item.variantName}</Text> : null}</Text>
+          <Text style={ic.name} numberOfLines={2}>{item.name}{item.variantName ? <Text style={ic.variant}> - {item.variantName}</Text> : null}</Text>
           <Text style={ic.sku}>SKU: {item.sku}</Text>
           {special && (<View style={[ic.badge, { backgroundColor: special.bg }]}><Text style={[ic.badgeText, { color: special.color }]}>{special.badge}</Text><Text style={[ic.badgeDesc, { color: special.color }]}>{special.desc}</Text></View>)}
           <View style={ic.priceRow}>
-            <View style={ic.qtyPill}><Text style={ic.qtyText}>×{item.quantity}</Text></View>
+            <View style={ic.qtyPill}><Text style={ic.qtyText}>x{item.quantity}</Text></View>
             {item.originalPrice && item.originalPrice !== item.price && <Text style={ic.origPrice}>R{(item.originalPrice * item.quantity).toFixed(2)}</Text>}
             <Text style={[ic.price, lineTotal === 0 && ic.priceFree]}>{lineTotal === 0 ? 'FREE' : `R${lineTotal.toFixed(2)}`}</Text>
           </View>
@@ -168,7 +170,7 @@ function ItemCard({ item, scanKey, isScanned, isOOS, onScan, onManual, onOOS, gr
         <View style={ic.actions}>
           {item.barcode
             ? (<TouchableOpacity style={ic.scanBtn} onPress={() => onScan(item)}><Ionicons name="barcode-outline" size={18} color="#fff" /><Text style={ic.scanBtnText}>Scan Barcode</Text></TouchableOpacity>)
-            : (<View style={ic.noBarcodeWarn}><Ionicons name="warning-outline" size={15} color="#f59e0b" /><Text style={ic.noBarcodeText}>No barcode — use manual confirm</Text></View>)
+            : (<View style={ic.noBarcodeWarn}><Ionicons name="warning-outline" size={15} color="#f59e0b" /><Text style={ic.noBarcodeText}>No barcode - use manual confirm</Text></View>)
           }
           <TouchableOpacity style={ic.manualBtn} onPress={() => onManual(item, scanKey)}><Ionicons name="checkmark" size={18} color="#fff" /><Text style={ic.manualBtnText}>Manual</Text></TouchableOpacity>
           <TouchableOpacity style={ic.oosBtn} onPress={() => onOOS(item, scanKey)}>
@@ -187,7 +189,7 @@ function ItemCard({ item, scanKey, isScanned, isOOS, onScan, onManual, onOOS, gr
   );
 }
 
-// ─── GroupSection ─────────────────────────────────────────────────────────────
+// GroupSection -------------------------------------------------------------
 
 interface GroupSectionProps {
   group: ItemGroup; scanKeys: string[]; scannedSet: Set<string>; oosSet: Set<string>;
@@ -222,7 +224,7 @@ function GroupSection({ group, scanKeys, scannedSet, oosSet, onScan, onManual, o
   );
 }
 
-// ─── Main Screen ──────────────────────────────────────────────────────────────
+// Main Screen --------------------------------------------------------------
 
 export default function PickingScreen({ route, navigation: navProp }: any) {
   const { orderId } = route.params;
@@ -233,12 +235,12 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
   const [groups, setGroups]           = useState<ItemGroup[]>([]);
   const [allScanKeys, setAllScanKeys] = useState<string[]>([]);
   const [scanned, setScanned]         = useState<Set<string>>(new Set());
-  const [oosItems, setOosItems]       = useState<Set<string>>(new Set());   // FIXED: renamed from 'oos' to avoid conflict with stylesheet
+  const [oos, setOos]                 = useState<Set<string>>(new Set());   // out-of-stock keys
   const [loading, setLoading]         = useState(true);
   const [scannerVisible, setScannerVisible] = useState(false);
   const [currentItem, setCurrentItem] = useState<OrderItem | null>(null);
 
-  // ── Fetch order ─────────────────────────────────────────────────────────────
+  // Fetch order -------------------------------------------------------------
   const fetchOrder = useCallback(async () => {
     try {
       const res = await axios.get(`${API_URL}/api/orders/${orderId}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -264,7 +266,7 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
 
   useEffect(() => { fetchOrder(); }, [fetchOrder]);
 
-  // ── Scanner helpers ──────────────────────────────────────────────────────────
+  // Scanner helpers ----------------------------------------------------------
   const openScanner = (item: OrderItem) => {
     if (!item.barcode) { Alert.alert('No Barcode', 'This product has no barcode. Use manual confirm.'); return; }
     setCurrentItem(item);
@@ -276,37 +278,38 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
     if (currentItem.barcode === scannedBarcode) {
       const result = findUnscannedKey(currentItem);
       if (result) markScanned(result.key, result.item);
-      Alert.alert('✓ Correct', `${currentItem.name} picked!`);
+      Alert.alert('v Correct', `${currentItem.name} picked!`);
     } else {
       try {
         const res = await axios.get(`${API_URL}/api/products?barcode=${scannedBarcode}`);
-        Alert.alert('✗ Wrong Item', `You scanned: ${res.data.product?.name || 'unknown'}\n\nExpected: ${currentItem.name}`, [{ text: 'OK' }]);
+        Alert.alert('x Wrong Item', `You scanned: ${res.data.product?.name || 'unknown'}\n\nExpected: ${currentItem.name}`, [{ text: 'OK' }]);
       } catch {
-        Alert.alert('✗ Wrong Barcode', `Expected barcode for: ${currentItem.name}`);
+        Alert.alert('x Wrong Barcode', `Expected barcode for: ${currentItem.name}`);
       }
     }
     setCurrentItem(null);
   };
 
-  // ── Manual confirm ──────────────────────────────────────────────────────────
+  // Manual confirm ----------------------------------------------------------
   const handleManual = (item: OrderItem, scanKey: string) => {
     const special = getSpecialLabel(item);
     let extraInfo = '';
-    if (special) extraInfo = `\n\n🏷️ ${special.badge}: ${special.desc}`;
+    if (special) extraInfo = `\n\n ${special.badge}: ${special.desc}`;
 
+    // Warn if low stock
     const lowStock = item.stockLevel !== undefined && item.lowStockThreshold !== undefined && item.stockLevel <= item.lowStockThreshold;
     if (lowStock) {
-      extraInfo += `\n\n⚠️ Stock level is low (${item.stockLevel} units). A stock count is due.`;
+      extraInfo += `\n\n Stock level is low (${item.stockLevel} units). A stock count is due.`;
     }
 
     Alert.alert(
       'Confirm Pick',
-      `${item.name}${item.variantName ? ` — ${item.variantName}` : ''}\nSKU: ${item.sku}  |  Qty: ${item.quantity}${extraInfo}`,
+      `${item.name}${item.variantName ? ` - ${item.variantName}` : ''}\nSKU: ${item.sku}  |  Qty: ${item.quantity}${extraInfo}`,
       [{ text: 'Cancel', style: 'cancel' }, { text: 'Confirm Picked', onPress: () => markScanned(scanKey, item) }]
     );
   };
 
-  // ── Out-of-stock flow ────────────────────────────────────────────────────────
+  // Out-of-stock flow --------------------------------------------------------
   const handleOOS = (item: OrderItem, scanKey: string) => {
     const refundAmount = (item.isBonusItem || item.isFreeItem || item.isMultibuyBonus || item.autoAdded || item._flattenedFromCombo)
       ? null
@@ -314,11 +317,11 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
 
     const refundLine = refundAmount != null
       ? `\n\nThe customer will be refunded R${refundAmount.toFixed(2)} for this item.`
-      : '\n\nThis item is free — no refund required.';
+      : '\n\nThis item is free - no refund required.';
 
     Alert.alert(
-      '⚠️ Item Out of Stock?',
-      `Are you sure "${item.name}${item.variantName ? ` — ${item.variantName}` : ''}" is out of stock?\n\nThis will:${refundLine}\n• Create a stock-count record for admin verification.`,
+      ' Item Out of Stock?',
+      `Are you sure "${item.name}${item.variantName ? ` - ${item.variantName}` : ''}" is out of stock?\n\nThis will:${refundLine}\n Create a stock-count record for admin verification.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -332,9 +335,10 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
 
   const confirmOOS = async (item: OrderItem, scanKey: string, refundAmount: number | null) => {
     // Optimistic UI
-    setOosItems(prev => new Set([...prev, scanKey]));
+    setOos(prev => new Set([...prev, scanKey]));
 
     try {
+      // 1. Notify server - triggers refund + stock-take creation
       await axios.post(
         `${API_URL}/api/orders/${orderId}/item-oos`,
         {
@@ -349,10 +353,11 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
       );
     } catch (err) {
       console.warn('[PickingScreen] item-oos failed (non-fatal):', err);
+      // Keep OOS state so picker can continue
     }
   };
 
-  // ── Mark scanned ─────────────────────────────────────────────────────────────
+  // Mark scanned -------------------------------------------------------------
   const markScanned = async (key: string, item?: OrderItem) => {
     setScanned(prev => new Set([...prev, key]));
     if (item) {
@@ -373,7 +378,7 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
     for (const grp of groups) {
       for (const grpItem of grp.items) {
         const key = itemScanKey(grpItem, globalIdx);
-        if (grpItem.productId === item.productId && grpItem.variantName === item.variantName && !scanned.has(key) && !oosItems.has(key)) {
+        if (grpItem.productId === item.productId && grpItem.variantName === item.variantName && !scanned.has(key) && !oos.has(key)) {
           return { key, item: grpItem };
         }
         globalIdx++;
@@ -382,17 +387,17 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
     return null;
   };
 
-  // ── Complete picking ──────────────────────────────────────────────────────────
+  // Complete picking ----------------------------------------------------------
   const handleComplete = async () => {
     if (!order) return;
-    const pending = allScanKeys.filter(k => !scanned.has(k) && !oosItems.has(k));
+    const pending = allScanKeys.filter(k => !scanned.has(k) && !oos.has(k));
     if (pending.length > 0) {
       const missing: string[] = [];
       let globalIdx = 0;
       for (const grp of groups) {
         for (const item of grp.items) {
           const k = itemScanKey(item, globalIdx);
-          if (!scanned.has(k) && !oosItems.has(k)) missing.push(`• ${item.name}${item.variantName ? ` (${item.variantName})` : ''} ×${item.quantity}`);
+          if (!scanned.has(k) && !oos.has(k)) missing.push(` ${item.name}${item.variantName ? ` (${item.variantName})` : ''} x${item.quantity}`);
           globalIdx++;
         }
       }
@@ -400,7 +405,7 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
       return;
     }
 
-    const oosCount = oosItems.size;
+    const oosCount = oos.size;
     if (oosCount > 0) {
       Alert.alert(
         `${oosCount} OOS Item${oosCount > 1 ? 's' : ''}`,
@@ -421,15 +426,15 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
     } catch (err: any) {
       console.error('Status update failed:', err.response?.data || err.message);
     }
-    navigation.navigate('Packaging', { orderId, orderNumber: order!.orderNumber });
+    navigation.navigate('Packaging', { orderId, orderNumber: order ? order.orderNumber : '' });
   };
 
-  // ─── Render ──────────────────────────────────────────────────────────────────
+  // Render ------------------------------------------------------------------
 
-  if (loading) return (<View style={styles.centered}><ActivityIndicator size="large" color="#FF6B35" /><Text style={styles.loadingText}>Loading order…</Text></View>);
-  if (!order)  return (<View style={styles.centered}><Ionicons name="alert-circle-outline" size={64} color="#999" /><Text style={styles.errorText}>Order not found</Text><TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}><Text style={styles.backBtnText}>← Go Back</Text></TouchableOpacity></View>);
+  if (loading) return (<View style={styles.centered}><ActivityIndicator size="large" color="#FF6B35" /><Text style={styles.loadingText}>Loading order...</Text></View>);
+  if (!order)  return (<View style={styles.centered}><Ionicons name="alert-circle-outline" size={64} color="#999" /><Text style={styles.errorText}>Order not found</Text><TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}><Text style={styles.backBtnText}> Go Back</Text></TouchableOpacity></View>);
 
-  const pickedCount = scanned.size + oosItems.size;
+  const pickedCount = scanned.size + oos.size;
   const totalCount  = allScanKeys.length;
   const progress    = totalCount > 0 ? pickedCount / totalCount : 0;
   const allDone     = pickedCount === totalCount;
@@ -445,10 +450,10 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backPress}><Text style={styles.backText}>← Back</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backPress}><Text style={styles.backText}> Back</Text></TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={styles.headerTitle}>Order #{order.orderNumber}</Text>
-          {order.customerInfo?.name && <Text style={styles.customerName}>👤 {order.customerInfo.name}</Text>}
+          {order.customerInfo?.name && <Text style={styles.customerName}> {order.customerInfo.name}</Text>}
         </View>
       </View>
 
@@ -457,17 +462,17 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
       <View style={styles.progressWrap}>
         <View style={styles.progressMeta}>
           <Text style={styles.progressLabel}>{pickedCount} of {totalCount} items resolved</Text>
-          {oosItems.size > 0 && <Text style={styles.oosCount}>{oosItems.size} OOS</Text>}
+          {oos.size > 0 && <Text style={styles.oosCount}>{oos.size} OOS</Text>}
           <Text style={[styles.progressPct, allDone && { color: '#10b981' }]}>{Math.round(progress * 100)}%</Text>
         </View>
         <View style={styles.progressTrack}>
           <View style={[styles.progressFill, { width: `${(scanned.size / totalCount) * 100}%` }]} />
-          <View style={[styles.progressFillOOS, { width: `${(oosItems.size / totalCount) * 100}%` }]} />
+          <View style={[styles.progressFillOOS, { width: `${(oos.size / totalCount) * 100}%` }]} />
         </View>
         <View style={styles.chipRow}>
           {groups.map((grp, gi) => {
             const keys = groupScanKeys[gi];
-            const done = keys.filter(k => scanned.has(k) || oosItems.has(k)).length;
+            const done = keys.filter(k => scanned.has(k) || oos.has(k)).length;
             const allGrpDone = done === keys.length;
             return (
               <View key={grp.key} style={[styles.chip, { borderColor: grp.borderColor, backgroundColor: grp.bgColor }]}>
@@ -482,11 +487,11 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {oosItems.size > 0 && (
+        {oos.size > 0 && (
           <View style={styles.refundBanner}>
             <AlertTriangle size={16} color="#ef4444" />
             <Text style={styles.refundBannerText}>
-              {oosItems.size} item{oosItems.size > 1 ? 's' : ''} out of stock — refund{oosItems.size > 1 ? 's' : ''} will be issued to the customer
+              {oos.size} item{oos.size > 1 ? 's' : ''} out of stock - refund{oos.size > 1 ? 's' : ''} will be issued to the customer
             </Text>
           </View>
         )}
@@ -494,13 +499,13 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
         {groups.map((grp, gi) => (
           <GroupSection
             key={grp.key} group={grp} scanKeys={groupScanKeys[gi]}
-            scannedSet={scanned} oosSet={oosItems}
+            scannedSet={scanned} oosSet={oos}
             onScan={openScanner} onManual={handleManual} onOOS={handleOOS}
           />
         ))}
 
         {(order.totalSavings || 0) > 0 && (
-          <View style={styles.savingsCard}><Star size={16} color="#f59e0b" fill="#f59e0b" /><Text style={styles.savingsText}>Customer saves <Text style={{ fontWeight: '800' }}>R{order.totalSavings!.toFixed(2)}</Text> with specials on this order</Text></View>
+          <View style={styles.savingsCard}><Star size={16} color="#f59e0b" fill="#f59e0b" /><Text style={styles.savingsText}>Customer saves <Text style={{ fontWeight: '800' }}>R{(order.totalSavings || 0).toFixed(2)}</Text> with specials on this order</Text></View>
         )}
         <View style={{ height: 120 }} />
       </ScrollView>
@@ -520,7 +525,7 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
   );
 }
 
-// ─── Enrich items with barcode, image, and stock level ────────────────────────
+// Enrich items with barcode, image, and stock level ------------------------
 async function enrichItems(items: OrderItem[], token: string | null): Promise<OrderItem[]> {
   return Promise.all(items.map(async (item) => {
     try {
@@ -536,6 +541,7 @@ async function enrichItems(items: OrderItem[], token: string | null): Promise<Or
         }
       }
 
+      // Also enrich combo sub-items with barcodes/images if possible
       let enrichedComboItems = item.comboItems;
       if (item.comboItems && item.comboItems.length > 0) {
         enrichedComboItems = await Promise.all(item.comboItems.map(async (ci) => {
@@ -559,7 +565,7 @@ async function enrichItems(items: OrderItem[], token: string | null): Promise<Or
   }));
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// Styles -------------------------------------------------------------------
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
