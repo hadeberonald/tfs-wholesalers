@@ -25,6 +25,7 @@ interface ProductVariant {
 interface Special {
   _id: string;
   name: string;
+  slug: string;
   type: string;
   badgeText?: string;
   conditions: any;
@@ -82,10 +83,35 @@ export default function ProductCard({ product }: ProductCardProps) {
       const res = await fetch(`/api/specials/${specialId}`);
       if (res.ok) {
         const data = await res.json();
-        setSpecial(data.special);
+        if (data.special?.active) setSpecial(data.special);
       }
     } catch (error) {
       console.error('Failed to fetch special');
+    }
+  };
+
+  // ── Special price calculation ──────────────────────────────────────────────
+  const getSpecialPrice = (basePrice: number): number | null => {
+    if (!special) return null;
+    switch (special.type) {
+      case 'percentage_off': {
+        const off = (basePrice * (special.conditions.discountPercentage || 0)) / 100;
+        const cap = special.conditions.maximumDiscount || Infinity;
+        return Math.max(0, basePrice - Math.min(off, cap));
+      }
+      case 'amount_off':
+        return Math.max(0, basePrice - (special.conditions.discountAmount || 0));
+      case 'fixed_price':
+        return special.conditions.newPrice ?? null;
+      case 'multibuy':
+        // Show per-item price
+        return special.conditions.specialPrice
+          ? (special.conditions.specialPrice / (special.conditions.requiredQuantity || 1))
+          : null;
+      case 'conditional_add_on_price':
+        return special.conditions.triggerPrice ?? null;
+      default:
+        return null;
     }
   };
 
@@ -96,16 +122,27 @@ export default function ProductCard({ product }: ProductCardProps) {
     ? selectedVariant.description
     : product.description;
 
-  const displayPrice = selectedVariant
-    ? (selectedVariant.specialPrice || selectedVariant.price || product.price)
-    : (product.specialPrice || product.price);
+  const basePrice = selectedVariant
+    ? (selectedVariant.price || product.price)
+    : product.price;
 
-  const comparePrice = selectedVariant
-    ? (selectedVariant.compareAtPrice || product.compareAtPrice)
-    : product.compareAtPrice;
+  const specialComputedPrice = getSpecialPrice(basePrice);
+
+  // Final display price: special computed > variant specialPrice > product specialPrice > base
+  const displayPrice = specialComputedPrice !== null
+    ? specialComputedPrice
+    : selectedVariant
+      ? (selectedVariant.specialPrice || selectedVariant.price || product.price)
+      : (product.specialPrice || product.price);
+
+  // Compare-at: use base price as strikethrough when special is active
+  const comparePrice = special && specialComputedPrice !== null
+    ? basePrice
+    : selectedVariant
+      ? (selectedVariant.compareAtPrice || product.compareAtPrice)
+      : product.compareAtPrice;
 
   const hasDiscount = !!(comparePrice && comparePrice > displayPrice);
-
   const discountPercent = hasDiscount
     ? Math.round(((comparePrice! - displayPrice) / comparePrice!) * 100)
     : 0;
@@ -123,9 +160,9 @@ export default function ProductCard({ product }: ProductCardProps) {
   const displaySize = displayWeight && displayUnit
     ? `${displayWeight}${displayUnit}`
     : (product.unitQuantity && product.unit ? `${product.unitQuantity}${product.unit}` : '');
-  // ───────────────────────────────────────────────────────────────────────────
 
-  const getSpecialBadge = () => {
+  // ── Special badge ──────────────────────────────────────────────────────────
+  const getSpecialBadge = (): string | null => {
     if (!special || !special.active) return null;
     if (special.badgeText) return special.badgeText;
     switch (special.type) {
@@ -135,7 +172,21 @@ export default function ProductCard({ product }: ProductCardProps) {
       case 'multibuy': return `${special.conditions.requiredQuantity} FOR R${special.conditions.specialPrice}`;
       case 'buy_x_get_y': return `BUY ${special.conditions.buyQuantity} GET ${special.conditions.getQuantity}`;
       case 'bundle': return 'BUNDLE DEAL';
+      case 'conditional_add_on_price': return `UNLOCK @ R${special.conditions.overridePrice}`;
       default: return 'SPECIAL';
+    }
+  };
+
+  // ── Cart unit price (for multibuy: per-item price so qty still makes sense) ─
+  const getCartUnitPrice = (): number => {
+    if (!special) return displayPrice;
+    switch (special.type) {
+      case 'multibuy':
+        return special.conditions.specialPrice
+          ? (special.conditions.specialPrice / (special.conditions.requiredQuantity || 1))
+          : basePrice;
+      default:
+        return displayPrice;
     }
   };
 
@@ -146,7 +197,7 @@ export default function ProductCard({ product }: ProductCardProps) {
       variantId: selectedVariant?._id,
       name: displayName,
       variantName: selectedVariant?.name,
-      price: displayPrice,
+      price: getCartUnitPrice(),
       image: primaryImage,
       quantity,
       sku: selectedVariant?.sku || product.sku || product.slug,
@@ -173,12 +224,7 @@ export default function ProductCard({ product }: ProductCardProps) {
   const handleVariantChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     e.preventDefault();
     const variantId = e.target.value;
-    if (!variantId) {
-      setSelectedVariant(undefined);
-    } else {
-      const variant = product.variants?.find(v => v._id === variantId);
-      setSelectedVariant(variant);
-    }
+    setSelectedVariant(variantId ? product.variants?.find(v => v._id === variantId) : undefined);
     setImgError(false);
     setQuantity(1);
   };
@@ -259,18 +305,13 @@ export default function ProductCard({ product }: ProductCardProps) {
 
       {/* Content */}
       <div className="p-3 md:p-4 flex flex-col flex-grow">
-
-        {/* Name + size — fixed area */}
         <div className="mb-2">
           <h3 className="text-sm md:text-base font-semibold text-brand-black line-clamp-2 group-hover:text-brand-orange transition-colors">
             {displayName}
           </h3>
-          {displaySize && (
-            <p className="text-xs text-gray-500 mt-0.5">{displaySize}</p>
-          )}
+          {displaySize && <p className="text-xs text-gray-500 mt-0.5">{displaySize}</p>}
         </div>
 
-        {/* Description — fixed 2-line clamp so height is stable */}
         <p className="text-xs text-gray-600 mb-2 line-clamp-2 min-h-[2rem]">
           {truncatedDescription || ''}
         </p>
@@ -297,18 +338,17 @@ export default function ProductCard({ product }: ProductCardProps) {
           </div>
         )}
 
-        {/* Spacer to push price + cart to bottom */}
         <div className="flex-grow" />
 
-        {/* Price — always at bottom, single line */}
+        {/* Price */}
         <div className="mb-2">
           <div className="flex items-baseline space-x-2 flex-wrap">
             <span className="text-lg md:text-xl font-bold text-brand-orange whitespace-nowrap">
               R{displayPrice.toFixed(2)}
             </span>
-            {comparePrice && comparePrice > displayPrice && (
+            {hasDiscount && (
               <span className="text-xs text-gray-500 line-through whitespace-nowrap">
-                R{comparePrice.toFixed(2)}
+                R{comparePrice!.toFixed(2)}
               </span>
             )}
             {hasDiscount && (
@@ -317,9 +357,16 @@ export default function ProductCard({ product }: ProductCardProps) {
               </span>
             )}
           </div>
+          {/* Multibuy hint */}
+          {special?.type === 'multibuy' && (
+            <p className="text-xs text-purple-600 font-semibold mt-0.5">
+              {special.conditions.requiredQuantity} for R{special.conditions.specialPrice}
+            </p>
+          )}
         </div>
 
-        {special && special.type === 'buy_x_get_y' && (
+        {/* Special info banners */}
+        {special?.type === 'buy_x_get_y' && (
           <div className="mb-2 bg-blue-50 border border-blue-200 rounded-lg p-2">
             <p className="text-xs text-blue-900 font-semibold">
               Buy {special.conditions.buyQuantity}, Get {special.conditions.getQuantity}
@@ -328,10 +375,10 @@ export default function ProductCard({ product }: ProductCardProps) {
           </div>
         )}
 
-        {special && special.type === 'multibuy' && (
-          <div className="mb-2 bg-purple-50 border border-purple-200 rounded-lg p-2">
-            <p className="text-xs text-purple-900 font-semibold">
-              Buy {special.conditions.requiredQuantity} for only R{special.conditions.specialPrice}
+        {special?.type === 'conditional_add_on_price' && (
+          <div className="mb-2 bg-amber-50 border border-amber-200 rounded-lg p-2">
+            <p className="text-xs text-amber-800 font-semibold">
+              🔓 Unlocks add-on @ R{special.conditions.overridePrice}
             </p>
           </div>
         )}
