@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_URL = 'https://tfs-wholesalers.onrender.com';
+const API_URL = 'https://tfs-wholesalers-ifad.onrender.com';
 
 interface OrderItem {
   productId: string;

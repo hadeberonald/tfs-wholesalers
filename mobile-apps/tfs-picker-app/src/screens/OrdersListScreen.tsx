@@ -14,7 +14,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useFocusEffect } from '@react-navigation/native';
 import { connectPickerSocket, getSocket } from '../services/socketService';
 
-const API_URL = 'https://tfs-wholesalers.onrender.com';
+const API_URL = 'https://tfs-wholesalers-ifad.onrender.com';
 
 const EXCLUDED_STATUSES = [
   'payment_pending', 'payment_failed',

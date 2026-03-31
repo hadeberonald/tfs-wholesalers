@@ -62,7 +62,7 @@ export default async function BranchHomePage({ params }: BranchHomePageProps) {
   }
 
   return (
-    <div className="pt-20">
+    <div>
       {/* branchId scopes hero banners to this branch */}
       <HeroSection branchId={data.branch.id} />
       <SpecialsSection />

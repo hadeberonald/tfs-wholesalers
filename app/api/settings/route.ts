@@ -1,35 +1,45 @@
+// app/api/settings/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
+import { ObjectId } from 'mongodb';
 
 export async function GET(request: NextRequest) {
   try {
+    const { searchParams } = new URL(request.url);
+    const branchId = searchParams.get('branchId');
+
+    if (!branchId) {
+      return NextResponse.json({ error: 'branchId is required' }, { status: 400 });
+    }
+
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
-    
-    const settings = await db.collection('settings').findOne({ type: 'delivery-pricing' });
 
-    return NextResponse.json({ settings });
+    const branch = await db.collection('branches').findOne({
+      _id: new ObjectId(branchId),
+    });
+
+    if (!branch) {
+      return NextResponse.json({ error: 'Branch not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      settings: branch.settings?.deliveryPricing || {
+        local: 35,
+        localRadius: 20,
+        medium: 85,
+        mediumRadius: 40,
+        far: 105,
+        farRadius: 60,
+      },
+      location: branch.settings?.storeLocation || {
+        lat: -29.8587,
+        lng: 31.0218,
+        address: '',
+      },
+    });
   } catch (error) {
     console.error('Failed to fetch settings:', error);
     return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });
-  }
-}
-
-export async function PUT(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const client = await clientPromise;
-    const db = client.db('tfs-wholesalers');
-
-    await db.collection('settings').updateOne(
-      { type: 'delivery-pricing' },
-      { $set: { ...body, updatedAt: new Date() } },
-      { upsert: true }
-    );
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error('Failed to update settings:', error);
-    return NextResponse.json({ error: 'Failed to update settings' }, { status: 500 });
   }
 }

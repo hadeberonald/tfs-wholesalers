@@ -13,7 +13,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useFocusEffect } from '@react-navigation/native';
 import { connectPickerSocket } from '../services/socketService';
 
-const API_URL = 'https://tfs-wholesalers.onrender.com';
+const API_URL = 'https://tfs-wholesalers-ifad.onrender.com';
 
 const DELIVERY_STATUSES = ['collecting', 'ready_for_delivery', 'out_for_delivery'];
 

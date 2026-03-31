@@ -4,9 +4,26 @@ export const dynamic = 'force-dynamic';
 import { useState, useEffect } from 'react';
 import { Settings, Truck, Save } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useBranch } from '@/lib/branch-context';
+
+// Reads the token from localStorage — adjust the key to match where your
+// admin login stores it (common keys: 'admin-token', 'token', 'authToken')
+function getAuthHeaders(): HeadersInit {
+  const token =
+    typeof window !== 'undefined'
+      ? localStorage.getItem('admin-token') ?? localStorage.getItem('token')
+      : null;
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
 
 export default function AdminSettingsPage() {
+  const { branch } = useBranch();
   const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(true);
+
   const [deliveryPricing, setDeliveryPricing] = useState({
     local: 35,
     localRadius: 20,
@@ -22,21 +39,69 @@ export default function AdminSettingsPage() {
     address: '123 Main Street, Durban, KZN 4001',
   });
 
+  useEffect(() => {
+    if (!branch) return;
+
+    const load = async () => {
+      setFetching(true);
+      try {
+        const headers = getAuthHeaders();
+
+        const [deliveryRes, locationRes] = await Promise.all([
+          fetch(`/api/admin/settings/delivery?branchId=${branch.id}`, { headers }),
+          fetch(`/api/admin/settings/location?branchId=${branch.id}`, { headers }),
+        ]);
+
+        if (deliveryRes.ok) {
+          const { settings } = await deliveryRes.json();
+          if (settings) {
+            setDeliveryPricing({
+              local: settings.local ?? 35,
+              localRadius: settings.localRadius ?? 20,
+              medium: settings.medium ?? 85,
+              mediumRadius: settings.mediumRadius ?? 40,
+              far: settings.far ?? 105,
+              farRadius: settings.farRadius ?? 60,
+            });
+          }
+        }
+
+        if (locationRes.ok) {
+          const { location } = await locationRes.json();
+          if (location) {
+            setStoreLocation({
+              lat: location.lat ?? -29.8587,
+              lng: location.lng ?? 31.0218,
+              address: location.address ?? '',
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load settings:', error);
+        toast.error('Failed to load current settings');
+      } finally {
+        setFetching(false);
+      }
+    };
+
+    load();
+  }, [branch]);
+
   const handleSaveDelivery = async () => {
     setLoading(true);
     try {
       const res = await fetch('/api/admin/settings/delivery', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(deliveryPricing),
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ branchId: branch?.id, ...deliveryPricing }),
       });
-
       if (res.ok) {
         toast.success('Delivery pricing updated successfully');
       } else {
-        toast.error('Failed to update delivery pricing');
+        const err = await res.json();
+        toast.error(err.error || 'Failed to update delivery pricing');
       }
-    } catch (error) {
+    } catch {
       toast.error('An error occurred');
     } finally {
       setLoading(false);
@@ -48,21 +113,32 @@ export default function AdminSettingsPage() {
     try {
       const res = await fetch('/api/admin/settings/location', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(storeLocation),
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ branchId: branch?.id, ...storeLocation }),
       });
-
       if (res.ok) {
         toast.success('Store location updated successfully');
       } else {
-        toast.error('Failed to update store location');
+        const err = await res.json();
+        toast.error(err.error || 'Failed to update store location');
       }
-    } catch (error) {
+    } catch {
       toast.error('An error occurred');
     } finally {
       setLoading(false);
     }
   };
+
+  if (fetching) {
+    return (
+      <div className="min-h-screen bg-gray-50 pt-20 flex items-center justify-center">
+        <div className="text-center">
+          <Settings className="w-12 h-12 text-brand-orange mx-auto mb-4 animate-spin" />
+          <p className="text-gray-600">Loading settings...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 pt-20">
@@ -72,10 +148,12 @@ export default function AdminSettingsPage() {
             <Settings className="w-10 h-10 mr-3 text-brand-orange" />
             Settings
           </h1>
-          <p className="text-gray-600">Manage your store configuration</p>
+          <p className="text-gray-600">
+            {branch ? `Managing settings for ${branch.displayName}` : 'Manage your store configuration'}
+          </p>
         </div>
 
-        {/* Delivery Pricing Section */}
+        {/* Delivery Pricing */}
         <div className="bg-white rounded-2xl p-8 mb-6">
           <h2 className="text-2xl text-brand-black mb-6 flex items-center">
             <Truck className="w-6 h-6 mr-2 text-brand-orange" />
@@ -83,14 +161,11 @@ export default function AdminSettingsPage() {
           </h2>
 
           <div className="space-y-6">
-            {/* Local Delivery */}
             <div className="border-b pb-6">
               <h3 className="font-semibold text-lg text-gray-900 mb-4">Local Delivery</h3>
               <div className="grid md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Price (R)
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Price (R)</label>
                   <input
                     type="number"
                     className="input-field"
@@ -101,9 +176,7 @@ export default function AdminSettingsPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Radius (km)
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Radius (km)</label>
                   <input
                     type="number"
                     className="input-field"
@@ -119,14 +192,11 @@ export default function AdminSettingsPage() {
               </p>
             </div>
 
-            {/* Medium Distance */}
             <div className="border-b pb-6">
               <h3 className="font-semibold text-lg text-gray-900 mb-4">Medium Distance</h3>
               <div className="grid md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Price (R)
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Price (R)</label>
                   <input
                     type="number"
                     className="input-field"
@@ -137,9 +207,7 @@ export default function AdminSettingsPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Radius (km)
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Radius (km)</label>
                   <input
                     type="number"
                     className="input-field"
@@ -155,14 +223,11 @@ export default function AdminSettingsPage() {
               </p>
             </div>
 
-            {/* Far Distance */}
             <div className="pb-6">
               <h3 className="font-semibold text-lg text-gray-900 mb-4">Far Distance</h3>
               <div className="grid md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Price (R)
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Price (R)</label>
                   <input
                     type="number"
                     className="input-field"
@@ -173,9 +238,7 @@ export default function AdminSettingsPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Radius (km)
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Radius (km)</label>
                   <input
                     type="number"
                     className="input-field"
@@ -202,7 +265,7 @@ export default function AdminSettingsPage() {
           </div>
         </div>
 
-        {/* Store Location Section */}
+        {/* Store Location */}
         <div className="bg-white rounded-2xl p-8">
           <h2 className="text-2xl text-brand-black mb-6">Store Location</h2>
 
@@ -213,9 +276,7 @@ export default function AdminSettingsPage() {
                 type="text"
                 className="input-field"
                 value={storeLocation.address}
-                onChange={(e) =>
-                  setStoreLocation({ ...storeLocation, address: e.target.value })
-                }
+                onChange={(e) => setStoreLocation({ ...storeLocation, address: e.target.value })}
               />
             </div>
 

@@ -24,7 +24,7 @@ import { useNavigation } from '@react-navigation/native';
 import axios from 'axios';
 import { useAuthStore, Branch } from '../stores/authStore';
 
-const API_URL = 'https://tfs-wholesalers.onrender.com';
+const API_URL = 'https://tfs-wholesalers-ifad.onrender.com';
 
 export default function BranchSelectScreen() {
   const navigation = useNavigation<any>();
