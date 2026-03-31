@@ -19,7 +19,7 @@ import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
 import StatusStepper from '../components/StatusStepper';
 
-const API_URL = 'https://tfs-wholesalers.onrender.com';
+const API_URL = 'https://tfs-wholesalers-ifad.onrender.com';
 
 export default function DeliveryDetailScreen({ navigation: navProp }: any) {
   // Use the prop directly – avoids the generic useNavigation() `never` issue

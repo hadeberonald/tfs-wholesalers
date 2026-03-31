@@ -6,7 +6,7 @@ import { io, Socket } from 'socket.io-client';
 // Same URL used in your existing axios calls
 const API_URL =
   process.env.NODE_ENV === 'production'
-    ? 'https://tfs-wholesalers.onrender.com'
+    ? 'https://tfs-wholesalers-ifad.onrender.com'
     : 'http://192.168.0.100:3000';
 
 let socket: Socket | null = null;

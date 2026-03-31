@@ -38,7 +38,7 @@ export default function ShopPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { branch, loading: branchLoading } = useBranch();
-  
+
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,17 +49,14 @@ export default function ShopPage() {
   const [sortBy, setSortBy] = useState<'newest' | 'name' | 'price-asc' | 'price-desc'>('newest');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalProducts, setTotalProducts] = useState(0);
+  const [isSearchMode, setIsSearchMode] = useState(false);
 
   // Initialize from URL params
   useEffect(() => {
     const categoryParam = searchParams.get('category');
     const pageParam = searchParams.get('page');
-    if (categoryParam) {
-      setSelectedCategory(categoryParam);
-    }
-    if (pageParam) {
-      setCurrentPage(parseInt(pageParam));
-    }
+    if (categoryParam) setSelectedCategory(categoryParam);
+    if (pageParam) setCurrentPage(parseInt(pageParam));
   }, [searchParams]);
 
   useEffect(() => {
@@ -68,15 +65,15 @@ export default function ShopPage() {
     }
   }, [branchLoading, branch]);
 
+  // Guard fetchProducts with isSearchMode so search results are never overwritten
   useEffect(() => {
-    if (!branchLoading && branch) {
+    if (!branchLoading && branch && !isSearchMode) {
       fetchProducts();
     }
-  }, [branchLoading, branch, selectedCategory, sortBy, currentPage]);
+  }, [branchLoading, branch, selectedCategory, sortBy, currentPage, isSearchMode]);
 
   const fetchCategories = async () => {
     if (!branch) return;
-
     try {
       const res = await fetch(`/api/categories?branchId=${branch.id}&withChildren=true`);
       if (res.ok) {
@@ -90,16 +87,14 @@ export default function ShopPage() {
 
   const fetchProducts = async () => {
     if (!branch) return;
-
     setLoading(true);
     try {
       let url = `/api/products?branchId=${branch.id}&page=${currentPage}&limit=${ITEMS_PER_PAGE}`;
-      
+
       if (selectedCategory) {
         url += `&category=${selectedCategory}`;
       }
 
-      // Add sort parameter
       if (sortBy !== 'newest') {
         url += `&sort=${sortBy}`;
       }
@@ -124,40 +119,30 @@ export default function ShopPage() {
     const trimmedQuery = searchQuery.trim();
 
     if (!trimmedQuery || trimmedQuery.length < 2) {
-      // Reset to normal fetch
+      setIsSearchMode(false);
       setSearchQuery('');
       setCurrentPage(1);
-      fetchProducts();
       return;
     }
 
+    setIsSearchMode(true);
     setLoading(true);
     try {
-      console.log('🔍 Searching for:', trimmedQuery);
-      
+      // ✅ Correct path: /api/products/search
       const res = await fetch(
-        `/api/search?q=${encodeURIComponent(trimmedQuery)}&branchId=${branch.id}`
+        `/api/products/search?q=${encodeURIComponent(trimmedQuery)}&branchId=${branch.id}`
       );
-      
       if (res.ok) {
         const data = await res.json();
-        console.log('✅ Search returned:', data.count, 'products');
-        
-        let searchResults = data.products || [];
-        
-        // Apply sorting
-        searchResults = applySorting(searchResults);
-        
+        const searchResults = applySorting(data.products || []);
         setProducts(searchResults);
         setTotalProducts(searchResults.length);
-        setCurrentPage(1); // Reset to page 1 for search results
+        setCurrentPage(1);
       } else {
-        console.error('❌ Search failed with status:', res.status);
-        const error = await res.json();
-        console.error('Error details:', error);
+        console.error('Search failed with status:', res.status);
       }
     } catch (error) {
-      console.error('❌ Search error:', error);
+      console.error('Search error:', error);
     } finally {
       setLoading(false);
     }
@@ -165,27 +150,19 @@ export default function ShopPage() {
 
   const applySorting = (productList: Product[]) => {
     const sorted = [...productList];
-    
     switch (sortBy) {
       case 'name':
         sorted.sort((a, b) => a.name.localeCompare(b.name));
         break;
       case 'price-asc':
-        sorted.sort((a, b) => 
-          (a.specialPrice || a.price) - (b.specialPrice || b.price)
-        );
+        sorted.sort((a, b) => (a.specialPrice || a.price) - (b.specialPrice || b.price));
         break;
       case 'price-desc':
-        sorted.sort((a, b) => 
-          (b.specialPrice || b.price) - (a.specialPrice || a.price)
-        );
+        sorted.sort((a, b) => (b.specialPrice || b.price) - (a.specialPrice || a.price));
         break;
-      case 'newest':
       default:
-        // Already sorted by createdAt in API
         break;
     }
-    
     return sorted;
   };
 
@@ -193,9 +170,10 @@ export default function ShopPage() {
     setSelectedCategory(categoryId);
     setShowCategoryDropdown(false);
     setCategorySearchQuery('');
-    setCurrentPage(1); // Reset to page 1
-    
-    // Update URL
+    setCurrentPage(1);
+    setIsSearchMode(false);
+    setSearchQuery('');
+
     if (categoryId) {
       router.push(`/${branch?.slug}/shop?category=${categoryId}`);
     } else {
@@ -208,32 +186,34 @@ export default function ShopPage() {
     setSearchQuery('');
     setSortBy('newest');
     setCurrentPage(1);
+    setIsSearchMode(false);
     router.push(`/${branch?.slug}/shop`);
   };
 
-  // Flatten categories with nesting indicators
-  const flattenCategories = (cats: Category[], level: number = 0): Array<{category: Category, level: number}> => {
-    let result: Array<{category: Category, level: number}> = [];
-    
+  const flattenCategories = (
+    cats: Category[],
+    level: number = 0
+  ): Array<{ category: Category; level: number }> => {
+    let result: Array<{ category: Category; level: number }> = [];
     cats.forEach(cat => {
       result.push({ category: cat, level });
       if (cat.children && cat.children.length > 0) {
         result = result.concat(flattenCategories(cat.children, level + 1));
       }
     });
-    
     return result;
   };
 
   const flatCategories = flattenCategories(categories);
-  
   const filteredCategories = flatCategories.filter(({ category }) =>
     category.name.toLowerCase().includes(categorySearchQuery.toLowerCase())
   );
 
-  const selectedCategoryName = flatCategories.find(({ category }) => category._id === selectedCategory)?.category.name || 'All Categories';
-  const activeFiltersCount = [selectedCategory, searchQuery].filter(Boolean).length;
+  const selectedCategoryName =
+    flatCategories.find(({ category }) => category._id === selectedCategory)?.category.name ||
+    'All Categories';
 
+  const activeFiltersCount = [selectedCategory, searchQuery].filter(Boolean).length;
   const totalPages = Math.ceil(totalProducts / ITEMS_PER_PAGE);
 
   const handlePageChange = (page: number) => {
@@ -265,12 +245,8 @@ export default function ShopPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-4xl font-bold text-brand-black mb-2">
-            Shop {branch.displayName}
-          </h1>
-          <p className="text-gray-600">
-            Browse our wide selection of quality products
-          </p>
+          <h1 className="text-4xl font-bold text-brand-black mb-2">Shop {branch.displayName}</h1>
+          <p className="text-gray-600">Browse our wide selection of quality products</p>
         </div>
 
         {/* Search & Filter Bar */}
@@ -303,12 +279,13 @@ export default function ShopPage() {
                 className="w-full md:w-64 px-4 py-3 bg-brand-orange text-white rounded-xl hover:bg-orange-600 transition-colors flex items-center justify-between font-semibold"
               >
                 <span className="truncate">{selectedCategoryName}</span>
-                <ChevronDown className={`w-5 h-5 transition-transform ${showCategoryDropdown ? 'rotate-180' : ''}`} />
+                <ChevronDown
+                  className={`w-5 h-5 transition-transform ${showCategoryDropdown ? 'rotate-180' : ''}`}
+                />
               </button>
 
               {showCategoryDropdown && (
                 <div className="absolute top-full mt-2 w-full md:w-80 bg-white rounded-xl shadow-xl border border-gray-200 z-50 max-h-96 overflow-hidden">
-                  {/* Category Search */}
                   <div className="p-3 border-b border-gray-200">
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -323,41 +300,38 @@ export default function ShopPage() {
                     </div>
                   </div>
 
-                  {/* Categories List */}
                   <div className="max-h-80 overflow-y-auto">
                     <button
                       onClick={() => handleCategorySelect('')}
                       className={`w-full px-4 py-3 text-left hover:bg-orange-50 transition-colors ${
-                        !selectedCategory ? 'bg-orange-50 text-brand-orange font-semibold' : 'text-gray-700'
+                        !selectedCategory
+                          ? 'bg-orange-50 text-brand-orange font-semibold'
+                          : 'text-gray-700'
                       }`}
                     >
                       All Categories
                     </button>
-                    
+
                     {filteredCategories.length > 0 ? (
                       filteredCategories.map(({ category, level }) => (
                         <button
                           key={category._id}
                           onClick={() => handleCategorySelect(category._id)}
                           className={`w-full px-4 py-3 text-left hover:bg-orange-50 transition-colors ${
-                            selectedCategory === category._id 
-                              ? 'bg-orange-50 text-brand-orange font-semibold' 
+                            selectedCategory === category._id
+                              ? 'bg-orange-50 text-brand-orange font-semibold'
                               : 'text-gray-700'
                           }`}
                           style={{ paddingLeft: `${(level + 1) * 16}px` }}
                         >
                           {level > 0 && (
-                            <span className="text-gray-400 mr-2">
-                              {'└ '.repeat(level)}
-                            </span>
+                            <span className="text-gray-400 mr-2">{'└ '.repeat(level)}</span>
                           )}
                           {category.name}
                         </button>
                       ))
                     ) : (
-                      <div className="px-4 py-8 text-center text-gray-500">
-                        No categories found
-                      </div>
+                      <div className="px-4 py-8 text-center text-gray-500">No categories found</div>
                     )}
                   </div>
                 </div>
@@ -384,7 +358,7 @@ export default function ShopPage() {
           {activeFiltersCount > 0 && (
             <div className="mt-4 pt-4 border-t border-gray-200 flex items-center gap-2 flex-wrap">
               <span className="text-sm text-gray-600">Active filters:</span>
-              
+
               {selectedCategory && (
                 <button
                   onClick={() => handleCategorySelect('')}
@@ -394,20 +368,20 @@ export default function ShopPage() {
                   <X className="w-3 h-3" />
                 </button>
               )}
-              
+
               {searchQuery && (
                 <button
                   onClick={() => {
                     setSearchQuery('');
-                    fetchProducts();
+                    setIsSearchMode(false);
                   }}
                   className="inline-flex items-center gap-1 px-3 py-1 bg-brand-orange/10 text-brand-orange rounded-full text-sm hover:bg-brand-orange/20 transition-colors"
                 >
-                  Search: "{searchQuery}"
+                  Search: &quot;{searchQuery}&quot;
                   <X className="w-3 h-3" />
                 </button>
               )}
-              
+
               <button
                 onClick={clearFilters}
                 className="text-sm text-brand-orange hover:text-orange-600 font-semibold ml-auto"
@@ -420,10 +394,10 @@ export default function ShopPage() {
 
         {/* Results Count */}
         {!loading && (
-          <div className="mb-4 flex items-center justify-between">
+          <div className="mb-4">
             <p className="text-gray-600">
               {totalProducts} {totalProducts === 1 ? 'product' : 'products'} found
-              {totalPages > 1 && ` (Page ${currentPage} of ${totalPages})`}
+              {totalPages > 1 && !isSearchMode && ` (Page ${currentPage} of ${totalPages})`}
             </p>
           </div>
         )}
@@ -455,8 +429,8 @@ export default function ShopPage() {
               ))}
             </div>
 
-            {/* Pagination */}
-            {totalPages > 1 && !searchQuery && (
+            {/* Pagination — hidden in search mode */}
+            {totalPages > 1 && !isSearchMode && (
               <div className="mt-8 flex items-center justify-center gap-2">
                 <button
                   onClick={() => handlePageChange(currentPage - 1)}
@@ -468,7 +442,6 @@ export default function ShopPage() {
 
                 <div className="flex gap-2">
                   {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
-                    // Show first, last, current, and adjacent pages
                     if (
                       page === 1 ||
                       page === totalPages ||

@@ -16,7 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import StatusStepper from '../components/StatusStepper';
 
-const API_URL = 'https://tfs-wholesalers.onrender.com';
+const API_URL = 'https://tfs-wholesalers-ifad.onrender.com';
 
 export default function DeliveryCollectionScreen({ navigation: navProp }: any) {
   // Cast to avoid generic useNavigation() `never` typing
