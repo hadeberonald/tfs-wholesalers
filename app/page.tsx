@@ -11,7 +11,6 @@ export default function RootPage() {
 
   useEffect(() => {
     const savedBranch = localStorage.getItem('selectedBranch');
-    
     if (savedBranch) {
       router.replace(`/${savedBranch}`);
     } else {
