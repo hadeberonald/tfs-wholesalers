@@ -18,9 +18,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.tfswholesalers.picker",
       "infoPlist": {
-        "UIBackgroundModes": [
-          "remote-notification"
-        ]
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -32,11 +30,8 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.VIBRATE",
-        "android.permission.RECEIVE_BOOT_COMPLETED",
-        "android.permission.POST_NOTIFICATIONS",
         "android.permission.RECORD_AUDIO"
-      ],
-      "googleServicesFile": "./google-services.json"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -46,19 +41,6 @@
         "expo-camera",
         {
           "cameraPermission": "Allow TFS Picker to access your camera to scan barcodes and QR codes."
-        }
-      ],
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/notification-icon.png",
-          "color": "#FF6B35",
-          "androidMode": "default",
-          "androidCollapsedTitle": "TFS Picker",
-          "iosDisplayInForeground": true,
-          "sounds": [
-            "./assets/notification.wav"
-          ]
         }
       ]
     ],
