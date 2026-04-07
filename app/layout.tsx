@@ -25,7 +25,7 @@ export default function RootLayout({
         <AuthProvider>
           <GateWrapper>
             <ConditionalHeader />
-            <main>{children}</main>
+            <main className="pt-16">{children}</main>
             <Footer />
             <Toaster
               position="top-right"
