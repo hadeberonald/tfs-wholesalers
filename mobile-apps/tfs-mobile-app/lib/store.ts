@@ -1,16 +1,8 @@
-// lib/store.ts  (customer app — Expo Router)
-//
-// ─── Changes ─────────────────────────────────────────────────────────────────
-// DeliveryAddress now carries deliveryFee, distance, outsideZone
-// so checkout can use them directly without recalculating.
-
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { unregisterPushNotifications } from '@/lib/notificationService';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
 export interface DeliveryAddress {
   name:             string;
   street:           string;
@@ -21,10 +13,9 @@ export interface DeliveryAddress {
   lat:              number;
   lng:              number;
   formattedAddress: string;
-  // ✅ Delivery calculation result (set by address-picker)
-  deliveryFee:  number;
-  distance:     number;    // km from store
-  outsideZone:  boolean;   // true = cannot deliver
+  deliveryFee:      number;
+  distance:         number;
+  outsideZone:      boolean;
 }
 
 export interface Branch {
@@ -38,7 +29,6 @@ export interface Branch {
     storeLocation?: { lat: number; lng: number; address: string };
     contactEmail?: string;
     contactPhone?: string;
-    // ✅ Delivery pricing tiers (populated from /api/settings)
     deliveryPricing?: {
       local:        number;
       localRadius:  number;
@@ -68,23 +58,17 @@ export interface CartItem {
   image: string;
   quantity: number;
   sku?: string;
-
-  // Special / promotion fields
   appliedSpecialId?: string;
   specialDiscount?: number;
   specialDescription?: string;
   specialType?: string;
   specialConditions?: Record<string, any>;
-
-  // Bonus / free item flags
   isFreeItem?: boolean;
   isMultibuyBonus?: boolean;
   isBonusItem?: boolean;
   autoAdded?: boolean;
   linkedToItemId?: string;
   meetsSpecialRequirement?: boolean;
-
-  // Combo flags
   isComboItem?: boolean;
   comboId?: string;
   comboName?: string;
@@ -102,19 +86,11 @@ export interface WishlistItem {
   slug: string;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Store shape
-// ─────────────────────────────────────────────────────────────────────────────
 interface StoreState {
-  // Auth
   user: User | null;
   setUser: (user: User | null) => void;
-
-  // Branch
   branch: Branch | null;
   setBranch: (branch: Branch | null) => void;
-
-  // Cart
   items: CartItem[];
   addItem: (item: CartItem) => void;
   addToCart: (item: CartItem) => void;
@@ -123,37 +99,24 @@ interface StoreState {
   clearCart: () => void;
   getTotal: () => number;
   getItemCount: () => number;
-
-  // Wishlist
   wishlist: WishlistItem[];
   addToWishlist: (item: WishlistItem) => void;
   removeFromWishlist: (id: string, variantId?: string) => void;
   isInWishlist: (id: string, variantId?: string) => boolean;
-
-  // Address handoff (address-picker → checkout)
-  // ✅ Uses the enriched DeliveryAddress with fee/distance/outsideZone
   pendingDeliveryAddress: DeliveryAddress | null;
   setPendingDeliveryAddress: (address: DeliveryAddress | null) => void;
-
-  // Auth helpers
   logout: () => Promise<void>;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Store
-// ─────────────────────────────────────────────────────────────────────────────
 export const useStore = create<StoreState>()(
   persist(
     (set, get) => ({
-      // ── Auth ───────────────────────────────────────────────────────────────
-      user: null,
+      user:   null,
       setUser: (user) => set({ user }),
 
-      // ── Branch ─────────────────────────────────────────────────────────────
-      branch: null,
+      branch:    null,
       setBranch: (branch) => set({ branch }),
 
-      // ── Cart ───────────────────────────────────────────────────────────────
       items: [],
 
       addItem: (item) => {
@@ -210,7 +173,6 @@ export const useStore = create<StoreState>()(
       getItemCount: () =>
         get().items.reduce((sum, item) => sum + item.quantity, 0),
 
-      // ── Wishlist ───────────────────────────────────────────────────────────
       wishlist: [],
 
       addToWishlist: (item) => {
@@ -241,25 +203,24 @@ export const useStore = create<StoreState>()(
             : w.id === id && !w.variantId
         ),
 
-      // ── Address handoff ────────────────────────────────────────────────────
       pendingDeliveryAddress: null,
       setPendingDeliveryAddress: (address) => set({ pendingDeliveryAddress: address }),
 
-      // ── Logout ─────────────────────────────────────────────────────────────
+      // ── Logout — unregister push token then clear everything ───────────────
       logout: async () => {
-        await AsyncStorage.multiRemove(['user', 'selectedBranch']);
+        await unregisterPushNotifications().catch(() => {});
+        await AsyncStorage.multiRemove(['user', 'selectedBranch', 'auth_token', 'push_token']);
         set({ user: null, branch: null, items: [], wishlist: [], pendingDeliveryAddress: null });
       },
     }),
     {
-      name: 'tfs-customer-store',
+      name:    'tfs-customer-store',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
         user:     state.user,
         branch:   state.branch,
         items:    state.items,
         wishlist: state.wishlist,
-        // pendingDeliveryAddress intentionally excluded (transient)
       }),
     }
   )

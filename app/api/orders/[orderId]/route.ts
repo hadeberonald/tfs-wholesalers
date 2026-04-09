@@ -1,13 +1,10 @@
-// app/api/orders/[orderId]/route.ts
-// Same as before but emits Socket.IO events after every status update
-// so the customer app and picker app update in real time.
-
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 import { getAdminBranch } from '@/lib/get-admin-branch';
 import { verifyMobileToken } from '@/lib/verify-mobile-token';
-import { getIO } from '@/lib/socket';   // ← thin wrapper (see lib/socket.ts)
+import { getIO } from '@/lib/socket';
+import { notifyBranchPickers, notifyUser } from '@/lib/sendPushNotification'; // ← NEW
 
 async function findOrder(db: any, orderId: string) {
   if (ObjectId.isValid(orderId)) {
@@ -15,6 +12,60 @@ async function findOrder(db: any, orderId: string) {
     if (o) return o;
   }
   return db.collection('orders').findOne({ orderNumber: orderId });
+}
+
+// ─── Notification logic per status ───────────────────────────────────────────
+function triggerStatusNotification(order: any, newStatus: string) {
+  const orderId     = order._id?.toString() || order.id;
+  const orderNumber = order.orderNumber || orderId;
+  const branchId    = order.branchId?.toString();
+  const customerId  = order.userId?.toString();
+
+  switch (newStatus) {
+    case 'confirmed':
+      if (branchId) notifyBranchPickers(branchId, {
+        title: '📋 Order Confirmed',
+        body:  `${orderNumber} has been confirmed and needs picking`,
+        data:  { type: 'order_update', orderId, orderNumber },
+      }).catch(() => {});
+      break;
+
+    case 'picking':
+      // No notification needed — picker started it themselves
+      break;
+
+    case 'ready_for_delivery':
+      if (branchId) notifyBranchPickers(branchId, {
+        title: '📦 Ready for Delivery',
+        body:  `${orderNumber} is packed and waiting for a driver`,
+        data:  { type: 'ready_for_delivery', orderId, orderNumber },
+      }).catch(() => {});
+      break;
+
+    case 'out_for_delivery':
+      if (customerId) notifyUser(customerId, {
+        title: '🚗 Your order is on the way!',
+        body:  `${orderNumber} is out for delivery`,
+        data:  { type: 'order_update', orderId, orderNumber },
+      }).catch(() => {});
+      break;
+
+    case 'delivered':
+      if (customerId) notifyUser(customerId, {
+        title: '✅ Order Delivered',
+        body:  `${orderNumber} has been delivered. Enjoy!`,
+        data:  { type: 'order_update', orderId, orderNumber },
+      }).catch(() => {});
+      break;
+
+    case 'cancelled':
+      if (customerId) notifyUser(customerId, {
+        title: '❌ Order Cancelled',
+        body:  `${orderNumber} has been cancelled`,
+        data:  { type: 'order_update', orderId, orderNumber },
+      }).catch(() => {});
+      break;
+  }
 }
 
 // ─── GET ─────────────────────────────────────────────────────────────────────
@@ -77,8 +128,12 @@ export async function PATCH(
 
       const serialized = { ...result, _id: result._id.toString(), id: result._id.toString() };
 
-      // ── Emit socket events ──────────────────────────────────────────────────
       emitOrderUpdate(serialized, safeUpdates.status);
+
+      // ── Fire push notification ──────────────────────────────────────────
+      if (safeUpdates.status) {
+        triggerStatusNotification(serialized, safeUpdates.status);
+      }
 
       console.log(`✅ [Mobile] Order ${params.orderId} → status: ${safeUpdates.status || 'unchanged'}`);
       return NextResponse.json({ success: true, order: serialized });
@@ -107,8 +162,12 @@ export async function PATCH(
 
     const serialized = { ...result, _id: result._id.toString(), id: result._id.toString() };
 
-    // ── Emit socket events ────────────────────────────────────────────────────
     emitOrderUpdate(serialized, safeUpdates.status);
+
+    // ── Fire push notification ────────────────────────────────────────────
+    if (safeUpdates.status) {
+      triggerStatusNotification(serialized, safeUpdates.status);
+    }
 
     console.log(`✅ [Admin] Order ${params.orderId} updated`);
     return NextResponse.json({ success: true, order: serialized });
@@ -122,7 +181,7 @@ export async function PUT(request: NextRequest, { params }: { params: { orderId:
   return PATCH(request, { params });
 }
 
-// ─── Helper: emit to both the order room and the branch room ─────────────────
+// ─── Socket helper ────────────────────────────────────────────────────────────
 function emitOrderUpdate(order: any, newStatus?: string) {
   try {
     const io = getIO();
@@ -130,20 +189,13 @@ function emitOrderUpdate(order: any, newStatus?: string) {
 
     const orderId  = order._id?.toString() || order.id;
     const branchId = order.branchId?.toString();
+    const payload  = { order, status: newStatus || order.status || order.orderStatus };
 
-    const payload = { order, status: newStatus || order.status || order.orderStatus };
-
-    // Customer app is in room `order:<orderId>`
     io.to(`order:${orderId}`).emit('order:updated', payload);
-
-    // Picker app is in room `branch:<branchId>`
-    if (branchId) {
-      io.to(`branch:${branchId}`).emit('order:updated', payload);
-    }
+    if (branchId) io.to(`branch:${branchId}`).emit('order:updated', payload);
 
     console.log(`[Socket] Emitted order:updated → order:${orderId}${branchId ? ` + branch:${branchId}` : ''}`);
   } catch (err) {
-    // Never let a socket failure break the HTTP response
     console.error('[Socket] emit error:', err);
   }
 }
