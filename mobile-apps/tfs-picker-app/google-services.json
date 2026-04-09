@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "640255184307",
+    "project_id": "tfs-wholesalers",
+    "storage_bucket": "tfs-wholesalers.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:640255184307:android:44d42581c7f2ce2e16cfc6",
+        "android_client_info": {
+          "package_name": "com.tfswholesalers.picker"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAg4yvlBOfy_ivjkLY_CDvlVmZN3AZGqBM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

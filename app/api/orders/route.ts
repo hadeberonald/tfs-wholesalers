@@ -1,23 +1,21 @@
-// app/api/orders/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 import { getAdminBranch } from '@/lib/get-admin-branch';
 import { verifyMobileToken } from '@/lib/verify-mobile-token';
+import { notifyBranchPickers } from '@/lib/sendPushNotification'; // ← NEW
 
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const userId  = searchParams.get('userId');
     const all     = searchParams.get('all');
-    const picking = searchParams.get('picking'); // ordersStore.fetchOrders sends this
+    const picking = searchParams.get('picking');
 
     const client = await clientPromise;
     const db     = client.db('tfs-wholesalers');
-
     const query: any = {};
 
-    // ── Picker / delivery app (Bearer token) ─────────────────────────────────
     const authHeader = request.headers.get('authorization') || '';
     if (authHeader.startsWith('Bearer ')) {
       const mobileUser = await verifyMobileToken(authHeader.replace('Bearer ', ''));
@@ -25,7 +23,6 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
 
-      // Scope to picker's active branch — DB has the latest value after set-branch
       if (mobileUser.activeBranchId) {
         try {
           query.branchId = new ObjectId(mobileUser.activeBranchId);
@@ -34,13 +31,11 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      // What statuses are relevant to the picker queue
       if (picking === 'true') {
         query.status = {
           $in: ['pending', 'confirmed', 'picking', 'packaging', 'collecting', 'ready_for_delivery'],
         };
       } else {
-        // ?all=true from OrdersListScreen — exclude terminal + payment statuses
         query.status = {
           $nin: ['payment_pending', 'payment_failed', 'out_for_delivery', 'delivered'],
         };
@@ -56,7 +51,6 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // ── Admin dashboard (session cookie) ────────────────────────────────────
     if (all === 'true') {
       const adminInfo = await getAdminBranch();
       if ('error' in adminInfo) {
@@ -66,7 +60,6 @@ export async function GET(request: NextRequest) {
         query.branchId = adminInfo.branchId;
       }
     } else if (userId) {
-      // Customer app — their own orders only
       query.userId = userId;
     }
 
@@ -92,7 +85,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Branch ID is required' }, { status: 400 });
     }
 
-    // Enrich order items with product/variant data including barcodes
     const enrichedItems = await Promise.all(
       body.items.map(async (item: any) => {
         try {
@@ -141,25 +133,36 @@ export async function POST(request: NextRequest) {
       })
     );
 
+    const orderNumber = `ORD-${Date.now()}`;
     const order = {
       ...body,
       items:       enrichedItems,
       branchId:    new ObjectId(body.branchId),
-      orderNumber: `ORD-${Date.now()}`,
+      orderNumber,
       createdAt:   new Date(),
       updatedAt:   new Date(),
     };
 
     const result = await db.collection('orders').insertOne(order);
+    const orderId = result.insertedId.toString();
 
-    console.log('✅ Order created:', result.insertedId.toString());
-    console.log(`   Branch: ${body.branchId}`);
-    console.log(`   ${enrichedItems.filter((i: any) => i.barcode).length}/${enrichedItems.length} items have barcodes`);
+    console.log('✅ Order created:', orderId);
+
+    // ── Notify pickers at this branch ──────────────────────────────────────
+    notifyBranchPickers(body.branchId, {
+      title: '🛒 New Order',
+      body:  `Order ${orderNumber} is ready to pick — ${enrichedItems.length} item(s)`,
+      data:  {
+        type:        'new_order',
+        orderId,
+        orderNumber,
+      },
+    }).catch(() => {}); // fire and forget — never block the response
 
     return NextResponse.json({
       success: true,
-      orderId:     result.insertedId.toString(),
-      orderNumber: order.orderNumber,
+      orderId,
+      orderNumber,
     }, { status: 201 });
   } catch (error) {
     console.error('❌ Failed to create order:', error);
