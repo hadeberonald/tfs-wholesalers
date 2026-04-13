@@ -225,9 +225,9 @@ async function upsertPosSpecial(
 ): Promise<ObjectId> {
   const now = new Date();
   const doc = {
-    name:        `${productName} — POS Special`,
+    name:        productName,
     slug:        `pos-special-${productId.toString()}`,
-    description: 'Price reduction synced from POS system',
+    description: '',
     type:        'fixed_price',
     productId:   productId.toString(),
     conditions:  { newPrice: specialPrice },
