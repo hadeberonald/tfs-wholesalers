@@ -11,6 +11,9 @@
  * machine's batch file misses a run for any reason.
  */
 
+// Tells Next.js to never bundle this file for browser or edge runtime
+export const runtime = 'nodejs';
+
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
 
