@@ -1,9 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Required for instrumentation.ts to run on server start
-  // This is what boots the POS sync scheduler
   experimental: {
     instrumentationHook: true,
+    serverExternalPackages: ['mongodb', 'basic-ftp'],
   },
   images: {
     domains: ['localhost'],
