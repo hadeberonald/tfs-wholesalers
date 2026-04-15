@@ -273,24 +273,43 @@ export async function notifyBranchPickers(
   }
 }
 
-// ─── Push: specific user by userId ───────────────────────────────────────────
+// ─── Push: specific user by userId — ALL devices ─────────────────────────────
+//
+// FIX: was using findOne — only one device notified.
+// Now uses find() so every registered device for this user receives the push.
+// Also skips "guest" tokens that were never linked to a real userId.
 
 export async function notifyUser(
   userId: string,
   payload: PushPayload
 ): Promise<void> {
+  // Guard: never attempt to notify "guest" or empty userId
+  if (!userId || userId === 'guest') {
+    console.warn(`[Push] notifyUser: skipping invalid userId "${userId}"`);
+    return;
+  }
+
   try {
     const client = await clientPromise;
     const db     = client.db('tfs-wholesalers');
 
-    const tokenDoc = await db.collection('push_tokens').findOne({ userId });
-    if (!tokenDoc?.pushToken) {
-      console.warn(`[Push] notifyUser: no token for userId ${userId}`);
+    // Fetch ALL tokens for this user so every device is reached
+    const tokenDocs = await db.collection('push_tokens').find(
+      { userId }
+    ).toArray();
+
+    if (!tokenDocs.length) {
+      console.warn(`[Push] notifyUser: no tokens for userId ${userId}`);
       return;
     }
 
-    await sendPushNotification(tokenDoc.pushToken, payload);
-    console.log(`[Push] Notified user ${userId}`);
+    console.log(`[Push] notifyUser: found ${tokenDocs.length} token(s) for userId ${userId}`);
+
+    await Promise.allSettled(
+      tokenDocs.map(doc => sendPushNotification(doc.pushToken, payload))
+    );
+
+    console.log(`[Push] Notified user ${userId} on ${tokenDocs.length} device(s)`);
   } catch (err) {
     console.error('[Push] notifyUser failed:', err);
   }

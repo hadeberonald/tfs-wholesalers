@@ -29,12 +29,22 @@ async function findOrder(db: any, orderId: string) {
 // ─── Notifications per status ─────────────────────────────────────────────────
 
 async function triggerStatusNotifications(order: any, newStatus: string): Promise<void> {
-  const orderId      = order._id?.toString() || order.id;
-  const orderNumber  = order.orderNumber || orderId;
-  const branchId     = order.branchId?.toString();
-  const customerId   = order.userId?.toString();
-  const customerEmail = order.customerEmail ?? null;
-  const customerName  = order.customerName  ?? 'Customer';
+  const orderId     = order._id?.toString() || order.id;
+  const orderNumber = order.orderNumber || orderId;
+  const branchId    = order.branchId?.toString();
+  const customerId  = order.userId?.toString();
+
+  // ── FIX: resolve customer identity from EITHER storage shape ──────────────
+  // Old orders (and the web checkout) may store these in customerInfo{}
+  // rather than at the top level.  Always prefer the top-level field first.
+  const customerEmail =
+    order.customerEmail ||
+    order.customerInfo?.email ||
+    null;
+  const customerName =
+    order.customerName ||
+    order.customerInfo?.name ||
+    'Customer';
 
   // ── Mobile push (Expo) + Web push (browser) ──────────────────────────────────
   switch (newStatus) {
@@ -91,7 +101,6 @@ async function triggerStatusNotifications(order: any, newStatus: string): Promis
           body:  `Your order ${orderNumber} is out for delivery`,
           data:  { type: 'order_update', orderId, orderNumber, status: newStatus },
         }).catch(() => {});
-        // Web push to the customer's browser too
         notifyUserWeb(customerId, {
           title: '🚗 On the Way!',
           body:  `Your order ${orderNumber} is out for delivery`,
@@ -134,9 +143,17 @@ async function triggerStatusNotifications(order: any, newStatus: string): Promis
   // ── Email ─────────────────────────────────────────────────────────────────────
   if (customerEmail) {
     const emailPayload = buildOrderStatusEmail({
-      orderNumber, customerName, customerEmail, status: newStatus,
+      orderNumber,
+      customerName,
+      customerEmail,
+      status: newStatus,
     });
     if (emailPayload) sendTransactionalEmail(emailPayload).catch(() => {});
+  } else {
+    console.warn(
+      `[Notifications] No customerEmail on order ${orderNumber} — status email skipped. ` +
+      `Check that customerEmail / customerInfo.email is stored on the order document.`
+    );
   }
 }
 
