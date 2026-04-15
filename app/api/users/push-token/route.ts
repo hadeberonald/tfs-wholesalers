@@ -1,3 +1,4 @@
+// app/api/push-token/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { verifyMobileToken } from '@/lib/verify-mobile-token';
@@ -34,33 +35,57 @@ export async function POST(request: NextRequest) {
     const client = await clientPromise;
     const db     = client.db('tfs-wholesalers');
 
-    // Only include userId in $set if we actually have one —
-    // prevents a guest re-registration from wiping a previously linked userId
-    const setFields: Record<string, any> = {
-      pushToken,
-      platform:  platform ?? 'unknown',
-      updatedAt: new Date(),
-    };
     if (resolvedUserId) {
-      setFields.userId = resolvedUserId;
-    }
-
-    const result = await db.collection('push_tokens').updateOne(
-      { pushToken },
-      {
-        $set:         setFields,
-        $setOnInsert: {
-          userId:    resolvedUserId, // set on first insert (may be null for guest)
-          createdAt: new Date(),
+      // ── Authenticated path ─────────────────────────────────────────────────
+      // Always write userId into $set so:
+      //   (a) A newly inserted token gets the userId immediately.
+      //   (b) A previously-guest token gets re-linked to the real user.
+      // We also delete any OTHER guest-tagged document for this same token
+      // to avoid duplicates from pre-login registration.
+      await db.collection('push_tokens').updateOne(
+        { pushToken },
+        {
+          $set: {
+            pushToken,
+            userId:    resolvedUserId,
+            platform:  platform ?? 'unknown',
+            updatedAt: new Date(),
+          },
+          $setOnInsert: {
+            createdAt: new Date(),
+          },
         },
-      },
-      { upsert: true }
-    );
+        { upsert: true }
+      );
 
-    console.log(
-      `[PushToken] Saved — userId: ${resolvedUserId ?? 'guest'} | platform: ${platform}`,
-      `| matched: ${result.matchedCount} | upserted: ${result.upsertedCount}`
-    );
+      console.log(
+        `[PushToken] Saved (authenticated) — userId: ${resolvedUserId} | platform: ${platform} | token: …${pushToken.slice(-8)}`
+      );
+    } else {
+      // ── Guest path ─────────────────────────────────────────────────────────
+      // Store the token but only set userId on first insert (setOnInsert).
+      // If the document already exists (i.e. the user previously registered
+      // while authenticated), do NOT overwrite the real userId with null.
+      await db.collection('push_tokens').updateOne(
+        { pushToken },
+        {
+          $set: {
+            platform:  platform ?? 'unknown',
+            updatedAt: new Date(),
+          },
+          $setOnInsert: {
+            pushToken,
+            userId:    null,           // only written on first-ever insert
+            createdAt: new Date(),
+          },
+        },
+        { upsert: true }
+      );
+
+      console.log(
+        `[PushToken] Saved (guest) — platform: ${platform} | token: …${pushToken.slice(-8)}`
+      );
+    }
 
     return NextResponse.json({ success: true }, { headers: CORS });
   } catch (err) {

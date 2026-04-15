@@ -81,6 +81,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Branch ID is required' }, { status: 400 });
     }
 
+    // ── Resolve customer name / email from EITHER location ─────────────────
+    // Web checkout sends: customerInfo.{ name, email } (no top-level fields)
+    // Mobile checkout sends: customerName + customerEmail at top level
+    // Both paths now work correctly.
+    const customerName  = body.customerName  || body.customerInfo?.name  || null;
+    const customerEmail = body.customerEmail || body.customerInfo?.email || null;
+    const deliveryAddress =
+      body.deliveryAddress ||
+      body.shippingAddress?.address ||
+      null;
+
     const enrichedItems = await Promise.all(
       body.items.map(async (item: any) => {
         try {
@@ -132,22 +143,24 @@ export async function POST(request: NextRequest) {
     const orderNumber = `ORD-${Date.now()}`;
     const order = {
       ...body,
-      items:       enrichedItems,
-      branchId:    new ObjectId(body.branchId),
+      items:          enrichedItems,
+      branchId:       new ObjectId(body.branchId),
       orderNumber,
-      status:      body.status ?? 'pending',
-      createdAt:   new Date(),
-      updatedAt:   new Date(),
-      // These are stored explicitly so the PATCH route can read them back
-      // for status-update emails without having to fetch the user separately
-      customerName:    body.customerName    ?? null,
-      customerEmail:   body.customerEmail   ?? null,
-      deliveryAddress: body.deliveryAddress ?? null,
+      status:         body.status ?? 'pending',
+      createdAt:      new Date(),
+      updatedAt:      new Date(),
+      // ── Guaranteed-populated customer fields ─────────────────────────────
+      // These are read by the PATCH route to send status emails without
+      // performing a separate user lookup. Resolving from both payload shapes
+      // means web checkout AND mobile checkout populate them correctly.
+      customerName,
+      customerEmail,
+      deliveryAddress,
     };
 
     const result  = await db.collection('orders').insertOne(order);
     const orderId = result.insertedId.toString();
-    console.log('✅ Order created:', orderId);
+    console.log('✅ Order created:', orderId, '| customer:', customerEmail ?? 'guest');
 
     // ── Notify branch pickers (push) — fire and forget ─────────────────────
     notifyBranchPickers(body.branchId, {
@@ -157,14 +170,14 @@ export async function POST(request: NextRequest) {
     }).catch(() => {});
 
     // ── Confirm to customer (email) — fire and forget ──────────────────────
-    if (body.customerEmail) {
+    if (customerEmail) {
       const emailPayload = buildOrderConfirmationEmail({
         orderNumber,
-        customerName:    body.customerName    ?? 'Customer',
-        customerEmail:   body.customerEmail,
+        customerName:    customerName ?? 'Customer',
+        customerEmail,
         items:           enrichedItems,
-        total:           body.total           ?? 0,
-        deliveryAddress: body.deliveryAddress ?? undefined,
+        total:           body.total ?? 0,
+        deliveryAddress: deliveryAddress ?? undefined,
       });
       sendTransactionalEmail(emailPayload).catch(() => {});
     }
