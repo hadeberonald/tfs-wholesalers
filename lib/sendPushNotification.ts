@@ -1,5 +1,12 @@
 // lib/sendPushNotification.ts
-import clientPromise from '@/lib/mongodb';
+//
+// ⚠️  BUILD FIX: Changed `@/lib/mongodb` → `./mongodb`
+// When Render compiles this file via tsc directly (not through Next.js),
+// the `@/` path alias is NOT resolved, causing:
+//   error TS2307: Cannot find module '@/lib/mongodb'
+// Using a relative import works in both contexts.
+
+import clientPromise from './mongodb';
 import { ObjectId } from 'mongodb';
 import nodemailer from 'nodemailer';
 
@@ -19,14 +26,6 @@ export interface EmailPayload {
 }
 
 // ─── Nodemailer transport ─────────────────────────────────────────────────────
-// Required env vars in Render dashboard:
-//   SMTP_HOST  → mail.tfswholesalers.com  (cPanel → Email Accounts → Connect Devices)
-//   SMTP_PORT  → 587
-//   SMTP_USER  → noreply@tfswholesalers.com
-//   SMTP_PASS  → mailbox password
-//
-// Lazy-initialised so missing env vars throw at call time (not at module load),
-// which gives a clear error in logs rather than a silent crash.
 
 let _transporter: nodemailer.Transporter | null = null;
 
@@ -42,7 +41,7 @@ function getTransporter(): nodemailer.Transporter {
   _transporter = nodemailer.createTransport({
     host:   process.env.SMTP_HOST,
     port:   Number(process.env.SMTP_PORT ?? 587),
-    secure: Number(process.env.SMTP_PORT) === 465, // true = SSL, false = STARTTLS
+    secure: Number(process.env.SMTP_PORT) === 465,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
@@ -51,10 +50,6 @@ function getTransporter(): nodemailer.Transporter {
 
   return _transporter;
 }
-
-// ─── SMTP health check ────────────────────────────────────────────────────────
-// Call once in server.ts on startup to surface config errors early.
-// Never throws — email is non-critical and must not crash the server.
 
 export async function verifyEmailTransport(): Promise<void> {
   try {
@@ -65,8 +60,6 @@ export async function verifyEmailTransport(): Promise<void> {
     console.error('[Email] SMTP verification FAILED:', err);
   }
 }
-
-// ─── Email sender ─────────────────────────────────────────────────────────────
 
 export async function sendTransactionalEmail(payload: EmailPayload): Promise<void> {
   try {
@@ -80,32 +73,25 @@ export async function sendTransactionalEmail(payload: EmailPayload): Promise<voi
     });
     console.log('[Email] Sent OK — messageId:', info.messageId, '→', payload.to);
   } catch (err) {
-    // Never throws — email failure must NEVER crash the order flow
     console.error('[Email] sendMail FAILED:', err);
   }
 }
 
-// ─── Shared email wrapper ─────────────────────────────────────────────────────
+// ─── Email templates ──────────────────────────────────────────────────────────
 
 function emailWrapper(content: string): string {
   return `
   <div style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;max-width:600px;margin:auto;color:#1a1a1a;background:#ffffff">
     <div style="background:#FF6B35;padding:28px 32px">
-      <h1 style="color:#fff;margin:0;font-size:22px;font-weight:700;letter-spacing:-0.5px">
-        TFS Wholesalers
-      </h1>
+      <h1 style="color:#fff;margin:0;font-size:22px;font-weight:700;letter-spacing:-0.5px">TFS Wholesalers</h1>
     </div>
-    <div style="padding:32px">
-      ${content}
-    </div>
+    <div style="padding:32px">${content}</div>
     <div style="background:#f5f5f5;padding:20px 32px;text-align:center;font-size:12px;color:#999;border-top:1px solid #eee">
       © ${new Date().getFullYear()} TFS Wholesalers &nbsp;·&nbsp;
       <a href="mailto:support@tfswholesalers.com" style="color:#999">support@tfswholesalers.com</a>
     </div>
   </div>`;
 }
-
-// ─── Template: order confirmed ────────────────────────────────────────────────
 
 export function buildOrderConfirmationEmail(order: {
   orderNumber:      string;
@@ -118,29 +104,19 @@ export function buildOrderConfirmationEmail(order: {
   const rows = order.items.map(i => `
     <tr>
       <td style="padding:10px 8px;border-bottom:1px solid #f0f0f0">
-        ${i.name}${i.variantName
-          ? ` <span style="color:#888;font-size:13px">(${i.variantName})</span>`
-          : ''}
+        ${i.name}${i.variantName ? ` <span style="color:#888;font-size:13px">(${i.variantName})</span>` : ''}
       </td>
-      <td style="padding:10px 8px;border-bottom:1px solid #f0f0f0;text-align:center;color:#555">
-        ${i.quantity}
-      </td>
-      <td style="padding:10px 8px;border-bottom:1px solid #f0f0f0;text-align:right">
-        R${(i.price * i.quantity).toFixed(2)}
-      </td>
+      <td style="padding:10px 8px;border-bottom:1px solid #f0f0f0;text-align:center;color:#555">${i.quantity}</td>
+      <td style="padding:10px 8px;border-bottom:1px solid #f0f0f0;text-align:right">R${(i.price * i.quantity).toFixed(2)}</td>
     </tr>`).join('');
 
   const html = emailWrapper(`
     <h2 style="margin:0 0 8px;font-size:20px">Order Confirmed ✅</h2>
-    <p style="color:#555;margin:0 0 24px">
-      Hi ${order.customerName}, we've received your order and it's being prepared.
-    </p>
-
+    <p style="color:#555;margin:0 0 24px">Hi ${order.customerName}, we've received your order and it's being prepared.</p>
     <div style="background:#fff8f5;border:1px solid #ffe0d0;border-radius:8px;padding:16px 20px;margin-bottom:24px">
       <p style="margin:0;font-size:12px;color:#aaa;text-transform:uppercase;letter-spacing:0.5px">Order Number</p>
       <p style="margin:4px 0 0;font-size:22px;font-weight:700;color:#FF6B35">${order.orderNumber}</p>
     </div>
-
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
       <thead>
         <tr style="background:#f9f9f9">
@@ -153,22 +129,12 @@ export function buildOrderConfirmationEmail(order: {
       <tfoot>
         <tr>
           <td colspan="2" style="padding:12px 8px;font-weight:700;text-align:right;font-size:15px">Total</td>
-          <td style="padding:12px 8px;font-weight:700;text-align:right;font-size:15px;color:#FF6B35">
-            R${order.total.toFixed(2)}
-          </td>
+          <td style="padding:12px 8px;font-weight:700;text-align:right;font-size:15px;color:#FF6B35">R${order.total.toFixed(2)}</td>
         </tr>
       </tfoot>
     </table>
-
-    ${order.deliveryAddress ? `
-    <p style="margin:16px 0 4px;font-size:13px;color:#888">Delivering to</p>
-    <p style="margin:0;color:#333">${order.deliveryAddress}</p>
-    ` : ''}
-
-    <p style="margin:24px 0 0;color:#888;font-size:13px">
-      You'll receive an update each time your order status changes.
-      Open the TFS app to track in real time.
-    </p>
+    ${order.deliveryAddress ? `<p style="margin:16px 0 4px;font-size:13px;color:#888">Delivering to</p><p style="margin:0;color:#333">${order.deliveryAddress}</p>` : ''}
+    <p style="margin:24px 0 0;color:#888;font-size:13px">You'll receive an update each time your order status changes. Open the TFS app to track in real time.</p>
   `);
 
   return {
@@ -179,42 +145,15 @@ export function buildOrderConfirmationEmail(order: {
   };
 }
 
-// ─── Template: status update ──────────────────────────────────────────────────
-
 const STATUS_MAP: Record<string, { label: string; colour: string; message: string }> = {
-  packaging: {
-    label:   'Being Packaged 📦',
-    colour:  '#f59e0b',
-    message: 'Your order is being carefully packed and will be ready for delivery soon.',
-  },
-  ready_for_delivery: {
-    label:   'Ready for Delivery 🚀',
-    colour:  '#3b82f6',
-    message: 'Your order is packed and waiting for a driver.',
-  },
-  out_for_delivery: {
-    label:   'Out for Delivery 🚚',
-    colour:  '#8b5cf6',
-    message: 'Your order is on its way — keep an eye out for your delivery.',
-  },
-  collecting: {
-    label:   'Driver Collecting 🏃',
-    colour:  '#6366f1',
-    message: 'A driver is on their way to collect your order from our branch.',
-  },
-  delivered: {
-    label:   'Delivered ✅',
-    colour:  '#22c55e',
-    message: 'Your order has been delivered. Enjoy!',
-  },
-  cancelled: {
-    label:   'Order Cancelled ❌',
-    colour:  '#ef4444',
-    message: 'Your order has been cancelled. Contact us if you have any questions.',
-  },
+  packaging:          { label: 'Being Packaged 📦',      colour: '#f59e0b', message: 'Your order is being carefully packed and will be ready for delivery soon.' },
+  ready_for_delivery: { label: 'Ready for Delivery 🚀',  colour: '#3b82f6', message: 'Your order is packed and waiting for a driver.' },
+  out_for_delivery:   { label: 'Out for Delivery 🚚',    colour: '#8b5cf6', message: 'Your order is on its way — keep an eye out for your delivery.' },
+  collecting:         { label: 'Driver Collecting 🏃',   colour: '#6366f1', message: 'A driver is on their way to collect your order from our branch.' },
+  delivered:          { label: 'Delivered ✅',            colour: '#22c55e', message: 'Your order has been delivered. Enjoy!' },
+  cancelled:          { label: 'Order Cancelled ❌',      colour: '#ef4444', message: 'Your order has been cancelled. Contact us if you have any questions.' },
 };
 
-// Returns null for internal-only statuses (pending, confirmed, picking) — no email sent
 export function buildOrderStatusEmail(order: {
   orderNumber:   string;
   customerName:  string;
@@ -226,25 +165,16 @@ export function buildOrderStatusEmail(order: {
 
   const html = emailWrapper(`
     <h2 style="margin:0 0 8px;font-size:20px">Order Update</h2>
-    <p style="color:#555;margin:0 0 24px">
-      Hi ${order.customerName}, here's the latest on your order.
-    </p>
-
+    <p style="color:#555;margin:0 0 24px">Hi ${order.customerName}, here's the latest on your order.</p>
     <div style="background:#fff8f5;border:1px solid #ffe0d0;border-radius:8px;padding:16px 20px;margin-bottom:24px">
       <p style="margin:0;font-size:12px;color:#aaa;text-transform:uppercase;letter-spacing:0.5px">Order Number</p>
       <p style="margin:4px 0 0;font-size:22px;font-weight:700;color:#FF6B35">${order.orderNumber}</p>
     </div>
-
     <div style="text-align:center;margin:32px 0">
-      <div style="display:inline-block;background:${meta.colour};color:#fff;padding:14px 32px;border-radius:32px;font-size:17px;font-weight:700">
-        ${meta.label}
-      </div>
+      <div style="display:inline-block;background:${meta.colour};color:#fff;padding:14px 32px;border-radius:32px;font-size:17px;font-weight:700">${meta.label}</div>
     </div>
-
     <p style="text-align:center;color:#555;margin:0 0 24px">${meta.message}</p>
-    <p style="text-align:center;color:#aaa;font-size:13px">
-      Open the TFS app to track your order in real time.
-    </p>
+    <p style="text-align:center;color:#aaa;font-size:13px">Open the TFS app to track your order in real time.</p>
   `);
 
   return {
@@ -282,11 +212,7 @@ export async function sendPushNotification(
     const json = await res.json().catch(() => null);
     const result = json?.data;
     if (result?.status === 'error') {
-      console.error(
-        `[Push] Expo error (token …${expoPushToken.slice(-8)}):`,
-        result.message,
-        result.details ?? ''
-      );
+      console.error(`[Push] Expo error (token …${expoPushToken.slice(-8)}):`, result.message, result.details ?? '');
     } else {
       console.log(`[Push] Sent OK to …${expoPushToken.slice(-8)}`);
     }
