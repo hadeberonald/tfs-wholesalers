@@ -1,36 +1,28 @@
 // lib/webPush.ts
 // Client-side Web Push utilities for the TFS Wholesalers web store.
-//
-// Usage:
-//   import { registerWebPush, unregisterWebPush } from '@/lib/webPush';
-//
-//   // After user logs in:
-//   await registerWebPush(user.id);
-//
-//   // After user logs out:
-//   await unregisterWebPush();
-//
-// Required env var (NEXT_PUBLIC_ so it's available in the browser):
-//   NEXT_PUBLIC_VAPID_PUBLIC_KEY  — get from `npx web-push generate-vapid-keys`
-//
-// Server env vars (for sending):
-//   VAPID_PUBLIC_KEY
-//   VAPID_PRIVATE_KEY
-//   VAPID_SUBJECT  — e.g. mailto:admin@tfswholesalers.com
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? '';
-const SW_PATH          = '/sw.js';
-const API_BASE         = ''; // same origin
+const SW_PATH = '/sw.js';
+const API_BASE = ''; // same origin
 
 // ── urlBase64ToUint8Array ─────────────────────────────────────────────────────
-// Converts a base64url VAPID key string to the Uint8Array needed by
-// PushManager.subscribe().
+// FIX: Force correct ArrayBuffer typing for Node 22 / TS strict mode
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const base64 = (base64String + padding)
+    .replace(/-/g, '+')
+    .replace(/_/g, '/');
+
   const rawData = atob(base64);
-  return Uint8Array.from(rawData, c => c.charCodeAt(0));
+
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+
+  // 🔑 CRITICAL FIX: ensure ArrayBuffer (not ArrayBufferLike)
+  return new Uint8Array(outputArray.buffer);
 }
 
 // ── isSupported ───────────────────────────────────────────────────────────────
@@ -45,8 +37,6 @@ export function isWebPushSupported(): boolean {
 }
 
 // ── registerWebPush ───────────────────────────────────────────────────────────
-// Call this after the user logs in (or on page load if already logged in).
-// Safe to call multiple times — it's idempotent.
 
 export async function registerWebPush(userId?: string | null): Promise<boolean> {
   try {
@@ -68,21 +58,26 @@ export async function registerWebPush(userId?: string | null): Promise<boolean> 
     }
 
     // 2. Register service worker
-    const registration = await navigator.serviceWorker.register(SW_PATH, { scope: '/' });
+    const registration = await navigator.serviceWorker.register(SW_PATH, {
+      scope: '/',
+    });
+
     await navigator.serviceWorker.ready;
     console.log('[WebPush] Service worker registered');
 
     // 3. Subscribe to push
+    const vapidKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+
     const subscription = await registration.pushManager.subscribe({
-      userVisibleOnly:      true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      userVisibleOnly: true,
+      applicationServerKey: vapidKey as BufferSource, // ✅ explicit fix
     });
 
     // 4. Save subscription to backend
     const res = await fetch(`${API_BASE}/api/users/web-push-subscription`, {
-      method:  'POST',
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ subscription, userId: userId ?? null }),
+      body: JSON.stringify({ subscription, userId: userId ?? null }),
     });
 
     if (!res.ok) {
@@ -100,7 +95,6 @@ export async function registerWebPush(userId?: string | null): Promise<boolean> 
 }
 
 // ── unregisterWebPush ─────────────────────────────────────────────────────────
-// Call on logout. Removes the subscription from both the browser and the server.
 
 export async function unregisterWebPush(): Promise<void> {
   try {
@@ -114,9 +108,9 @@ export async function unregisterWebPush(): Promise<void> {
 
     // Tell server to remove it first
     await fetch(`${API_BASE}/api/users/web-push-subscription`, {
-      method:  'DELETE',
+      method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ endpoint: subscription.endpoint }),
+      body: JSON.stringify({ endpoint: subscription.endpoint }),
     }).catch(() => {});
 
     // Then unsubscribe in the browser
