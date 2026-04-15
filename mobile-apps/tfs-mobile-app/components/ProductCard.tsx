@@ -1,24 +1,13 @@
 import { useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  Image,
-  StyleSheet,
-  Dimensions,
-  Alert,
-} from 'react-native';
+import { View, Text, TouchableOpacity, Image, StyleSheet, Alert } from 'react-native';
+import { Picker } from '@react-native-picker/picker';
 import { useRouter } from 'expo-router';
 import { ShoppingCart, Plus, Minus, Package, Tag, Heart } from 'lucide-react-native';
 import { useStore } from '@/lib/store';
+import { shared } from './cardStyles';
 import type { Product } from '@/lib/types';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CARD_WIDTH = (SCREEN_WIDTH - 40) / 2;
-
-interface ProductCardProps {
-  product: Product;
-}
+interface ProductCardProps { product: Product; }
 
 export default function ProductCard({ product }: ProductCardProps) {
   const router = useRouter();
@@ -30,11 +19,13 @@ export default function ProductCard({ product }: ProductCardProps) {
   const user               = useStore((s) => s.user);
   const isAuthenticated    = !!user;
 
-  const [quantity, setQuantity] = useState(1);
-  // No variant selected by default — base product is the default
-  const [selectedVariant, setSelectedVariant] = useState<typeof product.variants extends Array<infer V> ? V : never | undefined>(undefined as any);
+  const [quantity, setQuantity]                   = useState(1);
+  const [selectedVariantId, setSelectedVariantId] = useState<string>('');
 
-  // ── Derived display values — always fall back to base product ───────────────
+  const activeVariants  = product.variants?.filter((v: any) => v.active) ?? [];
+  const selectedVariant = activeVariants.find((v: any) => v._id === selectedVariantId) ?? undefined;
+  const hasVariants     = product.hasVariants && activeVariants.length > 0;
+
   const displayPrice = selectedVariant
     ? (selectedVariant.specialPrice || selectedVariant.price || product.price)
     : (product.specialPrice || product.price);
@@ -45,23 +36,19 @@ export default function ProductCard({ product }: ProductCardProps) {
 
   const hasDiscount     = !!(comparePrice && comparePrice > displayPrice);
   const discountPercent = hasDiscount
-    ? Math.round(((comparePrice! - displayPrice) / comparePrice!) * 100)
-    : 0;
+    ? Math.round(((comparePrice! - displayPrice) / comparePrice!) * 100) : 0;
 
-  // Base product image first, switch to variant image only when variant selected
   const primaryImage = selectedVariant?.images?.length
-    ? selectedVariant.images[0]
-    : (product.images?.[0] || '');
+    ? selectedVariant.images[0] : (product.images?.[0] || '');
 
-  const stock   = selectedVariant ? selectedVariant.stockLevel : (product.stockLevel ?? 0);
-  const inStock = stock > 0;
+  const stock    = selectedVariant ? selectedVariant.stockLevel : (product.stockLevel ?? 0);
+  const inStock  = stock > 0;
   const lowStock = stock > 0 && stock <= 10;
-  // ───────────────────────────────────────────────────────────────────────────
 
   const isInWishlist = wishlist.some((item: any) =>
     selectedVariant
       ? item.id === product._id && item.variantId === selectedVariant._id
-      : item.id === product._id && !item.variantId
+      : item.id === product._id && !item.variantId,
   );
 
   const toggleWishlist = (e: any) => {
@@ -74,14 +61,11 @@ export default function ProductCard({ product }: ProductCardProps) {
       removeFromWishlist(product._id, selectedVariant?._id);
     } else {
       addToWishlist({
-        id:          product._id,
-        variantId:   selectedVariant?._id,
-        name:        product.name,
-        variantName: selectedVariant?.name,
-        price:       displayPrice,
-        image:       primaryImage || '',
-        sku:         selectedVariant?.sku || product.sku || product.slug,
-        slug:        product.slug,
+        id: product._id, variantId: selectedVariant?._id,
+        name: product.name, variantName: selectedVariant?.name,
+        price: displayPrice, image: primaryImage || '',
+        sku: selectedVariant?.sku || product.sku || product.slug,
+        slug: product.slug,
       });
     }
   };
@@ -89,155 +73,117 @@ export default function ProductCard({ product }: ProductCardProps) {
   const handleAddToCart = (e: any) => {
     e.stopPropagation();
     addToCart({
-      id:          product._id,
-      variantId:   selectedVariant?._id,
-      name:        product.name,
-      variantName: selectedVariant?.name,
-      price:       displayPrice,
-      image:       primaryImage || '',
-      quantity,
+      id: product._id, variantId: selectedVariant?._id,
+      name: product.name, variantName: selectedVariant?.name,
+      price: displayPrice, image: primaryImage || '', quantity,
     });
-    Alert.alert('Added to Cart', `${quantity} × ${product.name}${selectedVariant ? ` (${selectedVariant.name})` : ''} added to your cart`);
+    Alert.alert('Added to Cart',
+      `${quantity} × ${product.name}${selectedVariant ? ` (${selectedVariant.name})` : ''} added to your cart`);
     setQuantity(1);
   };
 
-  const incrementQuantity = (e: any) => {
-    e.stopPropagation();
-    if (quantity < stock) setQuantity((q) => q + 1);
-  };
-
-  const decrementQuantity = (e: any) => {
-    e.stopPropagation();
-    if (quantity > 1) setQuantity((q) => q - 1);
-  };
-
-  const handleVariantSelect = (variant: any) => {
-    // If tapping already-selected variant, deselect back to base product
-    if (selectedVariant?._id === variant._id) {
-      setSelectedVariant(undefined);
-    } else {
-      setSelectedVariant(variant);
-    }
-    setQuantity(1);
-  };
+  const increment = (e: any) => { e.stopPropagation(); if (quantity < stock) setQuantity(q => q + 1); };
+  const decrement = (e: any) => { e.stopPropagation(); if (quantity > 1) setQuantity(q => q - 1); };
 
   return (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => router.push(`/product/${product.slug}`)}
-      activeOpacity={0.7}
-    >
-      {/* Image */}
-      <View style={styles.imageContainer}>
-        {primaryImage ? (
-          <Image source={{ uri: primaryImage }} style={styles.image} />
-        ) : (
-          <View style={[styles.image, styles.placeholder]}>
-            <Package color="#9ca3af" size={40} />
-          </View>
-        )}
+    <TouchableOpacity style={shared.card} onPress={() => router.push(`/product/${product.slug}`)} activeOpacity={0.7}>
 
-        {/* Badges */}
-        <View style={styles.badgesContainer}>
+      <View style={shared.imageContainer}>
+        {primaryImage
+          ? <Image source={{ uri: primaryImage }} style={shared.image} />
+          : <View style={[shared.image, shared.placeholder]}><Package color="#9ca3af" size={40} /></View>
+        }
+        <View style={shared.badgesContainer}>
           {product.onSpecial && (
-            <View style={styles.specialBadge}>
+            <View style={[shared.badge, shared.badgeRed]}>
               <Tag color="#fff" size={10} />
-              <Text style={styles.badgeText}>SPECIAL</Text>
+              <Text style={shared.badgeText}>SPECIAL</Text>
             </View>
           )}
           {hasDiscount && (
-            <View style={styles.discountBadge}>
-              <Text style={styles.badgeText}>{discountPercent}% OFF</Text>
+            <View style={[shared.badge, shared.badgeOrange]}>
+              <Text style={shared.badgeText}>{discountPercent}% OFF</Text>
             </View>
           )}
-          {product.hasVariants && (product.variants?.length ?? 0) > 1 && (
-            <View style={styles.variantsBadge}>
-              <Text style={styles.badgeText}>{product.variants!.length} OPTIONS</Text>
+          {hasVariants && (
+            <View style={[shared.badge, shared.badgePurple]}>
+              <Text style={shared.badgeText}>{activeVariants.length + 1} OPTIONS</Text>
             </View>
           )}
         </View>
-
-        {/* Wishlist */}
         {isAuthenticated && (
-          <TouchableOpacity style={styles.wishlistButton} onPress={toggleWishlist}>
-            <Heart
-              color={isInWishlist ? '#ef4444' : '#fff'}
-              fill={isInWishlist ? '#ef4444' : 'none'}
-              size={20}
-            />
+          <TouchableOpacity style={shared.wishlistButton} onPress={toggleWishlist}>
+            <Heart color={isInWishlist ? '#ef4444' : '#fff'} fill={isInWishlist ? '#ef4444' : 'none'} size={20} />
           </TouchableOpacity>
         )}
-
-        {/* Only show stock count when low (under 10) */}
         {lowStock && (
-          <View style={styles.stockWarning}>
-            <Text style={styles.stockWarningText}>{stock} left</Text>
+          <View style={shared.stockWarning}>
+            <Text style={shared.stockWarningText}>{stock} left</Text>
           </View>
         )}
       </View>
 
-      {/* Content */}
-      <View style={styles.content}>
-        <Text style={styles.productName} numberOfLines={2}>
-          {product.name}
-          {selectedVariant && (
-            <Text style={styles.variantName}> - {selectedVariant.name}</Text>
-          )}
-        </Text>
+      <View style={shared.content}>
+        <Text style={shared.name} numberOfLines={2}>{product.name}</Text>
 
         {product.unitQuantity && product.unit && (
-          <Text style={styles.unitText}>{product.unitQuantity}{product.unit}</Text>
+          <Text style={shared.unitText}>{product.unitQuantity}{product.unit}</Text>
         )}
 
-        {product.description && (
-          <Text style={styles.description} numberOfLines={2}>{product.description}</Text>
-        )}
+        {/* Description: 3 lines when no variants/discount info below, 2 otherwise */}
+        <Text style={shared.description} numberOfLines={hasVariants ? 2 : 3}>
+          {product.description || ''}
+        </Text>
 
-        {/* Variant selector — base product is default, tap variant to select, tap again to deselect */}
-        {product.hasVariants && product.variants && product.variants.length > 0 && (
-          <View style={styles.variantsRow}>
-            {product.variants.filter((v: any) => v.active).map((variant: any) => (
-              <TouchableOpacity
-                key={variant._id}
-                style={[styles.variantChip, selectedVariant?._id === variant._id && styles.variantChipActive]}
-                onPress={(e) => { e.stopPropagation(); handleVariantSelect(variant); }}
-              >
-                <Text style={[styles.variantChipText, selectedVariant?._id === variant._id && styles.variantChipTextActive]}>
-                  {variant.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
+        {/* Variant picker — only renders when needed, no empty spacer */}
+        {hasVariants && (
+          <View style={styles.pickerWrapper} onStartShouldSetResponder={() => true}>
+            <Picker
+              selectedValue={selectedVariantId}
+              onValueChange={(val) => { setSelectedVariantId(val as string); setQuantity(1); }}
+              style={styles.picker}
+              dropdownIconColor="#6b7280"
+            >
+              <Picker.Item label={`${product.name} — R${product.price.toFixed(2)}`} value="" />
+              {activeVariants.map((v: any) => (
+                <Picker.Item
+                  key={v._id}
+                  label={`${v.name}${v.price ? ` — R${(v.specialPrice || v.price).toFixed(2)}` : ''}${v.stockLevel === 0 ? ' (Out of stock)' : ''}`}
+                  value={v._id}
+                />
+              ))}
+            </Picker>
           </View>
         )}
 
-        <View style={styles.priceContainer}>
-          <Text style={styles.price}>R{displayPrice.toFixed(2)}</Text>
-          {hasDiscount && (
-            <Text style={styles.oldPrice}>R{comparePrice!.toFixed(2)}</Text>
-          )}
+        <View style={shared.priceContainer}>
+          <Text style={shared.price}>R{displayPrice.toFixed(2)}</Text>
+          {hasDiscount && <Text style={shared.oldPrice}>R{comparePrice!.toFixed(2)}</Text>}
         </View>
+
+        {/* Savings only renders when there IS a saving */}
         {hasDiscount && (
-          <Text style={styles.savings}>Save R{(comparePrice! - displayPrice).toFixed(2)}</Text>
+          <Text style={shared.savingsText}>Save R{(comparePrice! - displayPrice).toFixed(2)}</Text>
         )}
 
         {inStock ? (
-          <View style={styles.cartActions} onStartShouldSetResponder={() => true}>
-            <View style={styles.quantityControl}>
-              <TouchableOpacity style={styles.quantityButton} onPress={decrementQuantity} disabled={quantity <= 1}>
-                <Minus color="#6b7280" size={16} />
+          <View style={shared.cartActions} onStartShouldSetResponder={() => true}>
+            <View style={shared.quantityControl}>
+              <TouchableOpacity style={shared.quantityButton} onPress={decrement} disabled={quantity <= 1}>
+                <Minus color={quantity <= 1 ? '#d1d5db' : '#6b7280'} size={16} />
               </TouchableOpacity>
-              <Text style={styles.quantityText}>{quantity}</Text>
-              <TouchableOpacity style={styles.quantityButton} onPress={incrementQuantity} disabled={quantity >= stock}>
-                <Plus color="#6b7280" size={16} />
+              <Text style={shared.quantityText}>{quantity}</Text>
+              <TouchableOpacity style={shared.quantityButton} onPress={increment} disabled={quantity >= stock}>
+                <Plus color={quantity >= stock ? '#d1d5db' : '#6b7280'} size={16} />
               </TouchableOpacity>
             </View>
-            <TouchableOpacity style={styles.addButton} onPress={handleAddToCart}>
+            <TouchableOpacity style={shared.addButton} onPress={handleAddToCart}>
               <ShoppingCart color="#fff" size={16} />
             </TouchableOpacity>
           </View>
         ) : (
-          <View style={styles.outOfStock}>
-            <Text style={styles.outOfStockText}>Out of Stock</Text>
+          <View style={shared.outOfStock}>
+            <Text style={shared.outOfStockText}>Out of Stock</Text>
           </View>
         )}
       </View>
@@ -246,71 +192,9 @@ export default function ProductCard({ product }: ProductCardProps) {
 }
 
 const styles = StyleSheet.create({
-  card: {
-    width: CARD_WIDTH,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  imageContainer: { width: '100%', aspectRatio: 4 / 3, position: 'relative' },
-  image: { width: '100%', height: '100%' },
-  placeholder: { alignItems: 'center', justifyContent: 'center' },
-  badgesContainer: { position: 'absolute', top: 8, left: 8, gap: 4 },
-  specialBadge: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#ef4444', paddingHorizontal: 6, paddingVertical: 3,
-    borderRadius: 4, gap: 3,
-  },
-  discountBadge: {
-    backgroundColor: '#FF6B35', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4,
-  },
-  variantsBadge: {
-    backgroundColor: '#8b5cf6', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4,
-  },
-  badgeText: { color: '#fff', fontSize: 9, fontWeight: 'bold' },
-  wishlistButton: {
-    position: 'absolute', top: 8, right: 8,
-    backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 20, padding: 6,
-  },
-  stockWarning: {
-    position: 'absolute', bottom: 8, right: 8,
-    backgroundColor: '#eab308', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4,
-  },
-  stockWarningText: { color: '#fff', fontSize: 9, fontWeight: 'bold' },
-  content: { padding: 12 },
-  productName: { fontSize: 14, fontWeight: '600', color: '#1f2937', marginBottom: 4, minHeight: 36 },
-  variantName: { color: '#6b7280', fontWeight: '400' },
-  unitText: { fontSize: 11, color: '#6b7280', marginBottom: 4 },
-  description: { fontSize: 11, color: '#6b7280', marginBottom: 6 },
-  variantsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 8 },
-  variantChip: {
-    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6,
-    borderWidth: 1, borderColor: '#e5e7eb', backgroundColor: '#f9fafb',
-  },
-  variantChipActive: { borderColor: '#FF6B35', backgroundColor: '#fef3e9' },
-  variantChipText: { fontSize: 10, color: '#6b7280', fontWeight: '500' },
-  variantChipTextActive: { color: '#FF6B35', fontWeight: '600' },
-  priceContainer: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
-  price: { fontSize: 18, fontWeight: 'bold', color: '#FF6B35' },
-  oldPrice: { fontSize: 12, color: '#9ca3af', textDecorationLine: 'line-through' },
-  savings: { fontSize: 11, color: '#10b981', fontWeight: '600', marginBottom: 8 },
-  cartActions: { flexDirection: 'row', gap: 8 },
-  quantityControl: {
-    flexDirection: 'row', alignItems: 'center',
+  pickerWrapper: {
     borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8,
+    backgroundColor: '#fff', marginBottom: 6, overflow: 'hidden',
   },
-  quantityButton: { padding: 8 },
-  quantityText: { fontSize: 14, fontWeight: '600', color: '#1f2937', paddingHorizontal: 8 },
-  addButton: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#FF6B35', paddingVertical: 8, borderRadius: 8, gap: 4,
-  },
-  outOfStock: { backgroundColor: '#e5e7eb', paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
-  outOfStockText: { color: '#6b7280', fontSize: 12, fontWeight: '600' },
+  picker: { height: 36, color: '#1f2937' },
 });
