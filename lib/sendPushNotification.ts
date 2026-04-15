@@ -20,38 +20,68 @@ export interface EmailPayload {
 
 // ─── Nodemailer transport ─────────────────────────────────────────────────────
 // Required env vars in Render dashboard:
-//   SMTP_HOST  → e.g. mail.tfswholesalers.com (cPanel) or smtp.sendgrid.net
-//   SMTP_PORT  → 587 for STARTTLS, 465 for SSL
+//   SMTP_HOST  → mail.tfswholesalers.com  (cPanel → Email Accounts → Connect Devices)
+//   SMTP_PORT  → 587
 //   SMTP_USER  → noreply@tfswholesalers.com
-//   SMTP_PASS  → mailbox password or API key
+//   SMTP_PASS  → mailbox password
 //
-// To find cPanel values: cPanel → Email Accounts → your address → Connect Devices
+// Lazy-initialised so missing env vars throw at call time (not at module load),
+// which gives a clear error in logs rather than a silent crash.
 
-const transporter = nodemailer.createTransport({
-  host:   process.env.SMTP_HOST,
-  port:   Number(process.env.SMTP_PORT ?? 587),
-  secure: Number(process.env.SMTP_PORT) === 465, // true = SSL, false = STARTTLS
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+let _transporter: nodemailer.Transporter | null = null;
+
+function getTransporter(): nodemailer.Transporter {
+  if (_transporter) return _transporter;
+
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    throw new Error(
+      '[Email] Missing SMTP env vars. Required: SMTP_HOST, SMTP_USER, SMTP_PASS'
+    );
+  }
+
+  _transporter = nodemailer.createTransport({
+    host:   process.env.SMTP_HOST,
+    port:   Number(process.env.SMTP_PORT ?? 587),
+    secure: Number(process.env.SMTP_PORT) === 465, // true = SSL, false = STARTTLS
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+
+  return _transporter;
+}
+
+// ─── SMTP health check ────────────────────────────────────────────────────────
+// Call once in server.ts on startup to surface config errors early.
+// Never throws — email is non-critical and must not crash the server.
+
+export async function verifyEmailTransport(): Promise<void> {
+  try {
+    const t = getTransporter();
+    await t.verify();
+    console.log('[Email] SMTP connection verified OK');
+  } catch (err) {
+    console.error('[Email] SMTP verification FAILED:', err);
+  }
+}
 
 // ─── Email sender ─────────────────────────────────────────────────────────────
 
 export async function sendTransactionalEmail(payload: EmailPayload): Promise<void> {
   try {
-    const info = await transporter.sendMail({
+    const t    = getTransporter();
+    const info = await t.sendMail({
       from:    '"TFS Wholesalers" <noreply@tfswholesalers.com>',
       to:      Array.isArray(payload.to) ? payload.to.join(', ') : payload.to,
       subject: payload.subject,
       html:    payload.html,
       text:    payload.text,
     });
-    console.log('[Email] Sent:', info.messageId, '→', payload.to);
+    console.log('[Email] Sent OK — messageId:', info.messageId, '→', payload.to);
   } catch (err) {
     // Never throws — email failure must NEVER crash the order flow
-    console.error('[Email] Failed to send:', err);
+    console.error('[Email] sendMail FAILED:', err);
   }
 }
 
@@ -78,11 +108,11 @@ function emailWrapper(content: string): string {
 // ─── Template: order confirmed ────────────────────────────────────────────────
 
 export function buildOrderConfirmationEmail(order: {
-  orderNumber:     string;
-  customerName:    string;
-  customerEmail:   string;
-  items:           { name: string; variantName?: string; quantity: number; price: number }[];
-  total:           number;
+  orderNumber:      string;
+  customerName:     string;
+  customerEmail:    string;
+  items:            { name: string; variantName?: string; quantity: number; price: number }[];
+  total:            number;
   deliveryAddress?: string;
 }): EmailPayload {
   const rows = order.items.map(i => `
@@ -101,7 +131,7 @@ export function buildOrderConfirmationEmail(order: {
     </tr>`).join('');
 
   const html = emailWrapper(`
-    <h2 style="margin:0 0 8px;font-size:20px">Order Confirmed</h2>
+    <h2 style="margin:0 0 8px;font-size:20px">Order Confirmed ✅</h2>
     <p style="color:#555;margin:0 0 24px">
       Hi ${order.customerName}, we've received your order and it's being prepared.
     </p>
@@ -153,32 +183,32 @@ export function buildOrderConfirmationEmail(order: {
 
 const STATUS_MAP: Record<string, { label: string; colour: string; message: string }> = {
   packaging: {
-    label:   'Being Packaged ',
+    label:   'Being Packaged 📦',
     colour:  '#f59e0b',
     message: 'Your order is being carefully packed and will be ready for delivery soon.',
   },
   ready_for_delivery: {
-    label:   'Ready for Delivery',
+    label:   'Ready for Delivery 🚀',
     colour:  '#3b82f6',
     message: 'Your order is packed and waiting for a driver.',
   },
   out_for_delivery: {
-    label:   'Out for Delivery',
+    label:   'Out for Delivery 🚚',
     colour:  '#8b5cf6',
     message: 'Your order is on its way — keep an eye out for your delivery.',
   },
   collecting: {
-    label:   'Driver Collecting',
+    label:   'Driver Collecting 🏃',
     colour:  '#6366f1',
     message: 'A driver is on their way to collect your order from our branch.',
   },
   delivered: {
-    label:   'Delivered',
+    label:   'Delivered ✅',
     colour:  '#22c55e',
     message: 'Your order has been delivered. Enjoy!',
   },
   cancelled: {
-    label:   'Order Cancelled',
+    label:   'Order Cancelled ❌',
     colour:  '#ef4444',
     message: 'Your order has been cancelled. Contact us if you have any questions.',
   },
@@ -250,7 +280,6 @@ export async function sendPushNotification(
     });
 
     const json = await res.json().catch(() => null);
-    // Expo wraps single-send responses in { data: { status, message, details } }
     const result = json?.data;
     if (result?.status === 'error') {
       console.error(
@@ -258,6 +287,8 @@ export async function sendPushNotification(
         result.message,
         result.details ?? ''
       );
+    } else {
+      console.log(`[Push] Sent OK to …${expoPushToken.slice(-8)}`);
     }
   } catch (err) {
     console.error('[Push] sendPushNotification network error:', err);
@@ -292,15 +323,17 @@ export async function notifyBranchPickers(
       return;
     }
 
-    // push_tokens.userId is always stored as a plain string (set by push-token route)
     const userIds = branchUsers.map(u => u._id.toString());
+    console.log(`[Push] Found ${userIds.length} staff for branch ${branchId}:`, userIds);
 
     const tokenDocs = await db.collection('push_tokens').find(
       { userId: { $in: userIds } }
     ).toArray();
 
+    console.log(`[Push] Found ${tokenDocs.length} push tokens for those staff`);
+
     if (!tokenDocs.length) {
-      console.warn(`[Push] notifyBranchPickers: staff found but no tokens registered for branch ${branchId}`);
+      console.warn(`[Push] notifyBranchPickers: no tokens registered. Staff IDs:`, userIds);
       return;
     }
 
@@ -324,7 +357,6 @@ export async function notifyUser(
     const client = await clientPromise;
     const db     = client.db('tfs-wholesalers');
 
-    // userId in push_tokens is always a plain string
     const tokenDoc = await db.collection('push_tokens').findOne({ userId });
     if (!tokenDoc?.pushToken) {
       console.warn(`[Push] notifyUser: no token for userId ${userId}`);
