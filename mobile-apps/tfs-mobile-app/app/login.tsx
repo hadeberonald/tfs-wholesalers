@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -43,7 +44,6 @@ export default function LoginScreen() {
 
         setUser(response.data.user);
 
-        // Link any existing push token to this user account
         if (response.data.user?.id) {
           linkPushTokenAfterLogin(response.data.user.id).catch(() => {});
         }
@@ -79,9 +79,11 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.logoContainer}>
-          <View style={styles.logo}>
-            <Text style={styles.logoText}>TFS</Text>
-          </View>
+          <Image
+            source={require('@/assets/logo.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
           <Text style={styles.title}>Welcome Back</Text>
           <Text style={styles.subtitle}>Sign in to continue</Text>
         </View>
@@ -146,26 +148,25 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container:            { flex: 1, backgroundColor: '#f9fafb' },
-  scrollContent:        { flexGrow: 1, padding: 20 },
-  header:               { paddingTop: 40, marginBottom: 20 },
-  backButton:           { alignSelf: 'flex-start' },
-  backButtonText:       { fontSize: 16, color: '#FF6B35', fontWeight: '600' },
-  logoContainer:        { alignItems: 'center', marginBottom: 40 },
-  logo:                 { width: 80, height: 80, borderRadius: 40, backgroundColor: '#FF6B35', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  logoText:             { fontSize: 32, fontWeight: 'bold', color: '#fff' },
-  title:                { fontSize: 28, fontWeight: 'bold', color: '#1f2937', marginBottom: 8 },
-  subtitle:             { fontSize: 16, color: '#6b7280' },
-  form:                 { marginBottom: 24 },
-  inputGroup:           { marginBottom: 20 },
-  label:                { fontSize: 14, fontWeight: '600', color: '#1f2937', marginBottom: 8 },
-  input:                { backgroundColor: '#fff', borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, color: '#1f2937' },
-  loginButton:          { backgroundColor: '#FF6B35', paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginTop: 8 },
-  loginButtonDisabled:  { opacity: 0.6 },
-  loginButtonText:      { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  forgotButton:         { alignItems: 'center', marginTop: 16 },
-  forgotButtonText:     { fontSize: 14, color: '#FF6B35', fontWeight: '600' },
-  registerContainer:    { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  registerText:         { fontSize: 14, color: '#6b7280' },
-  registerLink:         { fontSize: 14, color: '#FF6B35', fontWeight: '600' },
+  container:           { flex: 1, backgroundColor: '#f9fafb' },
+  scrollContent:       { flexGrow: 1, padding: 20 },
+  header:              { paddingTop: 40, marginBottom: 20 },
+  backButton:          { alignSelf: 'flex-start' },
+  backButtonText:      { fontSize: 16, color: '#FF6B35', fontWeight: '600' },
+  logoContainer:       { alignItems: 'center', marginBottom: 40 },
+  logo:                { width: 160, height: 80, marginBottom: 16 },
+  title:               { fontSize: 28, fontWeight: 'bold', color: '#1f2937', marginBottom: 8 },
+  subtitle:            { fontSize: 16, color: '#6b7280' },
+  form:                { marginBottom: 24 },
+  inputGroup:          { marginBottom: 20 },
+  label:               { fontSize: 14, fontWeight: '600', color: '#1f2937', marginBottom: 8 },
+  input:               { backgroundColor: '#fff', borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, color: '#1f2937' },
+  loginButton:         { backgroundColor: '#FF6B35', paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginTop: 8 },
+  loginButtonDisabled: { opacity: 0.6 },
+  loginButtonText:     { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  forgotButton:        { alignItems: 'center', marginTop: 16 },
+  forgotButtonText:    { fontSize: 14, color: '#FF6B35', fontWeight: '600' },
+  registerContainer:   { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+  registerText:        { fontSize: 14, color: '#6b7280' },
+  registerLink:        { fontSize: 14, color: '#FF6B35', fontWeight: '600' },
 });

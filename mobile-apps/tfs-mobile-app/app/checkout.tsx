@@ -9,6 +9,8 @@
 //    - paymentStatus: 'pending'
 //    - All special/bonus/combo fields preserved for picker app
 // 3. Delivery fee displayed live as user picks address
+// 4. customerName and customerEmail now sent as TOP-LEVEL fields so the
+//    PATCH route can send status emails without a separate user lookup
 
 import React, { useState, useCallback } from 'react';
 import {
@@ -133,7 +135,6 @@ export default function CheckoutScreen() {
       const branchId = branch._id || branch.id;
 
       // ✅ Map cart items → order items
-      // Schema matches web exactly so picker/delivery apps see the same shape
       const orderItems = items.map((item) => ({
         // Core product fields
         productId:   item.id,
@@ -174,7 +175,13 @@ export default function CheckoutScreen() {
         userId:   user.id,
         branchId,
 
-        // ── Customer info (matches web schema) ───────────────────────────
+        // ── Top-level customer fields (required by PATCH route for emails) ─
+        // The server stores these on the order document so status-update
+        // emails can be sent without a separate user lookup.
+        customerName:  user.name  ?? '',
+        customerEmail: user.email ?? '',
+
+        // ── Customer info object (kept for backwards compat) ─────────────
         customerInfo: {
           name:  user.name,
           email: user.email,
@@ -192,7 +199,6 @@ export default function CheckoutScreen() {
           city:        deliveryAddress.city,
           province:    deliveryAddress.province,
           postalCode:  deliveryAddress.postalCode,
-          // Keep full address object for driver app
           street:      deliveryAddress.street,
           name:        deliveryAddress.name,
           country:     deliveryAddress.country,
@@ -205,15 +211,16 @@ export default function CheckoutScreen() {
         totalSavings: parseFloat(totalSavings.toFixed(2)),
 
         // ── Delivery meta ────────────────────────────────────────────────
-        deliveryDistance: deliveryAddress.distance,  // km – useful for driver app
+        deliveryAddress: deliveryAddress.formattedAddress, // plain string for order confirmation email
+        deliveryDistance: deliveryAddress.distance,
         deliveryNotes:    '',
 
-        // ── Payment / status – matches web flow ──────────────────────────
+        // ── Payment / status ─────────────────────────────────────────────
         paymentMethod: 'card',
         paymentStatus: 'pending',
         status:        'payment_pending',
 
-        // ── Source tag (helps admin distinguish web vs app orders) ───────
+        // ── Source tag ───────────────────────────────────────────────────
         orderSource: 'mobile_app',
       };
 
@@ -225,7 +232,6 @@ export default function CheckoutScreen() {
 
       const { orderId, orderNumber } = res.data;
 
-      // Navigate to payment screen
       router.push(
         `/payment?orderId=${orderId}&amount=${total.toFixed(2)}&orderNumber=${encodeURIComponent(orderNumber)}`,
       );

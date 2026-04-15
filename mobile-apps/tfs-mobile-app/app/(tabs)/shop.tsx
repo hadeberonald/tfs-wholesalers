@@ -1,3 +1,5 @@
+// app/(tabs)/shop.tsx  — updated to accept ?tab=specials deep-link param
+
 import { useState, useEffect } from 'react';
 import {
   View,
@@ -38,26 +40,35 @@ interface Combo {
 export default function ShopScreen() {
   const params = useLocalSearchParams();
   const branch = useStore((state) => state.branch);
-  
-  const [activeTab, setActiveTab] = useState<'products' | 'specials'>('products');
-  const [products, setProducts] = useState<Product[]>([]);
-  const [specials, setSpecials] = useState<Special[]>([]);
-  const [combos, setCombos] = useState<Combo[]>([]);
+
+  // ── If the header (or any navigator) passes ?tab=specials, open that tab ──
+  const initialTab = params.tab === 'specials' ? 'specials' : 'products';
+  const [activeTab, setActiveTab] = useState<'products' | 'specials'>(initialTab);
+
+  const [products, setProducts]   = useState<Product[]>([]);
+  const [specials, setSpecials]   = useState<Special[]>([]);
+  const [combos, setCombos]       = useState<Combo[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]     = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(
     (params.categoryId as string) || null
   );
   const [showCategoryModal, setShowCategoryModal] = useState(false);
-  const [showLimitModal, setShowLimitModal] = useState(false);
-  
-  // Pagination state
+  const [showLimitModal, setShowLimitModal]       = useState(false);
+
+  // Pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [totalPages, setTotalPages]   = useState(1);
   const [totalProducts, setTotalProducts] = useState(0);
-  const [limit, setLimit] = useState(25);
+  const [limit, setLimit]             = useState(25);
   const [isSearching, setIsSearching] = useState(false);
+
+  // ── Re-open the correct tab if the param changes (e.g. user taps Specials
+  //    from the header while already on the shop screen) ────────────────────
+  useEffect(() => {
+    if (params.tab === 'specials') setActiveTab('specials');
+  }, [params.tab]);
 
   useEffect(() => {
     if (branch) {
@@ -88,11 +99,7 @@ export default function ShopScreen() {
     try {
       setLoading(true);
       let url = `/api/products?branchId=${branch?._id}&page=${currentPage}&limit=${limit}`;
-      
-      if (selectedCategory) {
-        url += `&category=${selectedCategory}`;
-      }
-
+      if (selectedCategory) url += `&category=${selectedCategory}`;
       const res = await api.get(url);
       setProducts(res.data.products || []);
       setTotalProducts(res.data.total || 0);
@@ -111,7 +118,7 @@ export default function ShopScreen() {
       const activeSpecials = (res.data.specials || []).filter((s: Special) => {
         const now = new Date();
         if (s.startDate && new Date(s.startDate) > now) return false;
-        if (s.endDate && new Date(s.endDate) < now) return false;
+        if (s.endDate   && new Date(s.endDate)   < now) return false;
         return s.active;
       });
       setSpecials(activeSpecials);
@@ -138,7 +145,6 @@ export default function ShopScreen() {
       loadProducts();
       return;
     }
-
     try {
       setLoading(true);
       setIsSearching(true);
@@ -169,9 +175,7 @@ export default function ShopScreen() {
   };
 
   const goToPage = (page: number) => {
-    if (page >= 1 && page <= totalPages) {
-      setCurrentPage(page);
-    }
+    if (page >= 1 && page <= totalPages) setCurrentPage(page);
   };
 
   const selectedCategoryName = selectedCategory
@@ -217,15 +221,11 @@ export default function ShopScreen() {
           <ActivityIndicator size="large" color="#FF6B35" />
         </View>
       ) : (
-        <ScrollView
-          style={styles.scrollView}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
           {activeTab === 'products' && (
             <>
-              {/* Search and Filters - Inside ScrollView */}
+              {/* Search and Filters */}
               <View style={styles.filtersContainer}>
-                {/* Search Bar */}
                 <View style={styles.searchContainer}>
                   <Search color="#6b7280" size={20} />
                   <TextInput
@@ -244,7 +244,6 @@ export default function ShopScreen() {
                 </View>
 
                 <View style={styles.filterRow}>
-                  {/* Category Filter */}
                   <TouchableOpacity
                     style={[styles.filterButton, { flex: 1 }]}
                     onPress={() => setShowCategoryModal(true)}
@@ -253,26 +252,20 @@ export default function ShopScreen() {
                     <ChevronDown color="#fff" size={16} />
                   </TouchableOpacity>
 
-                  {/* Limit Filter */}
-                  <TouchableOpacity
-                    style={styles.limitButton}
-                    onPress={() => setShowLimitModal(true)}
-                  >
+                  <TouchableOpacity style={styles.limitButton} onPress={() => setShowLimitModal(true)}>
                     <Text style={styles.limitButtonText}>{limit}</Text>
                     <ChevronDown color="#6b7280" size={16} />
                   </TouchableOpacity>
                 </View>
 
-                {/* Results Info */}
                 <View style={styles.resultsInfo}>
                   <Text style={styles.resultsText}>
-                    {isSearching && `Search: "${searchQuery}" - `}
+                    {isSearching && `Search: "${searchQuery}" — `}
                     Showing {products.length} of {totalProducts} products
                   </Text>
                 </View>
               </View>
 
-              {/* Products Grid */}
               <View style={[styles.content, { marginTop: 16 }]}>
                 <View style={styles.productGrid}>
                   {products.length > 0 ? (
@@ -289,7 +282,6 @@ export default function ShopScreen() {
                   )}
                 </View>
 
-                {/* Pagination Controls - Bottom */}
                 {products.length > 0 && totalPages > 1 && (
                   <View style={styles.pagination}>
                     <TouchableOpacity
@@ -299,13 +291,9 @@ export default function ShopScreen() {
                     >
                       <ChevronLeft color={currentPage === 1 ? '#d1d5db' : '#6b7280'} size={20} />
                     </TouchableOpacity>
-
                     <View style={styles.pageInfo}>
-                      <Text style={styles.pageText}>
-                        Page {currentPage} of {totalPages}
-                      </Text>
+                      <Text style={styles.pageText}>Page {currentPage} of {totalPages}</Text>
                     </View>
-
                     <TouchableOpacity
                       style={[styles.pageButton, currentPage === totalPages && styles.pageButtonDisabled]}
                       onPress={() => goToPage(currentPage + 1)}
@@ -321,7 +309,6 @@ export default function ShopScreen() {
 
           {activeTab === 'specials' && (
             <View style={styles.content}>
-              {/* Specials Section */}
               {specials.length > 0 && (
                 <View style={styles.section}>
                   <View style={styles.sectionHeader}>
@@ -338,7 +325,6 @@ export default function ShopScreen() {
                 </View>
               )}
 
-              {/* Combos Section */}
               {combos.length > 0 && (
                 <View style={styles.section}>
                   <View style={styles.sectionHeader}>
@@ -355,7 +341,6 @@ export default function ShopScreen() {
                 </View>
               )}
 
-              {/* Empty State */}
               {specials.length === 0 && combos.length === 0 && (
                 <View style={styles.emptyState}>
                   <Tag color="#9ca3af" size={60} />
@@ -367,7 +352,7 @@ export default function ShopScreen() {
         </ScrollView>
       )}
 
-      {/* Category Dropdown */}
+      {/* Category Modal */}
       {showCategoryModal && (
         <Modal
           visible={showCategoryModal}
@@ -375,49 +360,30 @@ export default function ShopScreen() {
           transparent
           onRequestClose={() => setShowCategoryModal(false)}
         >
-          <TouchableOpacity 
-            style={styles.dropdownOverlay} 
+          <TouchableOpacity
+            style={styles.dropdownOverlay}
             activeOpacity={1}
             onPress={() => setShowCategoryModal(false)}
           >
             <View style={styles.dropdownMenu}>
               <View style={styles.dropdownHeader}>
                 <Text style={styles.dropdownTitle}>Select Category</Text>
-                <TouchableOpacity 
-                  onPress={() => setShowCategoryModal(false)}
-                  style={styles.dropdownClose}
-                >
+                <TouchableOpacity onPress={() => setShowCategoryModal(false)} style={styles.dropdownClose}>
                   <X color="#6b7280" size={20} />
                 </TouchableOpacity>
               </View>
-              
               <ScrollView style={styles.dropdownScroll} showsVerticalScrollIndicator={false}>
                 <TouchableOpacity
-                  style={[
-                    styles.dropdownItem,
-                    !selectedCategory && styles.dropdownItemActive,
-                  ]}
-                  onPress={() => {
-                    setSelectedCategory(null);
-                    setCurrentPage(1);
-                    setShowCategoryModal(false);
-                  }}
+                  style={[styles.dropdownItem, !selectedCategory && styles.dropdownItemActive]}
+                  onPress={() => { setSelectedCategory(null); setCurrentPage(1); setShowCategoryModal(false); }}
                 >
                   <Text style={styles.dropdownItemText}>All Products</Text>
                 </TouchableOpacity>
-
                 {categories.map((category) => (
                   <TouchableOpacity
                     key={category._id}
-                    style={[
-                      styles.dropdownItem,
-                      selectedCategory === category._id && styles.dropdownItemActive,
-                    ]}
-                    onPress={() => {
-                      setSelectedCategory(category._id);
-                      setCurrentPage(1);
-                      setShowCategoryModal(false);
-                    }}
+                    style={[styles.dropdownItem, selectedCategory === category._id && styles.dropdownItemActive]}
+                    onPress={() => { setSelectedCategory(category._id); setCurrentPage(1); setShowCategoryModal(false); }}
                   >
                     <Text style={styles.dropdownItemText}>{category.name}</Text>
                   </TouchableOpacity>
@@ -428,7 +394,7 @@ export default function ShopScreen() {
         </Modal>
       )}
 
-      {/* Limit Dropdown */}
+      {/* Limit Modal */}
       {showLimitModal && (
         <Modal
           visible={showLimitModal}
@@ -436,29 +402,22 @@ export default function ShopScreen() {
           transparent
           onRequestClose={() => setShowLimitModal(false)}
         >
-          <TouchableOpacity 
-            style={styles.dropdownOverlay} 
+          <TouchableOpacity
+            style={styles.dropdownOverlay}
             activeOpacity={1}
             onPress={() => setShowLimitModal(false)}
           >
             <View style={[styles.dropdownMenu, styles.dropdownMenuSmall]}>
               <View style={styles.dropdownHeader}>
                 <Text style={styles.dropdownTitle}>Items Per Page</Text>
-                <TouchableOpacity 
-                  onPress={() => setShowLimitModal(false)}
-                  style={styles.dropdownClose}
-                >
+                <TouchableOpacity onPress={() => setShowLimitModal(false)} style={styles.dropdownClose}>
                   <X color="#6b7280" size={20} />
                 </TouchableOpacity>
               </View>
-              
               {[10, 25, 50].map((limitOption) => (
                 <TouchableOpacity
                   key={limitOption}
-                  style={[
-                    styles.dropdownItem,
-                    limit === limitOption && styles.dropdownItemActive,
-                  ]}
+                  style={[styles.dropdownItem, limit === limitOption && styles.dropdownItemActive]}
                   onPress={() => handleLimitChange(limitOption)}
                 >
                   <Text style={styles.dropdownItemText}>{limitOption} items</Text>
@@ -480,7 +439,7 @@ const styles = StyleSheet.create({
   tabActive: { borderBottomColor: '#FF6B35' },
   tabText: { fontSize: 14, fontWeight: '600', color: '#6b7280' },
   tabTextActive: { color: '#FF6B35' },
-  filtersContainer: { backgroundColor: '#fff', padding: 16, gap: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb', marginBottom: 0 },
+  filtersContainer: { backgroundColor: '#fff', padding: 16, gap: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
   searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f3f4f6', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, gap: 12 },
   searchInput: { flex: 1, fontSize: 16, color: '#1f2937' },
   filterRow: { flexDirection: 'row', gap: 12 },
@@ -506,60 +465,14 @@ const styles = StyleSheet.create({
   pageButtonDisabled: { opacity: 0.3 },
   pageInfo: { paddingHorizontal: 20 },
   pageText: { fontSize: 14, fontWeight: '600', color: '#1f2937' },
-  dropdownOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    justifyContent: 'flex-start',
-    paddingTop: 220,
-    paddingHorizontal: 16,
-  },
-  dropdownMenu: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
-    maxHeight: 400,
-    paddingBottom: 8,
-  },
-  dropdownMenuSmall: {
-    maxHeight: 230,
-  },
-  dropdownHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  dropdownTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1f2937',
-  },
-  dropdownClose: {
-    padding: 4,
-  },
-  dropdownScroll: {
-    paddingVertical: 4,
-  },
-  dropdownItem: {
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginHorizontal: 8,
-    marginVertical: 2,
-    borderRadius: 8,
-  },
-  dropdownItemActive: {
-    backgroundColor: '#fef3e9',
-  },
-  dropdownItemText: {
-    fontSize: 16,
-    color: '#1f2937',
-    fontWeight: '500',
-  },
+  dropdownOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-start', paddingTop: 220, paddingHorizontal: 16 },
+  dropdownMenu: { backgroundColor: '#fff', borderRadius: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 8, maxHeight: 400, paddingBottom: 8 },
+  dropdownMenuSmall: { maxHeight: 230 },
+  dropdownHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  dropdownTitle: { fontSize: 16, fontWeight: '600', color: '#1f2937' },
+  dropdownClose: { padding: 4 },
+  dropdownScroll: { paddingVertical: 4 },
+  dropdownItem: { paddingVertical: 14, paddingHorizontal: 16, marginHorizontal: 8, marginVertical: 2, borderRadius: 8 },
+  dropdownItemActive: { backgroundColor: '#fef3e9' },
+  dropdownItemText: { fontSize: 16, color: '#1f2937', fontWeight: '500' },
 });

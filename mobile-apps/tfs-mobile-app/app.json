@@ -22,7 +22,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.tfswholesalers.app",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "config": {
         "googleMapsApiKey": "AIzaSyBnssZMeuqy3Y074vdvp_4-BePD6cGwaTM"
       },

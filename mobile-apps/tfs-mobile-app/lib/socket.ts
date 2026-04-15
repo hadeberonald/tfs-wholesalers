@@ -1,8 +1,14 @@
 // lib/socket.ts  (tfs-mobile-app)
+//
+// ⚠️  IMPORTANT: This URL must match api.ts exactly.
+// api.ts uses: https://tfs-wholesalers-ifad.onrender.com
+// Previously this file used: https://tfs-wholesalers.onrender.com  ← WRONG
+// That was hitting a completely different server (or nothing), which is
+// why socket events never arrived on the picker app.
 
 import { io, Socket } from 'socket.io-client';
 
-const API_URL = 'https://tfs-wholesalers.onrender.com';
+const API_URL = 'https://tfs-wholesalers-ifad.onrender.com';
 
 let socket: Socket | null = null;
 
