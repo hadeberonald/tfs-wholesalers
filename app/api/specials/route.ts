@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
       if (s.conditions?.getProductId)     rawIds.push(s.conditions.getProductId.toString());
     }
 
-    const uniqueIds = [...new Set(rawIds)].filter(id => ObjectId.isValid(id));
+const uniqueIds = Array.from(new Set(rawIds)).filter(id => ObjectId.isValid(id));
 
     const products = uniqueIds.length > 0
       ? await db
