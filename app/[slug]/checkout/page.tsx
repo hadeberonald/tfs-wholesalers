@@ -493,18 +493,21 @@ export default function CheckoutPage() {
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Email *
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      className="input-field"
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    />
-                  </div>
+                 <div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">
+    Email *
+  </label>
+  <input
+    type="email"
+    required
+    className="input-field"
+    value={formData.email}
+    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+  />
+  <p className="text-xs text-gray-400 mt-1.5">
+    Your order confirmation will be sent here. Please check your spam or junk folder if you don&apos;t see it.
+  </p>
+</div>
 
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
