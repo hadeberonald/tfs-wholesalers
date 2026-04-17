@@ -18,6 +18,7 @@ export async function GET(request: NextRequest) {
     const all = searchParams.get('all');
     const barcode = searchParams.get('barcode');
     const branchId = searchParams.get('branchId');
+    const search = searchParams.get('search'); // ✅ NEW: admin full-text search param
 
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
@@ -39,31 +40,42 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // ✅ Products store categories as slugs (e.g. "spices-herbs-seasonings")
-    // The frontend passes category _id, so we look up the slug first then query by it.
-    // We also try matching by _id and slug directly as fallbacks to handle any mixed data.
+    // ✅ NEW: Admin full-text search across name, SKU, barcode, description
+    if (search && search.trim().length >= 2) {
+      const searchRegex = new RegExp(
+        search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+        'i'
+      );
+      query.$or = [
+        { name: searchRegex },
+        { sku: searchRegex },
+        { barcode: searchRegex },
+        { description: searchRegex },
+        { 'variants.name': searchRegex },
+        { 'variants.sku': searchRegex },
+        { 'variants.barcode': searchRegex },
+      ];
+    }
+
+    // ✅ Products store categories as slugs
     if (category) {
       try {
-        // Look up the category document to get its slug
         const categoryDoc = await db.collection('categories').findOne({
           _id: new ObjectId(category),
         });
 
         if (categoryDoc) {
-          // Match by slug (how products are stored) OR by _id string OR by ObjectId — covers all cases
           query.categories = {
             $in: [
-              categoryDoc.slug,           // "spices-herbs-seasonings" ← this is what products store
-              category,                   // raw string id fallback
-              new ObjectId(category),     // ObjectId fallback
+              categoryDoc.slug,
+              category,
+              new ObjectId(category),
             ],
           };
         } else {
-          // Category not found by ObjectId, try matching as-is (maybe it's already a slug)
           query.categories = { $in: [category] };
         }
       } catch {
-        // Not a valid ObjectId, treat as slug directly
         query.categories = { $in: [category] };
       }
     }
@@ -79,20 +91,17 @@ export async function GET(request: NextRequest) {
       ];
     }
 
-    // ✅ Stable compound sort with _id tiebreaker to prevent duplicates across pages
+    // ✅ Stable compound sort
     let sortOption: any = { createdAt: -1, _id: -1 };
+    if (sort === 'name') sortOption = { name: 1, _id: 1 };
+    else if (sort === 'price-asc') sortOption = { price: 1, _id: 1 };
+    else if (sort === 'price-desc') sortOption = { price: -1, _id: 1 };
 
-    if (sort === 'name') {
-      sortOption = { name: 1, _id: 1 };
-    } else if (sort === 'price-asc') {
-      sortOption = { price: 1, _id: 1 };
-    } else if (sort === 'price-desc') {
-      sortOption = { price: -1, _id: 1 };
-    }
-
+    // When searching admin, return more results without strict pagination
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 25;
-    const skip = (pageNum - 1) * limitNum;
+    const skip = search ? 0 : (pageNum - 1) * limitNum; // Don't skip on search
+    const effectiveLimit = search ? Math.min(parseInt(limit || '200'), 500) : limitNum;
 
     const total = await db.collection('products').countDocuments(query);
 
@@ -101,7 +110,7 @@ export async function GET(request: NextRequest) {
       .find(query)
       .sort(sortOption)
       .skip(skip)
-      .limit(limitNum)
+      .limit(effectiveLimit)
       .toArray();
 
     if (barcode && products.length > 0) {
@@ -119,7 +128,7 @@ export async function GET(request: NextRequest) {
       products,
       total,
       page: pageNum,
-      limit: limitNum,
+      limit: effectiveLimit,
       totalPages: Math.ceil(total / limitNum),
     });
   } catch (error) {
