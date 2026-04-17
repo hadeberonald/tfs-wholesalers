@@ -44,7 +44,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
   const [bundleQty, setBundleQty] = useState(1);
   const [imgError, setImgError] = useState(false);
   const [loading, setLoading] = useState(true);
-  // Modal shown after trigger product is added to cart
   const [showAddonModal, setShowAddonModal] = useState(false);
   const addItem = useCartStore((state) => state.addItem);
 
@@ -75,7 +74,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
           setBundleQty(1);
         }
 
-        // For conditional_add_on_price: also fetch the add-on product for the prompt
         if (!cancelled && special.type === 'conditional_add_on_price' && special.conditions.targetProductId) {
           fetch(`/api/products/${special.conditions.targetProductId}`)
             .then((r) => (r.ok ? r.json() : null))
@@ -159,7 +157,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
     if (bundleQty > 1) setBundleQty(q => q - 1);
   };
 
-  // Step 1: add the trigger product to cart, then open the add-on modal
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     if (!product) { toast.error('Product not available'); return; }
@@ -186,7 +183,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
     }
   };
 
-  // Step 2a: customer says yes — add the add-on at the override price
   const handleAcceptAddon = (e: React.MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     if (!addonProduct) return;
@@ -206,7 +202,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
     setShowAddonModal(false);
   };
 
-  // Step 2b: customer says no — just confirm the trigger was added
   const handleDeclineAddon = (e: React.MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     toast.success(`${product?.name} added to cart!`);
@@ -217,7 +212,7 @@ export default function SpecialCard({ special }: SpecialCardProps) {
   const displayImage = special.images?.[0] || product?.images[0];
   const inStock      = product && product.stockLevel > 0;
   const displayPrice = getDisplayPrice();
-  const lowStock     = product && product.stockLevel < 10 && product.stockLevel > 0;
+  const lowStock     = product && product.stockLevel <= 10 && product.stockLevel > 0;
 
   const savings = (() => {
     if (!product) return 0;
@@ -263,7 +258,7 @@ export default function SpecialCard({ special }: SpecialCardProps) {
             </div>
           )}
 
-          {/* Badges — top left */}
+          {/* Badges */}
           <div className="absolute top-2 left-2 flex flex-col gap-1">
             <span className="inline-flex items-center gap-1 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
               <Tag className="w-2.5 h-2.5" />
@@ -356,7 +351,7 @@ export default function SpecialCard({ special }: SpecialCardProps) {
               {!hasBanner && <div className="h-[1.625rem]" />}
             </div>
 
-            {/* ── Cart actions — identical UI for all special types ──────── */}
+            {/* Cart actions */}
             {inStock ? (
               <div className="flex items-center gap-2" onClick={(e) => e.preventDefault()}>
                 <div className="flex items-center border border-gray-200 rounded-lg">
@@ -386,9 +381,10 @@ export default function SpecialCard({ special }: SpecialCardProps) {
 
                 <button
                   onClick={handleAddToCart}
-                  className="flex-1 flex items-center justify-center bg-brand-orange hover:bg-orange-600 text-white py-2 rounded-lg transition-colors"
+                  className="flex-1 flex items-center justify-center gap-1 bg-brand-orange hover:bg-orange-600 text-white py-2 rounded-lg transition-colors"
                 >
                   <ShoppingCart className="w-4 h-4" />
+                  <span className="font-semibold text-xs md:text-sm">Add</span>
                 </button>
               </div>
             ) : (
@@ -407,7 +403,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
           onClick={(e) => e.stopPropagation()}
         >
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden">
-            {/* Header */}
             <div className="bg-amber-50 border-b border-amber-200 px-5 py-4 flex items-start justify-between">
               <div>
                 <p className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-0.5">🔓 Special Unlocked!</p>
@@ -421,7 +416,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
               </button>
             </div>
 
-            {/* Add-on product details */}
             <div className="p-5">
               <div className="flex items-start gap-3 mb-5">
                 {addonProduct?.images[0] ? (
@@ -456,7 +450,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
                 </div>
               </div>
 
-              {/* Action buttons */}
               <div className="space-y-2">
                 <button
                   onClick={handleAcceptAddon}

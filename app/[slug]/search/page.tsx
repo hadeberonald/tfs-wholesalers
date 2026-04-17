@@ -4,7 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Search, Loader2, Package, X } from 'lucide-react';
 import ProductCard from '@/components/ProductCard';
-import { useCartStore } from '@/lib/store';
+import { useBranch } from '@/lib/branch-context';
 import toast from 'react-hot-toast';
 
 interface Product {
@@ -18,30 +18,30 @@ interface Product {
   stockLevel: number;
   active: boolean;
   onSpecial?: boolean;
-  description?: string;
-  category?: string;
+  hasVariants?: boolean;
+  variants?: any[];
 }
 
 function SearchPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { branch, loading: branchLoading } = useBranch();
   const queryParam = searchParams.get('q') || '';
-  
+
   const [searchQuery, setSearchQuery] = useState(queryParam);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
-  const { addItem } = useCartStore();
 
   useEffect(() => {
-    if (queryParam) {
+    if (queryParam && !branchLoading && branch) {
       setSearchQuery(queryParam);
       performSearch(queryParam);
     }
-  }, [queryParam]);
+  }, [queryParam, branchLoading, branch]);
 
   const performSearch = async (query: string) => {
-    if (!query.trim()) {
+    if (!query.trim() || !branch) {
       setProducts([]);
       setHasSearched(false);
       return;
@@ -51,7 +51,9 @@ function SearchPageContent() {
     setHasSearched(true);
 
     try {
-      const res = await fetch(`/api/products/search?q=${encodeURIComponent(query)}`);
+      const res = await fetch(
+        `/api/products/search?q=${encodeURIComponent(query)}&branchId=${branch.id}`
+      );
       if (res.ok) {
         const data = await res.json();
         setProducts(data.products || []);
@@ -114,7 +116,7 @@ function SearchPageContent() {
               </div>
               <button
                 type="submit"
-                disabled={loading || !searchQuery.trim()}
+                disabled={loading || !searchQuery.trim() || branchLoading}
                 className="btn-primary px-8 py-4 text-lg disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? (
@@ -149,7 +151,7 @@ function SearchPageContent() {
           )}
         </div>
 
-        {/* Search Results */}
+        {/* Loading */}
         {loading && (
           <div className="flex items-center justify-center py-20">
             <div className="text-center">
@@ -159,29 +161,27 @@ function SearchPageContent() {
           </div>
         )}
 
+        {/* Results */}
         {!loading && hasSearched && (
           <>
-            {/* Results Count */}
             <div className="mb-6">
               <p className="text-lg text-gray-700">
                 {products.length === 0 ? (
                   <span>No results found for <strong>"{queryParam}"</strong></span>
                 ) : (
                   <span>
-                    Found <strong>{products.length}</strong> {products.length === 1 ? 'product' : 'products'} for <strong>"{queryParam}"</strong>
+                    Found <strong>{products.length}</strong>{' '}
+                    {products.length === 1 ? 'product' : 'products'} for{' '}
+                    <strong>"{queryParam}"</strong>
                   </span>
                 )}
               </p>
             </div>
 
-            {/* Products Grid */}
             {products.length > 0 ? (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
                 {products.map((product) => (
-                  <ProductCard
-                    key={product._id}
-                    product={product}
-                  />
+                  <ProductCard key={product._id} product={product} />
                 ))}
               </div>
             ) : (
@@ -192,15 +192,14 @@ function SearchPageContent() {
                   Try different keywords or browse our categories
                 </p>
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                  <button
-                    onClick={clearSearch}
-                    className="btn-secondary"
-                  >
+                  <button onClick={clearSearch} className="btn-secondary">
                     Clear Search
                   </button>
-                  <a href="/products" className="btn-primary">
-                    Browse All Products
-                  </a>
+                  {branch && (
+                    <a href={`/${branch.slug}/shop`} className="btn-primary">
+                      Browse All Products
+                    </a>
+                  )}
                 </div>
               </div>
             )}
@@ -212,7 +211,7 @@ function SearchPageContent() {
           <div className="bg-white rounded-2xl p-12 text-center">
             <Search className="w-16 h-16 text-gray-300 mx-auto mb-4" />
             <h3 className="text-xl font-semibold text-gray-900 mb-2">Start Searching</h3>
-            <p className="text-gray-600 mb-6">
+            <p className="text-gray-600">
               Enter a product name, category, or description above
             </p>
           </div>
