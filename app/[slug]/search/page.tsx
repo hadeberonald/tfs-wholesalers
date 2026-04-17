@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams, useRouter, useParams } from 'next/navigation';
 import { Search, Loader2, Package, X } from 'lucide-react';
 import ProductCard from '@/components/ProductCard';
 import { useBranch } from '@/lib/branch-context';
@@ -25,7 +25,10 @@ interface Product {
 function SearchPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const params = useParams();
   const { branch, loading: branchLoading } = useBranch();
+
+  const slug = params?.slug as string; // branch slug from URL
   const queryParam = searchParams.get('q') || '';
 
   const [searchQuery, setSearchQuery] = useState(queryParam);
@@ -68,8 +71,9 @@ function SearchPageContent() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (searchQuery.trim()) {
-      router.push(`/search?q=${encodeURIComponent(searchQuery)}`);
+    if (searchQuery.trim() && slug) {
+      // ✅ Include branch slug in the URL
+      router.push(`/${slug}/search?q=${encodeURIComponent(searchQuery)}`);
       performSearch(searchQuery);
     }
   };
@@ -78,19 +82,17 @@ function SearchPageContent() {
     setSearchQuery('');
     setProducts([]);
     setHasSearched(false);
-    router.push('/search');
+    if (slug) router.push(`/${slug}/search`);
   };
 
   return (
     <div className="min-h-screen bg-gray-50 pt-20">
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Search Header */}
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-brand-black mb-2">Search Products</h1>
           <p className="text-gray-600">Find exactly what you're looking for</p>
         </div>
 
-        {/* Search Bar */}
         <div className="bg-white rounded-2xl p-6 shadow-sm mb-8">
           <form onSubmit={handleSearch} className="relative">
             <div className="flex items-center space-x-3">
@@ -119,16 +121,11 @@ function SearchPageContent() {
                 disabled={loading || !searchQuery.trim() || branchLoading}
                 className="btn-primary px-8 py-4 text-lg disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {loading ? (
-                  <Loader2 className="w-6 h-6 animate-spin" />
-                ) : (
-                  'Search'
-                )}
+                {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : 'Search'}
               </button>
             </div>
           </form>
 
-          {/* Popular Searches */}
           {!hasSearched && (
             <div className="mt-6">
               <p className="text-sm text-gray-600 mb-3">Popular searches:</p>
@@ -138,7 +135,7 @@ function SearchPageContent() {
                     key={term}
                     onClick={() => {
                       setSearchQuery(term);
-                      router.push(`/search?q=${encodeURIComponent(term)}`);
+                      if (slug) router.push(`/${slug}/search?q=${encodeURIComponent(term)}`);
                       performSearch(term);
                     }}
                     className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700 transition-colors"
@@ -151,7 +148,6 @@ function SearchPageContent() {
           )}
         </div>
 
-        {/* Loading */}
         {loading && (
           <div className="flex items-center justify-center py-20">
             <div className="text-center">
@@ -161,7 +157,6 @@ function SearchPageContent() {
           </div>
         )}
 
-        {/* Results */}
         {!loading && hasSearched && (
           <>
             <div className="mb-6">
@@ -188,17 +183,11 @@ function SearchPageContent() {
               <div className="bg-white rounded-2xl p-12 text-center">
                 <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">No products found</h3>
-                <p className="text-gray-600 mb-6">
-                  Try different keywords or browse our categories
-                </p>
+                <p className="text-gray-600 mb-6">Try different keywords or browse our categories</p>
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                  <button onClick={clearSearch} className="btn-secondary">
-                    Clear Search
-                  </button>
+                  <button onClick={clearSearch} className="btn-secondary">Clear Search</button>
                   {branch && (
-                    <a href={`/${branch.slug}/shop`} className="btn-primary">
-                      Browse All Products
-                    </a>
+                    <a href={`/${branch.slug}/shop`} className="btn-primary">Browse All Products</a>
                   )}
                 </div>
               </div>
@@ -206,14 +195,11 @@ function SearchPageContent() {
           </>
         )}
 
-        {/* Initial State */}
         {!hasSearched && !loading && (
           <div className="bg-white rounded-2xl p-12 text-center">
             <Search className="w-16 h-16 text-gray-300 mx-auto mb-4" />
             <h3 className="text-xl font-semibold text-gray-900 mb-2">Start Searching</h3>
-            <p className="text-gray-600">
-              Enter a product name, category, or description above
-            </p>
+            <p className="text-gray-600">Enter a product name, category, or description above</p>
           </div>
         )}
       </div>
