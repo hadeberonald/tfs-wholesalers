@@ -55,7 +55,6 @@ export default function SpecialDetailPage() {
   const [quantity, setQuantity] = useState(1);
   const [selectedImage, setSelectedImage] = useState(0);
   const [loading, setLoading] = useState(true);
-  // Modal shown after trigger product is added to cart
   const [showAddonModal, setShowAddonModal] = useState(false);
 
   useEffect(() => {
@@ -105,7 +104,6 @@ export default function SpecialDetailPage() {
         }
       } else if (special.type === 'conditional_add_on_price') {
         if (special.conditions.triggerProductId) productIds = [special.conditions.triggerProductId];
-        // Also fetch the add-on product for the modal
         if (special.conditions.targetProductId) {
           fetch(`/api/products/${special.conditions.targetProductId}`)
             .then((r) => (r.ok ? r.json() : null))
@@ -227,7 +225,6 @@ export default function SpecialDetailPage() {
     setQuantity(Math.min(selectedProduct.stockLevel, n));
   };
 
-  // Step 1: add the trigger product, then show the add-on modal
   const handleAddToCart = () => {
     if (!selectedProduct || !special) {
       toast.error('Please select a product');
@@ -256,10 +253,8 @@ export default function SpecialDetailPage() {
     }
   };
 
-  // Step 2a: customer accepts the add-on
   const handleAcceptAddon = () => {
     if (!addonProduct || !special) return;
-
     addItem({
       id: addonProduct._id,
       name: addonProduct.name,
@@ -270,12 +265,10 @@ export default function SpecialDetailPage() {
       appliedSpecialId: special._id,
       originalPrice: addonProduct.price,
     });
-
     toast.success(`${addonProduct.name} added at R${special.conditions.overridePrice}! 🎉`);
     setShowAddonModal(false);
   };
 
-  // Step 2b: customer declines
   const handleDeclineAddon = () => {
     toast.success(`${selectedProduct?.name} added to cart!`);
     setShowAddonModal(false);
@@ -283,6 +276,7 @@ export default function SpecialDetailPage() {
 
   // ── Derived values ────────────────────────────────────────────────────────
   const isInStock     = (selectedProduct?.stockLevel ?? 0) > 0;
+  const isLowStock    = (selectedProduct?.stockLevel ?? 0) > 0 && (selectedProduct?.stockLevel ?? 0) <= 10;
   const displayImages = (special?.images?.length ? special.images : selectedProduct?.images) ?? [];
   const displayPrice  = selectedProduct ? getDisplayPrice(selectedProduct) : 0;
   const savings       = selectedProduct ? getDisplaySavings(selectedProduct) : 0;
@@ -301,7 +295,6 @@ export default function SpecialDetailPage() {
     ? Math.max(0, addonProduct.price - (special.conditions.overridePrice || 0))
     : 0;
 
-  // ─────────────────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 pt-32 md:pt-28">
@@ -549,13 +542,17 @@ export default function SpecialDetailPage() {
               </div>
             )}
 
-            {/* Stock status */}
+            {/* Stock status — only show count when 10 or less */}
             {selectedProduct && (
               <div className="mb-6">
                 {isInStock ? (
                   <p className="text-green-600 font-semibold flex items-center space-x-2">
                     <span className="w-2 h-2 bg-green-600 rounded-full inline-block" />
-                    <span>In Stock ({selectedProduct.stockLevel} available)</span>
+                    <span>
+                      {isLowStock
+                        ? `Only ${selectedProduct.stockLevel} left`
+                        : 'In Stock'}
+                    </span>
                   </p>
                 ) : (
                   <p className="text-red-600 font-semibold flex items-center space-x-2">
@@ -653,7 +650,6 @@ export default function SpecialDetailPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden">
 
-            {/* Modal header */}
             <div className="bg-amber-50 border-b border-amber-200 px-6 py-4 flex items-start justify-between">
               <div>
                 <p className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-1">🔓 Special Unlocked!</p>
@@ -664,7 +660,6 @@ export default function SpecialDetailPage() {
               </button>
             </div>
 
-            {/* Add-on product details */}
             <div className="p-6">
               <div className="flex items-start gap-4 mb-6">
                 {addonProduct?.images[0] ? (
@@ -704,7 +699,6 @@ export default function SpecialDetailPage() {
                 </div>
               </div>
 
-              {/* Action buttons */}
               <div className="space-y-3">
                 <button
                   onClick={handleAcceptAddon}

@@ -6,28 +6,36 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+
     "updates": {
       "url": "https://u.expo.dev/7355e9c9-4afe-4f0b-b808-2488fd7a1ff8",
       "fallbackToCacheTimeout": 0
     },
+
     "runtimeVersion": {
       "policy": "appVersion"
     },
+
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#FF6B35"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+
+    "assetBundlePatterns": ["**/*"],
+
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.tfswholesalers.picker",
+      "buildNumber": "2",
+
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Allow TFS Picker to use your camera to scan barcodes and QR codes for order processing.",
+        "NSUserNotificationUsageDescription": "We send notifications for order updates and task assignments."
       }
     },
+
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -38,15 +46,15 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.VIBRATE",
-        "android.permission.RECORD_AUDIO",
         "android.permission.RECEIVE_BOOT_COMPLETED",
-        "android.permission.VIBRATE",
         "android.permission.POST_NOTIFICATIONS"
       ]
     },
+
     "web": {
       "favicon": "./assets/favicon.png"
     },
+
     "plugins": [
       [
         "expo-camera",
@@ -63,11 +71,13 @@
         }
       ]
     ],
+
     "extra": {
       "eas": {
         "projectId": "7355e9c9-4afe-4f0b-b808-2488fd7a1ff8"
       }
     },
+
     "owner": "hadeberonald"
   }
 }
