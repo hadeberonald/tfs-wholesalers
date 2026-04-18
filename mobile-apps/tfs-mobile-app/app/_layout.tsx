@@ -40,9 +40,14 @@ export default function RootLayout() {
 
       const branchSlug = await AsyncStorage.getItem('selectedBranch');
       if (branchSlug) {
+        // Always fetch fresh from API — never trust the persisted branch in
+        // AsyncStorage for settings, since delivery pricing / store location
+        // can be updated by admin at any time.
         const response = await api.get(`/api/mobile/branches/${branchSlug}`);
         if (response.data.success && response.data.branch) {
           setBranch(response.data.branch);
+          console.log('[layout] Branch refreshed:', response.data.branch.slug,
+            'pricing:', response.data.branch.settings?.deliveryPricing);
         } else {
           await AsyncStorage.removeItem('selectedBranch');
         }

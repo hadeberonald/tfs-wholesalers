@@ -1,16 +1,6 @@
 // app/checkout.tsx  (Expo Router — customer app)
-//
-// ─── What changed ────────────────────────────────────────────────────────────
-// 1. Delivery fee comes from address-picker (distance-based, matches web logic)
-// 2. Order schema normalized to match web POST /api/orders exactly:
-//    - customerInfo  { name, email, phone }
-//    - shippingAddress (not deliveryAddress) – matches web field name
-//    - status: 'payment_pending' (set by web before payment)
-//    - paymentStatus: 'pending'
-//    - All special/bonus/combo fields preserved for picker app
-// 3. Delivery fee displayed live as user picks address
-// 4. customerName and customerEmail now sent as TOP-LEVEL fields so the
-//    PATCH route can send status emails without a separate user lookup
+// Free delivery threshold removed entirely.
+// Delivery fee always comes from address-picker which reads live branch settings.
 
 import React, { useState, useCallback } from 'react';
 import {
@@ -26,25 +16,17 @@ import { useStore } from '@/lib/store';
 import api from '@/lib/api';
 import type { DeliveryAddress } from '@/app/address-picker';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Constants – free delivery threshold (matches web)
-// ─────────────────────────────────────────────────────────────────────────────
-const FREE_DELIVERY_THRESHOLD = 500; // R500 cart subtotal → free delivery
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
 function specialTypeBadge(type?: string) {
   if (!type) return null;
   const map: Record<string, { label: string; bg: string; color: string }> = {
-    buy_x_get_y:    { label: 'Buy X Get Y',   bg: '#d1fae5', color: '#065f46' },
-    multibuy:       { label: 'Multibuy',       bg: '#ede9fe', color: '#5b21b6' },
-    combo:          { label: 'Combo',          bg: '#ede9fe', color: '#5b21b6' },
-    percentage_off: { label: '% Off',          bg: '#fef3c7', color: '#92400e' },
-    amount_off:     { label: 'Amount Off',     bg: '#fef3c7', color: '#92400e' },
-    fixed_price:    { label: 'Special Price',  bg: '#fef3c7', color: '#92400e' },
-    bonus:          { label: 'Bonus',          bg: '#d1fae5', color: '#065f46' },
-    bundle:         { label: 'Bundle',         bg: '#ede9fe', color: '#5b21b6' },
+    buy_x_get_y:    { label: 'Buy X Get Y',  bg: '#d1fae5', color: '#065f46' },
+    multibuy:       { label: 'Multibuy',      bg: '#ede9fe', color: '#5b21b6' },
+    combo:          { label: 'Combo',         bg: '#ede9fe', color: '#5b21b6' },
+    percentage_off: { label: '% Off',         bg: '#fef3c7', color: '#92400e' },
+    amount_off:     { label: 'Amount Off',    bg: '#fef3c7', color: '#92400e' },
+    fixed_price:    { label: 'Special Price', bg: '#fef3c7', color: '#92400e' },
+    bonus:          { label: 'Bonus',         bg: '#d1fae5', color: '#065f46' },
+    bundle:         { label: 'Bundle',        bg: '#ede9fe', color: '#5b21b6' },
   };
   const s = map[type];
   if (!s) return null;
@@ -56,24 +38,17 @@ function specialTypeBadge(type?: string) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Screen
-// ─────────────────────────────────────────────────────────────────────────────
 export default function CheckoutScreen() {
   const router = useRouter();
   const {
-    items,
-    user,
-    branch,
-    getTotal,
-    pendingDeliveryAddress,
-    setPendingDeliveryAddress,
+    items, user, branch, getTotal,
+    pendingDeliveryAddress, setPendingDeliveryAddress,
   } = useStore();
 
   const [deliveryAddress, setDeliveryAddress] = useState<DeliveryAddress | null>(null);
   const [placingOrder, setPlacingOrder] = useState(false);
 
-  // ── Consume address set by address-picker ─────────────────────────────────
+  // Consume address set by address-picker screen
   useFocusEffect(
     useCallback(() => {
       if (pendingDeliveryAddress) {
@@ -84,28 +59,18 @@ export default function CheckoutScreen() {
   );
 
   // ── Financials ────────────────────────────────────────────────────────────
-  const subtotal = getTotal();
-
-  // If cart qualifies for free delivery, ignore distance fee
-  const deliveryFee = subtotal >= FREE_DELIVERY_THRESHOLD
-    ? 0
-    : (deliveryAddress?.deliveryFee ?? 0);
-
-  const total = subtotal + deliveryFee;
+  const subtotal    = getTotal();
+  const deliveryFee = deliveryAddress?.deliveryFee ?? 0; // from address-picker, no overrides
+  const total       = subtotal + deliveryFee;
 
   const totalSavings = items.reduce(
-    (s, i) => s + ((i.specialDiscount || 0) * i.quantity),
-    0,
+    (s, i) => s + ((i.specialDiscount || 0) * i.quantity), 0,
   );
 
   // ── Item groups ───────────────────────────────────────────────────────────
-  const regularItems = items.filter(
-    (i) => !i.isBonusItem && !i.isFreeItem && !i.isMultibuyBonus && !i.isComboItem,
-  );
-  const bonusItems = items.filter(
-    (i) => i.isBonusItem || i.isFreeItem || i.isMultibuyBonus,
-  );
-  const comboItems = items.filter((i) => i.isComboItem);
+  const regularItems = items.filter(i => !i.isBonusItem && !i.isFreeItem && !i.isMultibuyBonus && !i.isComboItem);
+  const bonusItems   = items.filter(i => i.isBonusItem || i.isFreeItem || i.isMultibuyBonus);
+  const comboItems   = items.filter(i => i.isComboItem);
 
   // ── Place order ───────────────────────────────────────────────────────────
   const placeOrder = async () => {
@@ -114,7 +79,7 @@ export default function CheckoutScreen() {
       return;
     }
     if (deliveryAddress.outsideZone) {
-      Alert.alert('Outside Delivery Zone', 'Your selected address is outside our delivery area. Please choose a different address.');
+      Alert.alert('Outside Delivery Zone', 'Your address is outside our delivery area. Please choose a different address.');
       return;
     }
     if (!user) {
@@ -134,150 +99,101 @@ export default function CheckoutScreen() {
     try {
       const branchId = branch._id || branch.id;
 
-      // ✅ Map cart items → order items
-      const orderItems = items.map((item) => ({
-        // Core product fields
-        productId:   item.id,
-        variantId:   item.variantId,
-        name:        item.name,
-        variantName: item.variantName,
-        price:       item.price,
+      const orderItems = items.map(item => ({
+        productId:    item.id,
+        variantId:    item.variantId,
+        name:         item.name,
+        variantName:  item.variantName,
+        price:        item.price,
         originalPrice: item.originalPrice ?? item.price,
-        quantity:    item.quantity,
-        image:       item.image,
-        sku:         (item as any).sku || '',
-
-        // Special / promotion fields
+        quantity:     item.quantity,
+        image:        item.image,
+        sku:          (item as any).sku || '',
         appliedSpecialId:        item.appliedSpecialId,
         specialDiscount:         item.specialDiscount,
         specialDescription:      item.specialDescription,
         specialType:             (item as any).specialType,
         specialConditions:       (item as any).specialConditions,
         meetsSpecialRequirement: item.meetsSpecialRequirement,
-
-        // Bonus / free item flags
-        isFreeItem:      item.isFreeItem       || false,
-        isMultibuyBonus: item.isMultibuyBonus   || false,
-        isBonusItem:     item.isBonusItem       || false,
-        autoAdded:       item.autoAdded         || false,
+        isFreeItem:      item.isFreeItem      || false,
+        isMultibuyBonus: item.isMultibuyBonus || false,
+        isBonusItem:     item.isBonusItem     || false,
+        autoAdded:       item.autoAdded       || false,
         linkedToItemId:  item.linkedToItemId,
-
-        // Combo flags
         isComboItem: item.isComboItem || false,
         comboId:     (item as any).comboId,
         comboName:   (item as any).comboName,
         comboItems:  (item as any).comboItems,
       }));
 
-      // ✅ Order body normalized to match web /api/orders POST schema
       const orderBody = {
-        // ── Identity ─────────────────────────────────────────────────────
-        userId:   user.id,
+        userId:        user.id,
         branchId,
-
-        // ── Top-level customer fields (required by PATCH route for emails) ─
-        // The server stores these on the order document so status-update
-        // emails can be sent without a separate user lookup.
         customerName:  user.name  ?? '',
         customerEmail: user.email ?? '',
-
-        // ── Customer info object (kept for backwards compat) ─────────────
         customerInfo: {
           name:  user.name,
           email: user.email,
           phone: (user as any).phone || '',
         },
-
-        // ── Items ────────────────────────────────────────────────────────
         items: orderItems,
-
-        // ── Address – uses 'shippingAddress' to match web schema ─────────
         shippingAddress: {
-          address:     deliveryAddress.formattedAddress,
-          lat:         deliveryAddress.lat,
-          lng:         deliveryAddress.lng,
-          city:        deliveryAddress.city,
-          province:    deliveryAddress.province,
-          postalCode:  deliveryAddress.postalCode,
-          street:      deliveryAddress.street,
-          name:        deliveryAddress.name,
-          country:     deliveryAddress.country,
+          address:    deliveryAddress.formattedAddress,
+          lat:        deliveryAddress.lat,
+          lng:        deliveryAddress.lng,
+          city:       deliveryAddress.city,
+          province:   deliveryAddress.province,
+          postalCode: deliveryAddress.postalCode,
+          street:     deliveryAddress.street,
+          name:       deliveryAddress.name,
+          country:    deliveryAddress.country,
         },
-
-        // ── Financials ───────────────────────────────────────────────────
-        subtotal:     parseFloat(subtotal.toFixed(2)),
-        deliveryFee:  parseFloat(deliveryFee.toFixed(2)),
-        total:        parseFloat(total.toFixed(2)),
-        totalSavings: parseFloat(totalSavings.toFixed(2)),
-
-        // ── Delivery meta ────────────────────────────────────────────────
-        deliveryAddress: deliveryAddress.formattedAddress, // plain string for order confirmation email
+        subtotal:         parseFloat(subtotal.toFixed(2)),
+        deliveryFee:      parseFloat(deliveryFee.toFixed(2)),
+        total:            parseFloat(total.toFixed(2)),
+        totalSavings:     parseFloat(totalSavings.toFixed(2)),
+        deliveryAddress:  deliveryAddress.formattedAddress,
         deliveryDistance: deliveryAddress.distance,
         deliveryNotes:    '',
-
-        // ── Payment / status ─────────────────────────────────────────────
         paymentMethod: 'card',
         paymentStatus: 'pending',
         status:        'payment_pending',
-
-        // ── Source tag ───────────────────────────────────────────────────
-        orderSource: 'mobile_app',
+        orderSource:   'mobile_app',
       };
 
       const res = await api.post('/api/orders', orderBody);
-
-      if (!res.data.success) {
-        throw new Error(res.data.error || 'Failed to create order');
-      }
+      if (!res.data.success) throw new Error(res.data.error || 'Failed to create order');
 
       const { orderId, orderNumber } = res.data;
-
-      router.push(
-        `/payment?orderId=${orderId}&amount=${total.toFixed(2)}&orderNumber=${encodeURIComponent(orderNumber)}`,
-      );
+      router.push(`/payment?orderId=${orderId}&amount=${total.toFixed(2)}&orderNumber=${encodeURIComponent(orderNumber)}`);
     } catch (e: any) {
       console.error('[Checkout] placeOrder error:', e);
-      Alert.alert(
-        'Order Failed',
-        e?.response?.data?.error || e?.message || 'Something went wrong. Please try again.',
-      );
+      Alert.alert('Order Failed', e?.response?.data?.error || e?.message || 'Something went wrong. Please try again.');
     } finally {
       setPlacingOrder(false);
     }
   };
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Render helpers
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Render item ───────────────────────────────────────────────────────────
   const renderItem = (item: typeof items[0], index: number) => {
-    const isBonus  = item.isBonusItem || item.isFreeItem || item.isMultibuyBonus;
-    const isCombo  = item.isComboItem;
+    const isBonus   = item.isBonusItem || item.isFreeItem || item.isMultibuyBonus;
+    const isCombo   = item.isComboItem;
     const linePrice = isBonus ? 0 : item.price * item.quantity;
 
     return (
       <View
         key={`${item.id}-${item.variantId}-${index}`}
-        style={[
-          styles.itemRow,
-          isBonus && styles.itemRowBonus,
-          isCombo && styles.itemRowCombo,
-        ]}
+        style={[styles.itemRow, isBonus && styles.itemRowBonus, isCombo && styles.itemRowCombo]}
       >
-        {item.image ? (
-          <Image source={{ uri: item.image }} style={styles.itemImg} />
-        ) : (
-          <View style={[styles.itemImg, styles.itemImgPlaceholder]}>
-            <Package color="#d1d5db" size={18} />
-          </View>
-        )}
-
+        {item.image
+          ? <Image source={{ uri: item.image }} style={styles.itemImg} />
+          : <View style={[styles.itemImg, styles.itemImgPlaceholder]}><Package color="#d1d5db" size={18} /></View>
+        }
         <View style={{ flex: 1 }}>
           <View style={styles.itemNameRow}>
             <Text style={styles.itemName} numberOfLines={1}>
               {item.name}
-              {item.variantName ? (
-                <Text style={styles.itemVariant}> — {item.variantName}</Text>
-              ) : null}
+              {item.variantName ? <Text style={styles.itemVariant}> — {item.variantName}</Text> : null}
             </Text>
             {isBonus && (
               <View style={styles.freeBadge}>
@@ -285,22 +201,17 @@ export default function CheckoutScreen() {
               </View>
             )}
           </View>
-
           {(item as any).specialType && specialTypeBadge((item as any).specialType)}
-
           {isCombo && (item as any).comboItems?.length > 0 && (
             <Text style={styles.comboBreakdown} numberOfLines={2}>
               {(item as any).comboItems.map((c: any) => `${c.quantity}× ${c.productName}`).join(', ')}
             </Text>
           )}
-
           <View style={styles.itemQtyPriceRow}>
             <Text style={styles.itemQty}>×{item.quantity}</Text>
-            {item.specialDiscount ? (
-              <Text style={styles.itemOrigPrice}>
-                R{(item.originalPrice ?? item.price).toFixed(2)}
-              </Text>
-            ) : null}
+            {item.specialDiscount
+              ? <Text style={styles.itemOrigPrice}>R{(item.originalPrice ?? item.price).toFixed(2)}</Text>
+              : null}
             <Text style={[styles.itemPrice, isBonus && styles.itemPriceFree]}>
               {isBonus ? 'FREE' : `R${linePrice.toFixed(2)}`}
             </Text>
@@ -310,9 +221,7 @@ export default function CheckoutScreen() {
     );
   };
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Empty cart guard
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Empty cart ────────────────────────────────────────────────────────────
   if (items.length === 0) {
     return (
       <View style={styles.emptyContainer}>
@@ -325,13 +234,11 @@ export default function CheckoutScreen() {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Main render
-  // ─────────────────────────────────────────────────────────────────────────
   const canCheckout = !!deliveryAddress && !deliveryAddress.outsideZone && !placingOrder;
 
   return (
     <View style={styles.container}>
+
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
@@ -349,10 +256,7 @@ export default function CheckoutScreen() {
 
           {deliveryAddress ? (
             <TouchableOpacity
-              style={[
-                styles.addressSelected,
-                deliveryAddress.outsideZone && styles.addressSelectedError,
-              ]}
+              style={[styles.addressSelected, deliveryAddress.outsideZone && styles.addressSelectedError]}
               onPress={() => router.push('/address-picker')}
             >
               <View style={styles.addressIconWrap}>
@@ -363,8 +267,7 @@ export default function CheckoutScreen() {
                   {deliveryAddress.street || deliveryAddress.name}
                 </Text>
                 <Text style={styles.addressCity} numberOfLines={1}>
-                  {[deliveryAddress.city, deliveryAddress.province, deliveryAddress.postalCode]
-                    .filter(Boolean).join(', ')}
+                  {[deliveryAddress.city, deliveryAddress.province, deliveryAddress.postalCode].filter(Boolean).join(', ')}
                 </Text>
                 {deliveryAddress.outsideZone ? (
                   <Text style={styles.outsideZoneText}>
@@ -372,43 +275,25 @@ export default function CheckoutScreen() {
                   </Text>
                 ) : (
                   <Text style={styles.deliveryFeeInline}>
-                    {deliveryAddress.distance.toFixed(1)} km ·{' '}
-                    {deliveryFee === 0
-                      ? '🎉 Free delivery!'
-                      : `Delivery: R${deliveryFee.toFixed(2)}`}
+                    {deliveryAddress.distance.toFixed(1)} km · Delivery: R{deliveryFee.toFixed(2)}
                   </Text>
                 )}
               </View>
               <ChevronRight color="#9ca3af" size={18} />
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity
-              style={styles.addressEmpty}
-              onPress={() => router.push('/address-picker')}
-            >
+            <TouchableOpacity style={styles.addressEmpty} onPress={() => router.push('/address-picker')}>
               <MapPin color="#FF6B35" size={20} />
               <Text style={styles.addressEmptyText}>Select delivery address</Text>
               <ChevronRight color="#9ca3af" size={18} />
             </TouchableOpacity>
-          )}
-
-          {/* Free delivery hint */}
-          {deliveryAddress && !deliveryAddress.outsideZone && subtotal < FREE_DELIVERY_THRESHOLD && (
-            <View style={styles.freeDeliveryHintRow}>
-              <Truck color="#6b7280" size={14} />
-              <Text style={styles.freeDeliveryHintText}>
-                Add <Text style={{ fontWeight: '700' }}>R{(FREE_DELIVERY_THRESHOLD - subtotal).toFixed(2)}</Text> more for free delivery
-              </Text>
-            </View>
           )}
         </View>
 
         {/* ── Items ── */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Your Items ({items.length})</Text>
-
           {regularItems.map((item, i) => renderItem(item, i))}
-
           {comboItems.length > 0 && (
             <>
               <View style={styles.groupDivider}>
@@ -417,7 +302,6 @@ export default function CheckoutScreen() {
               {comboItems.map((item, i) => renderItem(item, i + 1000))}
             </>
           )}
-
           {bonusItems.length > 0 && (
             <>
               <View style={styles.groupDivider}>
@@ -428,7 +312,7 @@ export default function CheckoutScreen() {
           )}
         </View>
 
-        {/* ── Savings notice ── */}
+        {/* ── Savings ── */}
         {totalSavings > 0 && (
           <View style={styles.savingsCard}>
             <CheckCircle color="#10b981" size={18} />
@@ -442,7 +326,7 @@ export default function CheckoutScreen() {
           <View style={styles.bonusNotice}>
             <AlertCircle color="#f59e0b" size={16} />
             <Text style={styles.bonusNoticeText}>
-              {bonusItems.length} free bonus item{bonusItems.length > 1 ? 's' : ''} will be included with your order
+              {bonusItems.length} free bonus item{bonusItems.length > 1 ? 's' : ''} included with your order
             </Text>
           </View>
         )}
@@ -466,13 +350,9 @@ export default function CheckoutScreen() {
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Delivery</Text>
             <Text style={styles.summaryValue}>
-              {!deliveryAddress ? (
-                <Text style={{ color: '#9ca3af' }}>Select address</Text>
-              ) : deliveryFee === 0 ? (
-                <Text style={{ color: '#10b981', fontWeight: '700' }}>FREE</Text>
-              ) : (
-                `R${deliveryFee.toFixed(2)}`
-              )}
+              {!deliveryAddress
+                ? <Text style={{ color: '#9ca3af' }}>Select address</Text>
+                : `R${deliveryFee.toFixed(2)}`}
             </Text>
           </View>
 
@@ -482,12 +362,9 @@ export default function CheckoutScreen() {
           </View>
         </View>
 
-        {/* Delivery info */}
         <View style={styles.deliveryInfoRow}>
           <Truck color="#6b7280" size={16} />
-          <Text style={styles.deliveryInfoText}>
-            Delivered by TFS Wholesalers.
-          </Text>
+          <Text style={styles.deliveryInfoText}>Delivered by TFS Wholesalers.</Text>
         </View>
 
         <View style={{ height: 140 }} />
@@ -502,7 +379,7 @@ export default function CheckoutScreen() {
           </View>
         )}
         {deliveryAddress?.outsideZone && (
-          <View style={[styles.footerWarning, styles.footerError]}>
+          <View style={styles.footerWarning}>
             <AlertCircle color="#ef4444" size={14} />
             <Text style={[styles.footerWarningText, { color: '#ef4444' }]}>
               Address is outside our delivery zone
@@ -519,9 +396,7 @@ export default function CheckoutScreen() {
             <ActivityIndicator color="#fff" />
           ) : (
             <>
-              <Text style={styles.placeOrderBtnText}>
-                Place Order — R{total.toFixed(2)}
-              </Text>
+              <Text style={styles.placeOrderBtnText}>Place Order — R{total.toFixed(2)}</Text>
               <ChevronRight color="#fff" size={20} />
             </>
           )}
@@ -531,9 +406,6 @@ export default function CheckoutScreen() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Styles
-// ─────────────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9fafb' },
 
@@ -560,7 +432,6 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 15, fontWeight: '700', color: '#1f2937', marginBottom: 14 },
 
-  // Address
   addressSelected: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
     backgroundColor: '#fff7f3', borderRadius: 14, padding: 14,
@@ -582,14 +453,6 @@ const styles = StyleSheet.create({
   },
   addressEmptyText: { flex: 1, fontSize: 14, color: '#FF6B35', fontWeight: '600' },
 
-  freeDeliveryHintRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    marginTop: 10, paddingTop: 10,
-    borderTopWidth: 1, borderTopColor: '#f3f4f6',
-  },
-  freeDeliveryHintText: { fontSize: 12, color: '#6b7280' },
-
-  // Items
   itemRow: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 12,
     paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f9fafb',
@@ -615,7 +478,6 @@ const styles = StyleSheet.create({
   groupDivider: { marginVertical: 10, paddingVertical: 6, borderTopWidth: 1, borderTopColor: '#f3f4f6' },
   groupDividerText: { fontSize: 12, fontWeight: '700', color: '#6b7280' },
 
-  // Savings
   savingsCard: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     backgroundColor: '#f0fdf4', borderRadius: 14, padding: 14,
@@ -630,7 +492,6 @@ const styles = StyleSheet.create({
   },
   bonusNoticeText: { flex: 1, fontSize: 13, color: '#92400e' },
 
-  // Summary
   summaryRow:        { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
   summaryLabel:      { fontSize: 14, color: '#6b7280' },
   summaryValue:      { fontSize: 14, fontWeight: '600', color: '#1f2937' },
@@ -644,7 +505,6 @@ const styles = StyleSheet.create({
   },
   deliveryInfoText: { flex: 1, fontSize: 12, color: '#9ca3af', lineHeight: 18 },
 
-  // Footer
   footer: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: '#fff', padding: 16,
@@ -654,7 +514,6 @@ const styles = StyleSheet.create({
   footerWarning: {
     flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10,
   },
-  footerError: { /* inherits footerWarning */ },
   footerWarningText: { fontSize: 12, color: '#f59e0b', fontWeight: '600' },
   placeOrderBtn: {
     backgroundColor: '#FF6B35', borderRadius: 16, height: 56,
