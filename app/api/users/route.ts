@@ -1,20 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { hashPassword } from '@/lib/utils';
+import { getAdminBranch } from '@/lib/get-admin-branch';
 
 export async function GET(request: NextRequest) {
+  // SECURITY: admin access required to list users
+  const adminInfo = await getAdminBranch();
+  if ('error' in adminInfo) {
+    return NextResponse.json({ error: adminInfo.error }, { status: adminInfo.status });
+  }
+
   try {
     const searchParams = request.nextUrl.searchParams;
     const role = searchParams.get('role');
-    
+
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
-    
+
     const query: any = {};
     if (role) {
       query.role = role;
     }
-    
+    // Non-super-admins may only see users in their own branch
+    if (!adminInfo.isSuperAdmin && adminInfo.branchId) {
+      query.branchId = adminInfo.branchId;
+    }
+
     const users = await db.collection('users')
       .find(query, { projection: { password: 0 } })
       .sort({ createdAt: -1 })
@@ -28,6 +39,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  // SECURITY: admin access required to create users via this endpoint
+  const adminInfo = await getAdminBranch();
+  if ('error' in adminInfo) {
+    return NextResponse.json({ error: adminInfo.error }, { status: adminInfo.status });
+  }
+
   try {
     const { name, email, password, role = 'customer', phone, active = true } = await request.json();
 
@@ -39,11 +56,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
     }
 
+    // SECURITY: only super-admins may create admin or super-admin accounts
+    if ((role === 'admin' || role === 'super-admin') && !adminInfo.isSuperAdmin) {
+      return NextResponse.json({ error: 'Not authorized to create admin accounts' }, { status: 403 });
+    }
+
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
 
-    const existingUser = await db.collection('users').findOne({ 
-      email: email.toLowerCase() 
+    const existingUser = await db.collection('users').findOne({
+      email: email.toLowerCase()
     });
 
     if (existingUser) {
@@ -63,7 +85,7 @@ export async function POST(request: NextRequest) {
       updatedAt: new Date(),
     });
 
-    return NextResponse.json({ 
+    return NextResponse.json({
       id: result.insertedId,
       message: 'User created successfully'
     }, { status: 201 });

@@ -33,10 +33,10 @@ export const maxDuration = 300;
 const CFG = {
   syncSecret: process.env.SYNC_SECRET || '',
   ftp: {
-    host:       process.env.FTP_HOST        || '196.30.17.6',
+    host:       process.env.FTP_HOST        || '',
     port:       parseInt(process.env.FTP_PORT || '21'),
-    user:       process.env.FTP_USER        || 'Online',
-    password:   process.env.FTP_PASSWORD    || 'OnLiNe2026',
+    user:       process.env.FTP_USER        || '',
+    password:   process.env.FTP_PASSWORD    || '',
     secure:     process.env.FTP_SECURE      === 'true',
     remotePath: process.env.FTP_REMOTE_PATH || '/Online Stock Master.CSV',
   },

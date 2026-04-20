@@ -1,13 +1,12 @@
 // app/api/orders/[orderId]/route.ts
-// Key change: triggerStatusNotifications now fires BOTH Expo (mobile) push
-// AND Web Push (browser) so the web store customers get notified too.
-
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 import { getAdminBranch } from '@/lib/get-admin-branch';
 import { verifyMobileToken } from '@/lib/verify-mobile-token';
 import { getIO } from '@/lib/socket';
+import { cookies } from 'next/headers';
+import jwt from 'jsonwebtoken';
 import {
   notifyBranchPickers,
   notifyUser,
@@ -15,6 +14,10 @@ import {
   sendTransactionalEmail,
 } from '@/lib/sendPushNotification';
 import { notifyUserWeb, notifyBranchWeb } from '@/lib/sendWebPush';
+
+// SECURITY: No fallback.
+const JWT_SECRET = process.env.NEXTAUTH_SECRET;
+if (!JWT_SECRET) throw new Error('[SECURITY] NEXTAUTH_SECRET environment variable is not set. Refusing to start.');
 
 // ─── DB helper ────────────────────────────────────────────────────────────────
 
@@ -34,9 +37,6 @@ async function triggerStatusNotifications(order: any, newStatus: string): Promis
   const branchId    = order.branchId?.toString();
   const customerId  = order.userId?.toString();
 
-  // ── FIX: resolve customer identity from EITHER storage shape ──────────────
-  // Old orders (and the web checkout) may store these in customerInfo{}
-  // rather than at the top level.  Always prefer the top-level field first.
   const customerEmail =
     order.customerEmail ||
     order.customerInfo?.email ||
@@ -46,7 +46,6 @@ async function triggerStatusNotifications(order: any, newStatus: string): Promis
     order.customerInfo?.name ||
     'Customer';
 
-  // ── Mobile push (Expo) + Web push (browser) ──────────────────────────────────
   switch (newStatus) {
     case 'confirmed':
       if (branchId) {
@@ -140,7 +139,6 @@ async function triggerStatusNotifications(order: any, newStatus: string): Promis
       break;
   }
 
-  // ── Email ─────────────────────────────────────────────────────────────────────
   if (customerEmail) {
     const emailPayload = buildOrderStatusEmail({
       orderNumber,
@@ -151,8 +149,7 @@ async function triggerStatusNotifications(order: any, newStatus: string): Promis
     if (emailPayload) sendTransactionalEmail(emailPayload).catch(() => {});
   } else {
     console.warn(
-      `[Notifications] No customerEmail on order ${orderNumber} — status email skipped. ` +
-      `Check that customerEmail / customerInfo.email is stored on the order document.`
+      `[Notifications] No customerEmail on order ${orderNumber} — status email skipped.`
     );
   }
 }
@@ -168,7 +165,6 @@ function emitOrderUpdate(order: any, newStatus?: string) {
     const payload  = { order, status: newStatus || order.status };
     io.to(`order:${orderId}`).emit('order:updated', payload);
     if (branchId) io.to(`branch:${branchId}`).emit('order:updated', payload);
-    console.log(`[Socket] order:updated → order:${orderId}${branchId ? ` + branch:${branchId}` : ''}`);
   } catch (err) {
     console.error('[Socket] emit error:', err);
   }
@@ -201,13 +197,49 @@ async function applyOrderUpdate(db: any, orderId: string, updates: any) {
 
 export async function GET(request: NextRequest, { params }: { params: { orderId: string } }) {
   try {
+    // SECURITY: require authentication — web cookie or mobile Bearer token
+    const authHeader = request.headers.get('authorization') || '';
+    let authenticatedUserId: string | null = null;
+    let isStaff = false;
+
+    if (authHeader.startsWith('Bearer ')) {
+      // Mobile staff (picker/delivery) — verify mobile token
+      const mobileUser = await verifyMobileToken(authHeader.replace('Bearer ', ''));
+      if (!mobileUser) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+      authenticatedUserId = mobileUser.id;
+      isStaff = true;
+    } else {
+      // Web — verify cookie session
+      const cookieStore = await cookies();
+      const token = cookieStore.get('auth-token')?.value;
+      if (!token) {
+        return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+      }
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET!) as any;
+        authenticatedUserId = decoded.userId;
+        isStaff = decoded.role === 'admin' || decoded.role === 'super-admin';
+      } catch {
+        return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
+      }
+    }
+
     const client = await clientPromise;
     const db     = client.db('tfs-wholesalers');
     const order  = await findOrder(db, params.orderId);
+
     if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+
+    // SECURITY: non-staff users may only view their own orders
+    if (!isStaff && order.userId?.toString() !== authenticatedUserId) {
+      return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
+    }
+
     return NextResponse.json({ order: { ...order, _id: order._id.toString(), id: order._id.toString() } });
   } catch (error: any) {
-    return NextResponse.json({ error: 'Failed to fetch order', details: error.message }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to fetch order' }, { status: 500 });
   }
 }
 
@@ -267,7 +299,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { orderI
 
   } catch (error: any) {
     console.error('❌ Error updating order:', error);
-    return NextResponse.json({ error: 'Failed to update order', details: error.message }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to update order' }, { status: 500 });
   }
 }
 
