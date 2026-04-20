@@ -4,11 +4,16 @@ import { hashPassword } from '../../../../lib/utils';
 import { cookies } from 'next/headers';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.NEXTAUTH_SECRET || 'your-secret-key-change-in-production';
+// SECURITY: No fallback — app will not start without this env var set.
+const JWT_SECRET = process.env.NEXTAUTH_SECRET;
+if (!JWT_SECRET) throw new Error('[SECURITY] NEXTAUTH_SECRET environment variable is not set. Refusing to start.');
 
 export async function POST(request: NextRequest) {
   try {
-    const { name, email, password, role = 'customer' } = await request.json();
+    const { name, email, password } = await request.json();
+
+    // SECURITY: role is NEVER accepted from the client — always set server-side.
+    const role = 'customer';
 
     // Validation
     if (!name || !email || !password) {
@@ -23,8 +28,8 @@ export async function POST(request: NextRequest) {
     const db = client.db('tfs-wholesalers');
 
     // Check if user exists
-    const existingUser = await db.collection('users').findOne({ 
-      email: email.toLowerCase() 
+    const existingUser = await db.collection('users').findOne({
+      email: email.toLowerCase()
     });
 
     if (existingUser) {
@@ -46,17 +51,18 @@ export async function POST(request: NextRequest) {
 
     // Create JWT token
     const token = jwt.sign(
-      { 
+      {
         userId: result.insertedId.toString(),
         email: email.toLowerCase(),
-        role 
+        role
       },
-      JWT_SECRET,
+      JWT_SECRET!,
       { expiresIn: '7d' }
     );
 
     // Set cookie
-    cookies().set('auth-token', token, {
+    const cookieStore = await cookies();
+    cookieStore.set('auth-token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',

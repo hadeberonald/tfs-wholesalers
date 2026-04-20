@@ -1,13 +1,14 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// FILE: app/api/auth/mobile-login/route.ts
-// ─────────────────────────────────────────────────────────────────────────────
+// app/api/auth/mobile-login/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET  = process.env.JWT_SECRET || process.env.NEXTAUTH_SECRET || '';
-const JWT_EXPIRES = '30d';
+// SECURITY: Consolidated to single env var. No fallback to empty string.
+const JWT_SECRET  = process.env.NEXTAUTH_SECRET;
+if (!JWT_SECRET) throw new Error('[SECURITY] NEXTAUTH_SECRET environment variable is not set. Refusing to start.');
+
+const JWT_EXPIRES   = '30d';
 const ALLOWED_ROLES = ['picker', 'delivery', 'admin'];
 
 export async function POST(request: NextRequest) {
@@ -43,11 +44,9 @@ export async function POST(request: NextRequest) {
         role:           user.role,
         activeBranchId: user.activeBranchId?.toString() || null,
       },
-      JWT_SECRET,
+      JWT_SECRET!,
       { expiresIn: JWT_EXPIRES }
     );
-
-    console.log(`✅ Mobile login: ${user.email} (${user.role})`);
 
     return NextResponse.json({
       token,

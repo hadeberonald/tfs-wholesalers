@@ -1,12 +1,9 @@
 // app/api/payment/initialize/route.ts
-// FIX: After payment succeeds, emit order:new to the branch room
-// so the picker app sees the order instantly without any refresh.
-
 import { NextRequest, NextResponse } from 'next/server';
 import { paystackService, generatePaymentReference, formatAmountForPayment } from '@/lib/payment';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
-import { getIO } from '@/lib/socket';   // ← same wrapper used by the order route
+import { getIO } from '@/lib/socket';
 
 // ─── Helper: notify the picker app that a new order is ready ─────────────────
 function emitNewOrder(order: any) {
@@ -29,13 +26,11 @@ function emitNewOrder(order: any) {
       id:  order._id?.toString(),
     };
 
-    // Picker app joins room `branch:<branchId>` on connect
     io.to(`branch:${branchId}`).emit('order:updated', {
       order:  serialized,
       status: serialized.status,
     });
 
-    // Also emit to the order's own room (customer tracking screens join this)
     io.to(`order:${serialized._id}`).emit('order:updated', {
       order:  serialized,
       status: serialized.status,
@@ -49,16 +44,27 @@ function emitNewOrder(order: any) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { orderId, email, amount, authorizationCode } = await request.json();
+    // SECURITY: amount is NOT accepted from the client — always read from the DB.
+    const { orderId, email, authorizationCode } = await request.json();
 
-    if (!orderId || !email || !amount) {
+    if (!orderId || !email) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    const reference = generatePaymentReference(`ORDER-${orderId}`);
-
     const client = await clientPromise;
     const db     = client.db('tfs-wholesalers');
+
+    // SECURITY: fetch the authoritative order total from the database
+    if (!ObjectId.isValid(orderId)) {
+      return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
+    }
+    const orderDoc = await db.collection('orders').findOne({ _id: new ObjectId(orderId) });
+    if (!orderDoc) {
+      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    }
+    const amount = orderDoc.total;
+
+    const reference = generatePaymentReference(`ORDER-${orderId}`);
 
     // ── Saved card: charge immediately ────────────────────────────────────────
     if (authorizationCode) {
@@ -87,22 +93,21 @@ export async function POST(request: NextRequest) {
         const result = await response.json();
 
         if (result.status && result.data.status === 'success') {
-          // Update order and fetch the full document to emit
           const updated = await db.collection('orders').findOneAndUpdate(
             { _id: new ObjectId(orderId) },
             {
               $set: {
                 paymentReference: reference,
                 paymentStatus:    'paid',
-                status:           'confirmed',   // FIX: was 'processing' — picker expects 'confirmed'
+                status:           'confirmed',
                 updatedAt:        new Date(),
               },
             },
-            { returnDocument: 'after' }  // ← get the updated doc back
+            { returnDocument: 'after' }
           );
 
           if (updated) {
-            emitNewOrder(updated);  // 🔴 THE CRITICAL MISSING CALL
+            emitNewOrder(updated);
           }
 
           return NextResponse.json({
@@ -116,7 +121,7 @@ export async function POST(request: NextRequest) {
         }
       } catch (error: any) {
         console.error('Charge authorization error:', error);
-        return NextResponse.json({ error: error.message || 'Failed to charge saved card' }, { status: 400 });
+        return NextResponse.json({ error: 'Failed to charge saved card' }, { status: 400 });
       }
     }
 
@@ -150,10 +155,10 @@ export async function POST(request: NextRequest) {
         publicKey:         paystackService.getPublicKey(),
       });
     } else {
-      return NextResponse.json({ error: result.message || 'Payment initialization failed' }, { status: 400 });
+      return NextResponse.json({ error: 'Payment initialization failed' }, { status: 400 });
     }
   } catch (error: any) {
     console.error('Payment initialization error:', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

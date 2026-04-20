@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v2 as cloudinary } from 'cloudinary';
+import { getAdminBranch } from '@/lib/get-admin-branch';
 
 // Configure Cloudinary
 cloudinary.config({
@@ -9,6 +10,12 @@ cloudinary.config({
 });
 
 export async function POST(request: NextRequest) {
+  // SECURITY: admin access required to delete assets
+  const adminInfo = await getAdminBranch();
+  if ('error' in adminInfo) {
+    return NextResponse.json({ error: adminInfo.error }, { status: adminInfo.status });
+  }
+
   try {
     const { publicId } = await request.json();
 

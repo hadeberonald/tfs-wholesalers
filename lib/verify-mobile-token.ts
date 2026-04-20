@@ -3,7 +3,9 @@ import jwt from 'jsonwebtoken';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 
-const JWT_SECRET = process.env.JWT_SECRET || process.env.NEXTAUTH_SECRET || '';
+// SECURITY: Consolidated to single env var. No fallback to empty string.
+const JWT_SECRET = process.env.NEXTAUTH_SECRET;
+if (!JWT_SECRET) throw new Error('[SECURITY] NEXTAUTH_SECRET environment variable is not set. Refusing to start.');
 
 export interface MobileUser {
   id:              string;
@@ -13,32 +15,16 @@ export interface MobileUser {
 }
 
 export async function verifyMobileToken(token: string): Promise<MobileUser | null> {
-  console.log('[verifyMobileToken] called, token length:', token?.length ?? 0);
-  console.log('[verifyMobileToken] JWT_SECRET length:', JWT_SECRET.length);
-
-  if (!token) {
-    console.warn('[verifyMobileToken] No token provided');
-    return null;
-  }
-
-  if (!JWT_SECRET) {
-    console.error('[verifyMobileToken] JWT_SECRET is empty — check Render env vars');
-    return null;
-  }
+  if (!token) return null;
 
   let decoded: any;
   try {
-    decoded = jwt.verify(token, JWT_SECRET);
-    console.log('[verifyMobileToken] JWT decoded ok, id:', decoded?.id);
-  } catch (err: any) {
-    console.error('[verifyMobileToken] JWT verify failed:', err.name, err.message);
+    decoded = jwt.verify(token, JWT_SECRET!);
+  } catch {
     return null;
   }
 
-  if (!decoded?.id) {
-    console.warn('[verifyMobileToken] No id in decoded token');
-    return null;
-  }
+  if (!decoded?.id) return null;
 
   try {
     const client = await clientPromise;
@@ -49,12 +35,7 @@ export async function verifyMobileToken(token: string): Promise<MobileUser | nul
       { projection: { role: 1, email: 1, activeBranchId: 1 } }
     );
 
-    if (!user) {
-      console.warn('[verifyMobileToken] User not found in DB:', decoded.id);
-      return null;
-    }
-
-    console.log('[verifyMobileToken] Success:', user.email, '| activeBranchId:', user.activeBranchId?.toString() ?? 'none');
+    if (!user) return null;
 
     return {
       id:             decoded.id,
@@ -62,8 +43,7 @@ export async function verifyMobileToken(token: string): Promise<MobileUser | nul
       role:           user.role            || decoded.role,
       activeBranchId: user.activeBranchId?.toString() || decoded.activeBranchId || undefined,
     };
-  } catch (err: any) {
-    console.error('[verifyMobileToken] DB lookup failed:', err.message);
+  } catch {
     return null;
   }
 }
