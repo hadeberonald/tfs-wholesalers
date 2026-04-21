@@ -175,6 +175,47 @@ export async function GET(request: NextRequest) {
       .toArray();
     const lowStockCount = lowStockProducts[0]?.total || 0;
 
+    // NPS STATS (last 30 days)
+    const npsAgg = await db.collection('nps_responses')
+      .aggregate([
+        {
+          $match: {
+            ...branchQuery,
+            submittedAt: { $gte: thirtyDaysAgo },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            promoters: { $sum: { $cond: [{ $gte: ['$score', 9] }, 1, 0] } },
+            detractors: { $sum: { $cond: [{ $lte: ['$score', 6] }, 1, 0] } },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            total: 1,
+            npsScore: {
+              $round: [
+                {
+                  $multiply: [
+                    { $divide: [{ $subtract: ['$promoters', '$detractors'] }, '$total'] },
+                    100,
+                  ],
+                },
+                0,
+              ],
+            },
+          },
+        },
+      ])
+      .toArray();
+
+    const nps = npsAgg[0]
+      ? { score: npsAgg[0].npsScore as number, total: npsAgg[0].total as number }
+      : { score: null, total: 0 };
+
     return NextResponse.json({
       stats: {
         totalOrders,
@@ -205,7 +246,8 @@ export async function GET(request: NextRequest) {
         resolutions: {
           open: openResolutions,
           highPriority: highPriorityResolutions
-        }
+        },
+        nps,
       }
     });
   } catch (error) {
