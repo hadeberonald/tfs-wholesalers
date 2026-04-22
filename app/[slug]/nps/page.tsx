@@ -279,10 +279,7 @@ export default function NPSSurveyPage() {
         <div className="w-full max-w-lg">
 
           {/* Header */}
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-brand-orange rounded-2xl mb-5 shadow-lg shadow-orange-200">
-              <span className="text-white font-black text-2xl" style={{ fontFamily: "'Sora', sans-serif" }}>TFS</span>
-            </div>
+          
             <h1 className="text-4xl font-black text-gray-900 leading-tight mb-2" style={{ fontFamily: "'Sora', sans-serif" }}>
               How was your<br />visit today?
             </h1>
