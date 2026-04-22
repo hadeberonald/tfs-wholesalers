@@ -11,22 +11,19 @@ export async function GET(request: NextRequest) {
     }
 
     const searchParams = request.nextUrl.searchParams;
-    const branchSlug = searchParams.get('branchSlug');
-    const period = searchParams.get('period') || '30'; // days, or 'all'
+    const branchSlug   = searchParams.get('branchSlug');
+    const period       = searchParams.get('period') || '30';
 
     const client = await clientPromise;
-    const db = client.db('tfs-wholesalers');
+    const db     = client.db('tfs-wholesalers');
 
-    // Build date filter
+    // ── Date filter ───────────────────────────────────────────────────────────
     const dateFilter: any = {};
     if (period !== 'all') {
       const days = parseInt(period, 10);
-      dateFilter.submittedAt = {
-        $gte: new Date(Date.now() - days * 24 * 60 * 60 * 1000),
-      };
+      dateFilter.submittedAt = { $gte: new Date(Date.now() - days * 24 * 60 * 60 * 1000) };
     }
 
-    // Branch filter
     const branchFilter: any = {};
     if (!adminInfo.isSuperAdmin && adminInfo.branchId) {
       branchFilter.branchId = adminInfo.branchId;
@@ -42,63 +39,101 @@ export async function GET(request: NextRequest) {
       const days = parseInt(period, 10);
       prevFilter.submittedAt = {
         $gte: new Date(Date.now() - days * 2 * 24 * 60 * 60 * 1000),
-        $lt: new Date(Date.now() - days * 24 * 60 * 60 * 1000),
+        $lt:  new Date(Date.now() - days       * 24 * 60 * 60 * 1000),
       };
     }
 
-    // Fetch current responses
+    // ── Fetch responses ───────────────────────────────────────────────────────
     const responses = await db
       .collection('nps_responses')
       .find(baseFilter)
       .sort({ submittedAt: -1 })
       .toArray();
 
-    // Fetch previous period for trend
     const prevResponses = await db
       .collection('nps_responses')
       .find(prevFilter)
       .toArray();
 
+    // ── Core NPS helpers ──────────────────────────────────────────────────────
     const calcNPS = (arr: any[]) => {
-      if (!arr.length) return 0;
-      const promoters = arr.filter(r => r.score >= 9).length;
-      const detractors = arr.filter(r => r.score <= 6).length;
-      return Math.round(((promoters - detractors) / arr.length) * 100);
+      const valid = arr.filter(r => r.score !== null);
+      if (!valid.length) return 0;
+      const promoters  = valid.filter(r => r.score >= 9).length;
+      const detractors = valid.filter(r => r.score <= 6).length;
+      return Math.round(((promoters - detractors) / valid.length) * 100);
     };
 
-    const totalResponses = responses.length;
-    const promoters = responses.filter(r => r.score >= 9).length;
-    const passives = responses.filter(r => r.score >= 7 && r.score <= 8).length;
-    const detractors = responses.filter(r => r.score <= 6).length;
-    const npsScore = calcNPS(responses);
-    const prevNPS = calcNPS(prevResponses);
-    const averageScore =
-      totalResponses > 0
-        ? responses.reduce((sum, r) => sum + r.score, 0) / totalResponses
-        : 0;
+    const scoredResponses  = responses.filter(r => r.score !== null);
+    const totalResponses   = responses.length;
+    const promoters        = scoredResponses.filter(r => r.score >= 9).length;
+    const passives         = scoredResponses.filter(r => r.score >= 7 && r.score <= 8).length;
+    const detractors       = scoredResponses.filter(r => r.score <= 6).length;
+    const npsScore         = calcNPS(responses);
+    const prevNPS          = calcNPS(prevResponses);
+    const averageScore     = scoredResponses.length
+      ? scoredResponses.reduce((s, r) => s + r.score, 0) / scoredResponses.length
+      : 0;
 
-    // Score distribution
+    // ── Score distribution ────────────────────────────────────────────────────
     const scoreDistribution = Array.from({ length: 11 }, (_, i) => ({
       score: i,
-      count: responses.filter(r => r.score === i).length,
+      count: scoredResponses.filter(r => r.score === i).length,
     }));
 
-    // Tag frequency
-    const tagMap: Record<string, number> = {};
-    for (const r of responses) {
-      for (const tag of r.tags || []) {
-        tagMap[tag] = (tagMap[tag] || 0) + 1;
+    // ── Section aggregations ──────────────────────────────────────────────────
+    const countBy = (arr: any[], path: string) => {
+      const map: Record<string, number> = {};
+      for (const r of arr) {
+        const parts = path.split('.');
+        let val: any = r;
+        for (const p of parts) val = val?.[p];
+        if (val) map[val] = (map[val] || 0) + 1;
       }
-    }
-    const topTags = Object.entries(tagMap)
-      .map(([tag, count]) => ({ tag, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 12);
+      return map;
+    };
 
-    // Serialize recent responses
-    const recentResponses = responses.slice(0, 50).map(r => ({
+    const overall = {
+      satisfaction:        countBy(responses, 'overall.satisfaction'),
+      recommendLikelihood: countBy(responses, 'overall.recommendLikelihood'),
+      metExpectations:     countBy(responses, 'overall.metExpectations'),
+    };
+
+    const store = {
+      easyToFind:   countBy(responses, 'store.easyToFind'),
+      cleanliness:  countBy(responses, 'store.cleanliness'),
+      checkoutWait: countBy(responses, 'store.checkoutWait'),
+    };
+
+    const staff = {
+      greeted:            countBy(responses, 'staff.greeted'),
+      friendliness:       countBy(responses, 'staff.friendliness'),
+      madeRecommendation: countBy(responses, 'staff.madeRecommendation'),
+    };
+
+    const products = {
+      foundAllItems:    countBy(responses, 'products.foundAllItems'),
+      quality:          countBy(responses, 'products.quality'),
+      promotionsDriven: countBy(responses, 'products.promotionsDriven'),
+    };
+
+    // ── Improvement & suggestion texts ────────────────────────────────────────
+    const improvements = responses
+      .filter(r => r.overall?.oneImprovement?.trim())
+      .map(r => r.overall.oneImprovement.trim());
+
+    const productSuggestions = responses
+      .filter(r => r.products?.newProductSuggestions?.trim())
+      .map(r => r.products.newProductSuggestions.trim());
+
+    const threeWords = responses
+      .filter(r => r.overall?.threeWords?.trim())
+      .map(r => r.overall.threeWords.trim());
+
+    // ── Recent responses (serialised) ─────────────────────────────────────────
+    const recentResponses = responses.slice(0, 100).map(r => ({
       ...r,
-      _id: r._id.toString(),
+      _id:      r._id.toString(),
       branchId: r.branchId?.toString(),
     }));
 
@@ -111,9 +146,12 @@ export async function GET(request: NextRequest) {
         detractors,
         averageScore,
         scoreDistribution,
-        topTags,
-        recentResponses,
         trend: npsScore - prevNPS,
+        sectionStats: { overall, store, staff, products },
+        improvements,
+        productSuggestions,
+        threeWords,
+        recentResponses,
       },
     });
   } catch (error) {
