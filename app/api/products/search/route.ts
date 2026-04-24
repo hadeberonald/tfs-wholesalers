@@ -30,22 +30,33 @@ export async function GET(request: NextRequest) {
     const db = client.db('tfs-wholesalers');
 
     const searchTerm = query.trim();
-    const searchRegex = new RegExp(
-      searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-      'i'
-    );
+    const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // Word-boundary regex on name/variant name — stops "milk" matching "buttermilk"
+    // which was the main cause of irrelevant results with the old loose contains-regex.
+    const nameRegex = new RegExp('(^|\\b)' + escaped, 'i');
+
+    // SKU / barcode: substring is fine — these are structured codes
+    const codeRegex = new RegExp(escaped, 'i');
+
+    // Tags: exact token match — tags are stored as clean lowercase slugs so this
+    // is precise with no noise (e.g. tag "milk" won't match "buttermilk")
+    const tagRegex = new RegExp('^' + escaped + '$', 'i');
 
     console.log('🔍 Search query:', searchTerm, 'for branch:', branchId);
 
-    const filter = {
+    const filter: any = {
       branchId: new ObjectId(branchId),
       active: true,
       $or: [
-        { name: searchRegex },
-        { description: searchRegex },
-        { barcode: searchRegex },
-        { 'variants.name': searchRegex },
-        { 'variants.barcode': searchRegex },
+        { name: nameRegex },
+        { barcode: codeRegex },
+        { tags: tagRegex },
+        { 'variants.name': nameRegex },
+        { 'variants.barcode': codeRegex },
+        // NOTE: description intentionally excluded — it produces too many
+        // irrelevant matches on common words ("fresh", "premium", "pack" etc).
+        // Use product tags to surface items via alternate keywords instead.
       ],
     };
 
@@ -56,7 +67,7 @@ export async function GET(request: NextRequest) {
       const allProducts = await db
         .collection('products')
         .find(filter)
-        .sort({ name: 1, _id: 1 }) // ✅ Stable compound sort
+        .sort({ name: 1, _id: 1 })
         .limit(10000)
         .toArray();
 
@@ -78,13 +89,13 @@ export async function GET(request: NextRequest) {
     const products = await db
       .collection('products')
       .find(filter)
-      .sort({ name: 1, _id: 1 }) // ✅ Stable compound sort
+      .sort({ name: 1, _id: 1 })
       .skip(skip)
       .limit(limitNum)
       .toArray();
 
     console.log(
-      `✅ Search found: ${products.length} products (page ${pageNum} of ${Math.ceil(total / limitNum)})`
+      '✅ Search found: ' + products.length + ' products (page ' + pageNum + ' of ' + Math.ceil(total / limitNum) + ')'
     );
 
     return NextResponse.json({
