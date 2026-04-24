@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     const all = searchParams.get('all');
     const barcode = searchParams.get('barcode');
     const branchId = searchParams.get('branchId');
-    const search = searchParams.get('search'); // ✅ NEW: admin full-text search param
+    const search = searchParams.get('search');
 
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
@@ -40,37 +40,38 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // ✅ NEW: Admin full-text search across name, SKU, barcode, description
+    // Improved admin search:
+    // - Name uses word-boundary regex so "milk" won't match "buttermilk"
+    // - Description excluded — causes too many irrelevant hits on common words
+    // - Tags matched as exact tokens (stored as lowercase slugs)
+    // - SKU / barcode use substring match (fine for structured codes)
     if (search && search.trim().length >= 2) {
-      const searchRegex = new RegExp(
-        search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-        'i'
-      );
+      const raw = search.trim();
+      const escaped = raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      const nameRegex = new RegExp('(^|\\b)' + escaped, 'i');
+      const codeRegex = new RegExp(escaped, 'i');
+      const tagRegex  = new RegExp('^' + escaped + '$', 'i');
+
       query.$or = [
-        { name: searchRegex },
-        { sku: searchRegex },
-        { barcode: searchRegex },
-        { description: searchRegex },
-        { 'variants.name': searchRegex },
-        { 'variants.sku': searchRegex },
-        { 'variants.barcode': searchRegex },
+        { name: nameRegex },
+        { sku: codeRegex },
+        { barcode: codeRegex },
+        { tags: tagRegex },
+        { 'variants.name': nameRegex },
+        { 'variants.sku': codeRegex },
+        { 'variants.barcode': codeRegex },
       ];
     }
 
-    // ✅ Products store categories as slugs
     if (category) {
       try {
         const categoryDoc = await db.collection('categories').findOne({
           _id: new ObjectId(category),
         });
-
         if (categoryDoc) {
           query.categories = {
-            $in: [
-              categoryDoc.slug,
-              category,
-              new ObjectId(category),
-            ],
+            $in: [categoryDoc.slug, category, new ObjectId(category)],
           };
         } else {
           query.categories = { $in: [category] };
@@ -85,22 +86,17 @@ export async function GET(request: NextRequest) {
     if (slug) query.slug = slug;
 
     if (barcode) {
-      query.$or = [
-        { barcode: barcode },
-        { 'variants.barcode': barcode },
-      ];
+      query.$or = [{ barcode }, { 'variants.barcode': barcode }];
     }
 
-    // ✅ Stable compound sort
     let sortOption: any = { createdAt: -1, _id: -1 };
     if (sort === 'name') sortOption = { name: 1, _id: 1 };
     else if (sort === 'price-asc') sortOption = { price: 1, _id: 1 };
     else if (sort === 'price-desc') sortOption = { price: -1, _id: 1 };
 
-    // When searching admin, return more results without strict pagination
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 25;
-    const skip = search ? 0 : (pageNum - 1) * limitNum; // Don't skip on search
+    const skip = search ? 0 : (pageNum - 1) * limitNum;
     const effectiveLimit = search ? Math.min(parseInt(limit || '200'), 500) : limitNum;
 
     const total = await db.collection('products').countDocuments(query);
@@ -115,11 +111,9 @@ export async function GET(request: NextRequest) {
 
     if (barcode && products.length > 0) {
       const product = products[0];
-      if (product.variants && product.variants.length > 0) {
+      if (product.variants?.length > 0) {
         const variant = product.variants.find((v: any) => v.barcode === barcode);
-        if (variant) {
-          return NextResponse.json({ product, variant, matchType: 'variant' });
-        }
+        if (variant) return NextResponse.json({ product, variant, matchType: 'variant' });
       }
       return NextResponse.json({ product, matchType: 'product' });
     }
@@ -157,10 +151,7 @@ export async function POST(request: NextRequest) {
     if (body.barcode) {
       const existing = await db.collection('products').findOne({
         branchId: adminInfo.branchId,
-        $or: [
-          { barcode: body.barcode },
-          { 'variants.barcode': body.barcode },
-        ],
+        $or: [{ barcode: body.barcode }, { 'variants.barcode': body.barcode }],
       });
       if (existing) {
         return NextResponse.json({
@@ -169,9 +160,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (body.hasVariants && body.variants && body.variants.length > 0) {
-      const variantBarcodes = body.variants
-        .filter((v: any) => v.barcode)
+    if (body.hasVariants && body.variants?.length > 0) {
+      // FIX: skip linked variants — their barcode lives on their own product document,
+      // so checking them here would produce a false duplicate error.
+      const variantBarcodes: string[] = body.variants
+        .filter((v: any) => v.barcode && !v.linkedProductId)
         .map((v: any) => v.barcode);
 
       if (variantBarcodes.length > 0) {
@@ -189,20 +182,29 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      const duplicates = variantBarcodes.filter((item: string, index: number) =>
-        variantBarcodes.indexOf(item) !== index
+      const duplicates = variantBarcodes.filter(
+        (item: string, index: number) => variantBarcodes.indexOf(item) !== index
       );
       if (duplicates.length > 0) {
         return NextResponse.json({
-          error: `Duplicate barcode(s) in variants: ${duplicates.join(', ')}`,
+          error: 'Duplicate barcode(s) in variants: ' + duplicates.join(', '),
         }, { status: 400 });
       }
     }
 
     let categories = body.categories;
-    if (!Array.isArray(categories)) {
-      categories = categories ? [categories] : [];
-    }
+    if (!Array.isArray(categories)) categories = categories ? [categories] : [];
+
+    // Normalise tags: lowercase, strip invalid chars, dedupe
+    // Use Array.from(new Set(...)) — spread of Set requires ES2015+ target
+    const rawTags: string[] = Array.isArray(body.tags) ? body.tags : [];
+    const tags: string[] = Array.from(
+      new Set(
+        rawTags
+          .map((t: string) => t.toLowerCase().replace(/[^a-z0-9-]/g, ''))
+          .filter(Boolean)
+      )
+    );
 
     const variants =
       body.hasVariants && body.variants
@@ -215,6 +217,7 @@ export async function POST(request: NextRequest) {
     const product = {
       ...body,
       categories,
+      tags,
       variants,
       hasVariants: body.hasVariants || false,
       barcode: body.barcode || null,
