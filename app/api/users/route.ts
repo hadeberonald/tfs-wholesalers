@@ -4,7 +4,6 @@ import { hashPassword } from '@/lib/utils';
 import { getAdminBranch } from '@/lib/get-admin-branch';
 
 export async function GET(request: NextRequest) {
-  // SECURITY: admin access required to list users
   const adminInfo = await getAdminBranch();
   if ('error' in adminInfo) {
     return NextResponse.json({ error: adminInfo.error }, { status: adminInfo.status });
@@ -18,12 +17,19 @@ export async function GET(request: NextRequest) {
     const db = client.db('tfs-wholesalers');
 
     const query: any = {};
+
     if (role) {
       query.role = role;
     }
-    // Non-super-admins may only see users in their own branch
+
+    // Non-super-admins: show users that either belong to their branch
+    // OR have no branchId at all (legacy users created before branching)
     if (!adminInfo.isSuperAdmin && adminInfo.branchId) {
-      query.branchId = adminInfo.branchId;
+      query.$or = [
+        { branchId: adminInfo.branchId },
+        { branchId: { $exists: false } },
+        { branchId: null },
+      ];
     }
 
     const users = await db.collection('users')
@@ -39,7 +45,6 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  // SECURITY: admin access required to create users via this endpoint
   const adminInfo = await getAdminBranch();
   if ('error' in adminInfo) {
     return NextResponse.json({ error: adminInfo.error }, { status: adminInfo.status });
@@ -56,7 +61,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
     }
 
-    // SECURITY: only super-admins may create admin or super-admin accounts
     if ((role === 'admin' || role === 'super-admin') && !adminInfo.isSuperAdmin) {
       return NextResponse.json({ error: 'Not authorized to create admin accounts' }, { status: 403 });
     }
@@ -65,7 +69,7 @@ export async function POST(request: NextRequest) {
     const db = client.db('tfs-wholesalers');
 
     const existingUser = await db.collection('users').findOne({
-      email: email.toLowerCase()
+      email: email.toLowerCase(),
     });
 
     if (existingUser) {
@@ -76,19 +80,21 @@ export async function POST(request: NextRequest) {
 
     const result = await db.collection('users').insertOne({
       name,
-      email: email.toLowerCase(),
-      password: hashedPassword,
+      email:     email.toLowerCase(),
+      password:  hashedPassword,
       role,
-      phone: phone || null,
+      phone:     phone || null,
       active,
+      // Stamp branchId so this user shows up correctly in branch-scoped queries
+      branchId:  adminInfo.branchId ?? null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
 
-    return NextResponse.json({
-      id: result.insertedId,
-      message: 'User created successfully'
-    }, { status: 201 });
+    return NextResponse.json(
+      { id: result.insertedId, message: 'User created successfully' },
+      { status: 201 }
+    );
   } catch (error) {
     console.error('Failed to create user:', error);
     return NextResponse.json({ error: 'Failed to create user' }, { status: 500 });
