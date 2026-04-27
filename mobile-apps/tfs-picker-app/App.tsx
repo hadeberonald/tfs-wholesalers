@@ -1,23 +1,21 @@
-// App.tsx - adds StockCount tab to MainTabs and registers the screen in the stack
-
 import 'react-native-gesture-handler';
 import React, { useEffect, useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { TouchableOpacity, Text, View, StyleSheet } from 'react-native';
-import { Package, ClipboardList, Settings, Car, MapPin, ClipboardCheck } from 'lucide-react-native';
+import { TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { ClipboardList, Settings, Car, MapPin, ClipboardCheck } from 'lucide-react-native';
 
-import LoginScreen           from './src/screens/LoginScreen';
-import OrdersListScreen      from './src/screens/OrdersListScreen';
-import PickingScreen         from './src/screens/PickingScreen';
-import PackagingScreen       from './src/screens/PackagingScreen';
-import BarcodeLinkingScreen  from './src/screens/BarcodeLinkingScreen';
-import DeliveriesListScreen  from './src/screens/DeliveriesListScreen';
+import LoginScreen              from './src/screens/LoginScreen';
+import OrdersListScreen         from './src/screens/OrdersListScreen';
+import PickingScreen            from './src/screens/PickingScreen';
+import PackagingScreen          from './src/screens/PackagingScreen';
+import BarcodeLinkingScreen     from './src/screens/BarcodeLinkingScreen';
+import DeliveriesListScreen     from './src/screens/DeliveriesListScreen';
 import DeliveryCollectionScreen from './src/screens/DeliveryCollectionScreen';
-import DeliveryScreen        from './src/screens/DeliveryScreen';
-import BranchSelectScreen    from './src/screens/BranchSelectScreen';
-import StockCountScreen      from './src/screens/StockCountScreen'; // <- NEW
+import DeliveryScreen           from './src/screens/DeliveryScreen';
+import BranchSelectScreen       from './src/screens/BranchSelectScreen';
+import StockCountScreen         from './src/screens/StockCountScreen';
 
 import { useAuthStore } from './src/stores/authStore';
 import {
@@ -30,15 +28,18 @@ const Stack = createStackNavigator();
 const Tab   = createBottomTabNavigator();
 
 function MainTabs({ navigation }: any) {
-  const { activeBranch } = useAuthStore();
+  const { activeBranch, user } = useAuthStore();
+
+  const isPicker   = user?.role === 'picker'   || user?.role === 'admin';
+  const isDelivery = user?.role === 'delivery' || user?.role === 'admin';
 
   return (
     <Tab.Navigator
       screenOptions={{
         tabBarActiveTintColor:   '#FF6B35',
         tabBarInactiveTintColor: '#666',
-        headerShown:  true,
-        headerStyle:  { backgroundColor: '#fff' },
+        headerShown:      true,
+        headerStyle:      { backgroundColor: '#fff' },
         headerTitleStyle: { fontWeight: '700', color: '#1a1a1a' },
         headerRight: () => (
           <TouchableOpacity
@@ -53,64 +54,72 @@ function MainTabs({ navigation }: any) {
         ),
       }}
     >
-      <Tab.Screen
-        name="Orders"
-        component={OrdersListScreen}
-        options={{
-          title: 'Orders',
-          tabBarIcon: ({ color, size }) => <ClipboardList color={color} size={size} />,
-        }}
-      />
-      {/* -- NEW: Stock Counts tab -- */}
-      <Tab.Screen
-        name="StockCount"
-        component={StockCountScreen}
-        options={{
-          title: 'Stock Count',
-          tabBarIcon: ({ color, size }) => <ClipboardCheck color={color} size={size} />,
-          // Show a badge if there are OOS verifications pending
-          // (badge state would need a global store - left as an exercise)
-        }}
-      />
-      <Tab.Screen
-        name="Products"
-        component={BarcodeLinkingScreen}
-        options={{
-          title: 'Products',
-          tabBarIcon: ({ color, size }) => <Settings color={color} size={size} />,
-        }}
-      />
-      <Tab.Screen
-        name="Deliveries"
-        component={DeliveriesListScreen}
-        options={{
-          title: 'Deliveries',
-          tabBarIcon: ({ color, size }) => <Car color={color} size={size} />,
-        }}
-      />
+      {isPicker && (
+        <Tab.Screen
+          name="Orders"
+          component={OrdersListScreen}
+          options={{
+            title: 'Orders',
+            tabBarIcon: ({ color, size }) => <ClipboardList color={color} size={size} />,
+          }}
+        />
+      )}
+
+      {isPicker && (
+        <Tab.Screen
+          name="StockCount"
+          component={StockCountScreen}
+          options={{
+            title: 'Stock Count',
+            tabBarIcon: ({ color, size }) => <ClipboardCheck color={color} size={size} />,
+          }}
+        />
+      )}
+
+      {isPicker && (
+        <Tab.Screen
+          name="Products"
+          component={BarcodeLinkingScreen}
+          options={{
+            title: 'Products',
+            tabBarIcon: ({ color, size }) => <Settings color={color} size={size} />,
+          }}
+        />
+      )}
+
+      {isDelivery && (
+        <Tab.Screen
+          name="Deliveries"
+          component={DeliveriesListScreen}
+          options={{
+            title: 'Deliveries',
+            tabBarIcon: ({ color, size }) => <Car color={color} size={size} />,
+          }}
+        />
+      )}
     </Tab.Navigator>
   );
 }
 
 const tabStyles = StyleSheet.create({
   branchBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginRight: 16,
-    backgroundColor: '#fff7f3',
+    flexDirection:    'row',
+    alignItems:       'center',
+    gap:              4,
+    marginRight:      16,
+    backgroundColor:  '#fff7f3',
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#fed7aa',
-    maxWidth: 140,
+    paddingVertical:  6,
+    borderRadius:     20,
+    borderWidth:      1,
+    borderColor:      '#fed7aa',
+    maxWidth:         140,
   },
   branchBtnText: {
-    fontSize: 12,
+    fontSize:   12,
     fontWeight: '700',
-    color: '#FF6B35',
-    flex: 1,
+    color:      '#FF6B35',
+    flex:       1,
   },
 });
 
