@@ -1,14 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, Users, Search, UserCircle, Package, Truck, ShoppingBag, Shield } from 'lucide-react';
+import { Plus, Edit, Trash2, Users, Search, Package, Truck, ShoppingBag, Shield } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface User {
   _id: string;
   name: string;
   email: string;
-  role: 'customer' | 'picker' | 'driver' | 'admin';
+  role: 'customer' | 'picker' | 'delivery' | 'admin';  // ← 'driver' → 'delivery'
   phone?: string;
   active: boolean;
   createdAt: string;
@@ -49,14 +49,7 @@ export default function AdminUsersPage() {
   };
 
   const resetForm = () => {
-    setFormData({
-      name: '',
-      email: '',
-      password: '',
-      role: 'customer',
-      phone: '',
-      active: true,
-    });
+    setFormData({ name: '', email: '', password: '', role: 'customer', phone: '', active: true });
   };
 
   const handleEdit = (user: User) => {
@@ -64,7 +57,7 @@ export default function AdminUsersPage() {
     setFormData({
       name: user.name,
       email: user.email,
-      password: '', // Don't pre-fill password
+      password: '',
       role: user.role,
       phone: user.phone || '',
       active: user.active,
@@ -74,7 +67,6 @@ export default function AdminUsersPage() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this user?')) return;
-
     try {
       const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
       if (res.ok) {
@@ -83,101 +75,83 @@ export default function AdminUsersPage() {
       } else {
         toast.error('Failed to delete user');
       }
-    } catch (error) {
+    } catch {
       toast.error('An error occurred');
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-
-  // Validate password requirement for new users
-  if (!editingUser && !formData.password) {
-    toast.error('Password is required for new users');
-    return;
-  }
-
-  console.log('📤 Submitting user data:', {
-    ...formData,
-    password: '***' // Don't log actual password
-  });
-
-  try {
-    const url = editingUser ? `/api/users/${editingUser._id}` : '/api/users';
-    const method = editingUser ? 'PUT' : 'POST';
-
-    const payload = editingUser && !formData.password
-      ? { ...formData, password: undefined } // Don't send password if not changed
-      : formData;
-
-    console.log('🌐 Making request to:', url, method);
-
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    console.log('📥 Response status:', res.status);
-
-    if (res.ok) {
-      const data = await res.json();
-      console.log('✅ Success:', data);
-      toast.success(editingUser ? 'User updated!' : 'User created!');
-      setShowModal(false);
-      setEditingUser(null);
-      resetForm();
-      fetchUsers();
-    } else {
-      const error = await res.json();
-      console.error('❌ Error response:', error);
-      toast.error(error.error || 'Failed to save user');
+    e.preventDefault();
+    if (!editingUser && !formData.password) {
+      toast.error('Password is required for new users');
+      return;
     }
-  } catch (error) {
-    console.error('❌ Exception:', error);
-    toast.error('An error occurred: ' + (error as Error).message);
-  }
-};
+    try {
+      const url    = editingUser ? `/api/users/${editingUser._id}` : '/api/users';
+      const method = editingUser ? 'PUT' : 'POST';
+      const payload = editingUser && !formData.password
+        ? { ...formData, password: undefined }
+        : formData;
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        toast.success(editingUser ? 'User updated!' : 'User created!');
+        setShowModal(false);
+        setEditingUser(null);
+        resetForm();
+        fetchUsers();
+      } else {
+        const error = await res.json();
+        toast.error(error.error || 'Failed to save user');
+      }
+    } catch (error) {
+      toast.error('An error occurred: ' + (error as Error).message);
+    }
+  };
 
   const filteredUsers = users.filter(u => {
-    const matchesSearch = 
+    const matchesSearch =
       u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       u.email.toLowerCase().includes(searchTerm.toLowerCase());
-    
     const matchesRole = roleFilter === 'all' || u.role === roleFilter;
-    
     return matchesSearch && matchesRole;
   });
 
   const getRoleIcon = (role: string) => {
     switch (role) {
-      case 'admin': return Shield;
-      case 'picker': return Package;
-      case 'driver': return Truck;
-      default: return ShoppingBag;
+      case 'admin':    return Shield;
+      case 'picker':   return Package;
+      case 'delivery': return Truck;       // ← was 'driver'
+      default:         return ShoppingBag;
     }
   };
 
   const getRoleBadge = (role: string) => {
-    const colors = {
-      admin: 'bg-purple-100 text-purple-800',
-      picker: 'bg-blue-100 text-blue-800',
-      driver: 'bg-green-100 text-green-800',
+    const colors: Record<string, string> = {
+      admin:    'bg-purple-100 text-purple-800',
+      picker:   'bg-blue-100 text-blue-800',
+      delivery: 'bg-green-100 text-green-800',  // ← was 'driver'
       customer: 'bg-gray-100 text-gray-800',
     };
-    return colors[role as keyof typeof colors] || colors.customer;
+    return colors[role] || colors.customer;
   };
 
   const stats = {
-    total: users.length,
+    total:    users.length,
     customers: users.filter(u => u.role === 'customer').length,
-    pickers: users.filter(u => u.role === 'picker').length,
-    drivers: users.filter(u => u.role === 'driver').length,
+    pickers:   users.filter(u => u.role === 'picker').length,
+    delivery:  users.filter(u => u.role === 'delivery').length,  // ← was 'driver'
   };
 
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 py-8">
+
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
@@ -185,11 +159,7 @@ export default function AdminUsersPage() {
             <p className="text-gray-600">{users.length} total users</p>
           </div>
           <button
-            onClick={() => {
-              setEditingUser(null);
-              resetForm();
-              setShowModal(true);
-            }}
+            onClick={() => { setEditingUser(null); resetForm(); setShowModal(true); }}
             className="btn-primary flex items-center space-x-2"
           >
             <Plus className="w-5 h-5" />
@@ -200,10 +170,10 @@ export default function AdminUsersPage() {
         {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           {[
-            { label: 'Total Users', value: stats.total, icon: Users, color: 'bg-blue-500' },
-            { label: 'Customers', value: stats.customers, icon: ShoppingBag, color: 'bg-gray-500' },
-            { label: 'Pickers', value: stats.pickers, icon: Package, color: 'bg-purple-500' },
-            { label: 'Drivers', value: stats.drivers, icon: Truck, color: 'bg-green-500' },
+            { label: 'Total Users',     value: stats.total,     icon: Users,       color: 'bg-blue-500'   },
+            { label: 'Customers',       value: stats.customers, icon: ShoppingBag, color: 'bg-gray-500'   },
+            { label: 'Pickers',         value: stats.pickers,   icon: Package,     color: 'bg-purple-500' },
+            { label: 'Delivery Staff',  value: stats.delivery,  icon: Truck,       color: 'bg-green-500'  },
           ].map((stat, index) => (
             <div key={index} className="bg-white rounded-2xl p-6 shadow-sm">
               <div className={`w-12 h-12 ${stat.color} rounded-xl flex items-center justify-center mb-4`}>
@@ -228,7 +198,6 @@ export default function AdminUsersPage() {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-
             <select
               className="input-field"
               value={roleFilter}
@@ -237,7 +206,7 @@ export default function AdminUsersPage() {
               <option value="all">All Roles</option>
               <option value="customer">Customers</option>
               <option value="picker">Pickers</option>
-              <option value="driver">Drivers</option>
+              <option value="delivery">Delivery Staff</option>  {/* ← was 'driver' */}
               <option value="admin">Admins</option>
             </select>
           </div>
@@ -297,9 +266,7 @@ export default function AdminUsersPage() {
                             <span className="capitalize">{user.role}</span>
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-600">
-                          {user.phone || '-'}
-                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-600">{user.phone || '-'}</td>
                         <td className="px-6 py-4">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                             user.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
@@ -312,16 +279,10 @@ export default function AdminUsersPage() {
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center justify-end space-x-2">
-                            <button
-                              onClick={() => handleEdit(user)}
-                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
-                            >
+                            <button onClick={() => handleEdit(user)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg">
                               <Edit className="w-5 h-5" />
                             </button>
-                            <button
-                              onClick={() => handleDelete(user._id)}
-                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
-                            >
+                            <button onClick={() => handleDelete(user._id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg">
                               <Trash2 className="w-5 h-5" />
                             </button>
                           </div>
@@ -335,90 +296,66 @@ export default function AdminUsersPage() {
           </div>
         )}
 
-        {/* Add/Edit User Modal */}
+        {/* Add/Edit Modal */}
         {showModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-2xl max-w-2xl w-full p-6">
               <h2 className="text-2xl font-bold text-brand-black mb-6">
                 {editingUser ? 'Edit User' : 'Add New User'}
               </h2>
-
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Full Name *
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
                     <input
-                      type="text"
-                      required
-                      className="input-field"
+                      type="text" required className="input-field"
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     />
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Email *
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Email *</label>
                     <input
-                      type="email"
-                      required
-                      className="input-field"
+                      type="email" required className="input-field"
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Password {!editingUser && '*'}
                     </label>
                     <input
-                      type="password"
-                      required={!editingUser}
-                      className="input-field"
+                      type="password" required={!editingUser} className="input-field"
                       value={formData.password}
                       onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                       placeholder={editingUser ? 'Leave blank to keep current' : ''}
                     />
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Phone
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
                     <input
-                      type="tel"
-                      className="input-field"
+                      type="tel" className="input-field"
                       value={formData.phone}
                       onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                       placeholder="082 123 4567"
                     />
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Role *
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Role *</label>
                     <select
-                      required
-                      className="input-field"
+                      required className="input-field"
                       value={formData.role}
                       onChange={(e) => setFormData({ ...formData, role: e.target.value })}
                     >
                       <option value="customer">Customer</option>
                       <option value="picker">Picker</option>
-                      <option value="driver">Driver</option>
+                      <option value="delivery">Delivery Staff</option>  {/* ← was 'driver' */}
                       <option value="admin">Admin</option>
                     </select>
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Status
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
                     <select
                       className="input-field"
                       value={formData.active ? 'active' : 'inactive'}
@@ -429,15 +366,10 @@ export default function AdminUsersPage() {
                     </select>
                   </div>
                 </div>
-
                 <div className="flex items-center justify-end space-x-4 pt-4 border-t">
                   <button
                     type="button"
-                    onClick={() => {
-                      setShowModal(false);
-                      setEditingUser(null);
-                      resetForm();
-                    }}
+                    onClick={() => { setShowModal(false); setEditingUser(null); resetForm(); }}
                     className="btn-secondary"
                   >
                     Cancel
