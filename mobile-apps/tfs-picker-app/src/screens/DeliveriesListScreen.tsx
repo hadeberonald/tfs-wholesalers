@@ -1,7 +1,10 @@
 // src/screens/DeliveriesListScreen.tsx
-// Real-time via Socket.IO — deliveries update instantly when order status changes.
+// - No status pill on cards (confusing purple "Ready for Pickup" removed)
+// - Available tab: "Take Delivery" navigates to collection scan (claim happens there)
+// - My Deliveries tab: button says "Start Delivery", not "Collect"
+// - Address snippet on every card
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   ActivityIndicator, RefreshControl,
@@ -17,32 +20,51 @@ const API_URL = 'https://tfs-wholesalers-ifad.onrender.com';
 
 const DELIVERY_STATUSES = ['collecting', 'ready_for_delivery', 'out_for_delivery'];
 
-const STATUS_LABELS: Record<string, { label: string; color: string; bg: string }> = {
-  collecting:         { label: 'Ready for Pickup',  color: '#6d28d9', bg: '#ede9fe' },
-  ready_for_delivery: { label: 'Awaiting Driver',   color: '#b45309', bg: '#fef3c7' },
-  out_for_delivery:   { label: 'Out for Delivery',  color: '#065f46', bg: '#d1fae5' },
+// Only used for "My Deliveries" cards — a simple progress label, no pill
+const STATUS_LABELS: Record<string, string> = {
+  collecting:         'Collecting packages',
+  ready_for_delivery: 'Ready to go',
+  out_for_delivery:   'Out for delivery',
 };
 
 interface Order {
   _id: string; orderNumber: string;
   customerInfo?: { name: string; phone?: string };
-  shippingAddress?: { streetAddress?: string; suburb?: string; city?: string; province?: string };
+  shippingAddress?: { streetAddress?: string; suburb?: string; city?: string; province?: string; address?: string; lat?: number; lng?: number };
+  deliveryAddress?: string;
   items: any[]; total: number; status: string;
   packages?: any[]; createdAt: string;
+  assignedDriverId?: string;
+  assignedDriverName?: string;
+}
+
+type TabKey = 'available' | 'mine';
+
+function getAddressSnippet(order: Order): string | null {
+  const sa = order.shippingAddress;
+  if (sa) {
+    if (typeof (sa as any).address === 'string' && (sa as any).address) return (sa as any).address;
+    const parts = [sa.streetAddress, sa.suburb, sa.city].filter(Boolean);
+    if (parts.length) return parts.join(', ');
+  }
+  if (typeof order.deliveryAddress === 'string' && order.deliveryAddress) return order.deliveryAddress;
+  return null;
 }
 
 export default function DeliveriesListScreen({ navigation }: any) {
-  const { token, activeBranch } = useAuthStore();
-  const [orders, setOrders]         = useState<Order[]>([]);
+  const { token, activeBranch, user } = useAuthStore();
+
+  const [allOrders, setAllOrders]   = useState<Order[]>([]);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab]   = useState<TabKey>('available');
 
   const fetchDeliveries = useCallback(async (silent = false) => {
     try {
       if (!silent) setLoading(true);
       const params: any = { all: true };
-      if (activeBranch?._id || activeBranch?.id) params.branchId = activeBranch._id || activeBranch.id;
-
+      if (activeBranch?._id || activeBranch?.id)
+        params.branchId = activeBranch._id || activeBranch.id;
       const response = await axios.get(`${API_URL}/api/orders`, {
         headers: { Authorization: `Bearer ${token}` },
         params,
@@ -50,7 +72,7 @@ export default function DeliveriesListScreen({ navigation }: any) {
       const deliveryOrders = response.data.orders.filter((o: Order) =>
         DELIVERY_STATUSES.includes(o.status)
       );
-      setOrders(deliveryOrders);
+      setAllOrders(deliveryOrders);
     } catch (err: any) {
       console.error('Fetch deliveries error:', err.response?.data || err.message);
     } finally {
@@ -59,38 +81,23 @@ export default function DeliveriesListScreen({ navigation }: any) {
     }
   }, [activeBranch?._id, token]);
 
-  // ── Socket setup ───────────────────────────────────────────────────────────
   useFocusEffect(
     useCallback(() => {
       const branchId = activeBranch?._id || activeBranch?.id;
       if (!branchId) return;
-
       fetchDeliveries();
-
       const socket = connectPickerSocket(branchId);
-
       const handleOrderUpdated = ({ order, status }: { order: Order; status: string }) => {
-        setOrders(prev => {
-          const isDeliveryStatus = DELIVERY_STATUSES.includes(status);
-
-          if (!isDeliveryStatus) {
-            // Order left delivery scope (e.g. delivered) — remove it
-            return prev.filter(o => o._id !== order._id);
-          }
-
+        setAllOrders(prev => {
+          if (!DELIVERY_STATUSES.includes(status)) return prev.filter(o => o._id !== order._id);
           const exists = prev.find(o => o._id === order._id);
-          if (exists) {
-            return prev.map(o => o._id === order._id ? { ...o, ...order } : o);
-          }
-          // Order just entered delivery scope (e.g. packaging → collecting)
+          if (exists) return prev.map(o => o._id === order._id ? { ...o, ...order } : o);
           return [order, ...prev];
         });
       };
-
       socket.on('order:updated', handleOrderUpdated);
       const handleReconnect = () => fetchDeliveries(true);
       socket.on('connect', handleReconnect);
-
       return () => {
         socket.off('order:updated', handleOrderUpdated);
         socket.off('connect', handleReconnect);
@@ -100,61 +107,109 @@ export default function DeliveriesListScreen({ navigation }: any) {
 
   const onRefresh = () => { setRefreshing(true); fetchDeliveries(); };
 
+  const myOrders        = allOrders.filter(o => o.assignedDriverId === user?.id);
+  const availableOrders = allOrders.filter(o => !o.assignedDriverId);
+  const displayOrders   = activeTab === 'mine' ? myOrders : availableOrders;
+
   const renderOrder = ({ item }: { item: Order }) => {
-    const statusInfo = STATUS_LABELS[item.status] || { label: item.status, color: '#374151', bg: '#f3f4f6' };
-    const address    = item.shippingAddress;
-    const addressLine = address
-      ? [address.streetAddress, address.suburb, address.city].filter(Boolean).join(', ')
-      : null;
+    const addressLine  = getAddressSnippet(item);
     const packageCount = item.packages?.length || 0;
+    const isMine       = item.assignedDriverId === user?.id;
+    const statusLabel  = STATUS_LABELS[item.status] || item.status;
+
+    const handleStartDelivery = () => {
+      // Always go through collection scan first
+      if (item.status === 'collecting' || item.status === 'ready_for_delivery') {
+        navigation.navigate('DeliveryCollection', { orderId: item._id });
+      } else {
+        navigation.navigate('DeliveryDetail', { orderId: item._id });
+      }
+    };
+
+    const handleTakeDelivery = () => {
+      // Navigating to collection screen IS the claim — scan packages to take ownership
+      navigation.navigate('DeliveryCollection', { orderId: item._id, claiming: true });
+    };
+
+    const handleViewDetail = () => {
+      navigation.navigate('DeliveryDetail', { orderId: item._id });
+    };
 
     return (
       <TouchableOpacity
-        style={styles.card}
-        onPress={() => navigation.navigate('DeliveryDetail', { orderId: item._id })}
+        style={[styles.card, isMine && styles.cardMine]}
+        onPress={isMine ? handleStartDelivery : handleViewDetail}
+        activeOpacity={0.75}
       >
+        {/* Header — order number only, no status pill */}
         <View style={styles.cardHeader}>
           <Text style={styles.orderNumber}>{item.orderNumber}</Text>
-          <View style={[styles.statusPill, { backgroundColor: statusInfo.bg }]}>
-            <Text style={[styles.statusPillText, { color: statusInfo.color }]}>{statusInfo.label}</Text>
-          </View>
+          {/* For my deliveries show a subtle text status, not a coloured pill */}
+          {isMine && (
+            <Text style={styles.myStatusText}>{statusLabel}</Text>
+          )}
         </View>
+
         <View style={styles.cardBody}>
           {item.customerInfo?.name && (
             <View style={styles.infoRow}>
-              <Ionicons name="person-outline" size={16} color="#6b7280" />
-              <Text style={styles.infoText}>{item.customerInfo.name}</Text>
-              {item.customerInfo.phone && <Text style={styles.phoneText}>{item.customerInfo.phone}</Text>}
+              <Ionicons name="person-outline" size={15} color="#6b7280" />
+              <Text style={styles.infoText} numberOfLines={1}>{item.customerInfo.name}</Text>
+              {item.customerInfo.phone && (
+                <Text style={styles.phoneText}>{item.customerInfo.phone}</Text>
+              )}
             </View>
           )}
-          {addressLine && (
+
+          {addressLine ? (
             <View style={styles.infoRow}>
-              <MapPin size={16} color="#6b7280" />
-              <Text style={styles.infoText} numberOfLines={1}>{addressLine}</Text>
+              <MapPin size={15} color="#FF6B35" />
+              <Text style={styles.addressText} numberOfLines={2}>{addressLine}</Text>
+            </View>
+          ) : (
+            <View style={styles.infoRow}>
+              <MapPin size={15} color="#d1d5db" />
+              <Text style={styles.noAddressText}>No address on file</Text>
             </View>
           )}
+
           <View style={styles.infoRow}>
-            <Package size={16} color="#6b7280" />
+            <Package size={15} color="#6b7280" />
             <Text style={styles.infoText}>
               {packageCount > 0
                 ? `${packageCount} package${packageCount !== 1 ? 's' : ''}`
                 : `${item.items?.length || 0} items`}
             </Text>
           </View>
+
           <View style={styles.infoRow}>
-            <Clock size={16} color="#6b7280" />
+            <Clock size={15} color="#6b7280" />
             <Text style={styles.infoText}>{new Date(item.createdAt).toLocaleString()}</Text>
           </View>
         </View>
+
         <View style={styles.cardFooter}>
           <Text style={styles.total}>R{item.total.toFixed(2)}</Text>
-          <TouchableOpacity
-            style={styles.actionBtn}
-            onPress={() => navigation.navigate('DeliveryDetail', { orderId: item._id })}
-          >
-            <Truck size={16} color="#fff" />
-            <Text style={styles.actionBtnText}>{item.status === 'collecting' ? 'Collect' : 'View'}</Text>
-          </TouchableOpacity>
+
+          {isMine ? (
+            // My deliveries — "Start Delivery"
+            <TouchableOpacity style={styles.actionBtn} onPress={handleStartDelivery}>
+              <Truck size={15} color="#fff" />
+              <Text style={styles.actionBtnText}>Start Delivery</Text>
+            </TouchableOpacity>
+          ) : (
+            // Available — "View Details" + "Take Delivery"
+            <View style={styles.btnGroup}>
+              <TouchableOpacity style={styles.viewBtn} onPress={handleViewDetail}>
+                <Ionicons name="eye-outline" size={15} color="#FF6B35" />
+                <Text style={styles.viewBtnText}>Details</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.claimBtn} onPress={handleTakeDelivery}>
+                <Truck size={15} color="#fff" />
+                <Text style={styles.claimBtnText}>Take Delivery</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -172,10 +227,7 @@ export default function DeliveriesListScreen({ navigation }: any) {
       <View style={styles.header}>
         <View>
           <Text style={styles.headerTitle}>Deliveries</Text>
-          <Text style={styles.headerSubtitle}>
-            {orders.length} {orders.length === 1 ? 'order' : 'orders'}
-            {activeBranch ? ` · ${activeBranch.name}` : ''}
-          </Text>
+          <Text style={styles.headerSubtitle}>{activeBranch?.name || ''}</Text>
         </View>
         <View style={styles.liveIndicator}>
           <View style={styles.liveDot} />
@@ -183,11 +235,40 @@ export default function DeliveriesListScreen({ navigation }: any) {
         </View>
       </View>
 
-      {orders.length === 0 ? (
+      <View style={styles.tabs}>
+        {(['available', 'mine'] as TabKey[]).map(tab => {
+          const count    = tab === 'available' ? availableOrders.length : myOrders.length;
+          const isActive = activeTab === tab;
+          return (
+            <TouchableOpacity
+              key={tab}
+              style={[styles.tab, isActive && styles.tabActive]}
+              onPress={() => setActiveTab(tab)}
+            >
+              <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
+                {tab === 'available' ? 'Available' : 'My Deliveries'}
+              </Text>
+              {count > 0 && (
+                <View style={[styles.tabBadge, isActive && styles.tabBadgeActive]}>
+                  <Text style={[styles.tabBadgeText, isActive && styles.tabBadgeTextActive]}>{count}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {displayOrders.length === 0 ? (
         <View style={styles.emptyState}>
           <Truck size={64} color="#ccc" />
-          <Text style={styles.emptyTitle}>No Deliveries</Text>
-          <Text style={styles.emptyText}>Orders ready for collection will appear here instantly.</Text>
+          <Text style={styles.emptyTitle}>
+            {activeTab === 'mine' ? 'No Active Deliveries' : 'No Available Deliveries'}
+          </Text>
+          <Text style={styles.emptyText}>
+            {activeTab === 'mine'
+              ? 'Take a delivery from the Available tab to get started.'
+              : 'Orders ready for collection will appear here instantly.'}
+          </Text>
           <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
             <Ionicons name="refresh" size={20} color="#FF6B35" />
             <Text style={styles.refreshButtonText}>Refresh</Text>
@@ -195,7 +276,7 @@ export default function DeliveriesListScreen({ navigation }: any) {
         </View>
       ) : (
         <FlatList
-          data={orders}
+          data={displayOrders}
           renderItem={renderOrder}
           keyExtractor={item => item._id}
           contentContainerStyle={styles.list}
@@ -207,9 +288,9 @@ export default function DeliveriesListScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  container:  { flex: 1, backgroundColor: '#f5f5f5' },
-  centered:   { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText:{ marginTop: 12, fontSize: 16, color: '#666' },
+  container:   { flex: 1, backgroundColor: '#f5f5f5' },
+  centered:    { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { marginTop: 12, fontSize: 16, color: '#666' },
 
   header: {
     backgroundColor: '#fff', padding: 20, paddingTop: 60,
@@ -219,8 +300,18 @@ const styles = StyleSheet.create({
   headerTitle:    { fontSize: 28, fontWeight: 'bold', color: '#1a1a1a' },
   headerSubtitle: { fontSize: 14, color: '#666', marginTop: 4 },
   liveIndicator:  { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#fff3e0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginBottom: 4 },
-  liveDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444' },
-  liveText: { fontSize: 12, fontWeight: '800', color: '#FF6B35' },
+  liveDot:        { width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444' },
+  liveText:       { fontSize: 12, fontWeight: '800', color: '#FF6B35' },
+
+  tabs:               { flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e5e5e5' },
+  tab:                { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, gap: 6, borderBottomWidth: 3, borderBottomColor: 'transparent' },
+  tabActive:          { borderBottomColor: '#FF6B35' },
+  tabText:            { fontSize: 14, fontWeight: '600', color: '#9ca3af' },
+  tabTextActive:      { color: '#FF6B35' },
+  tabBadge:           { backgroundColor: '#e5e7eb', borderRadius: 10, minWidth: 20, paddingHorizontal: 6, paddingVertical: 2, alignItems: 'center' },
+  tabBadgeActive:     { backgroundColor: '#fff3e0' },
+  tabBadgeText:       { fontSize: 11, fontWeight: '800', color: '#6b7280' },
+  tabBadgeTextActive: { color: '#FF6B35' },
 
   list: { padding: 16 },
 
@@ -229,24 +320,38 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#e5e7eb',
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 6, elevation: 2,
   },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  orderNumber: { fontSize: 17, fontWeight: 'bold', color: '#1a1a1a' },
-  statusPill:  { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  statusPillText: { fontSize: 11, fontWeight: '700' },
+  // My deliveries get a subtle green left border accent
+  cardMine: { borderLeftWidth: 4, borderLeftColor: '#10b981' },
 
-  cardBody: { gap: 8, marginBottom: 14 },
-  infoRow:  { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  infoText: { fontSize: 13, color: '#6b7280', flex: 1 },
-  phoneText:{ fontSize: 13, color: '#FF6B35', fontWeight: '600' },
+  cardHeader:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  orderNumber:  { fontSize: 17, fontWeight: 'bold', color: '#1a1a1a' },
+  myStatusText: { fontSize: 12, color: '#10b981', fontWeight: '600' },
 
-  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#f3f4f6', paddingTop: 12 },
-  total:      { fontSize: 18, fontWeight: 'bold', color: '#FF6B35' },
-  actionBtn:  { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FF6B35', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
-  actionBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  cardBody:      { gap: 7, marginBottom: 14 },
+  infoRow:       { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
+  infoText:      { fontSize: 13, color: '#6b7280', flex: 1 },
+  phoneText:     { fontSize: 13, color: '#FF6B35', fontWeight: '600' },
+  addressText:   { fontSize: 13, color: '#374151', fontWeight: '500', flex: 1, lineHeight: 18 },
+  noAddressText: { fontSize: 13, color: '#d1d5db', fontStyle: 'italic' },
 
-  emptyState:       { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
-  emptyTitle:       { fontSize: 24, fontWeight: 'bold', color: '#1a1a1a', marginTop: 16 },
-  emptyText:        { fontSize: 16, color: '#666', marginTop: 8, textAlign: 'center' },
-  refreshButton:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 20, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 8, borderWidth: 2, borderColor: '#FF6B35' },
-  refreshButtonText:{ color: '#FF6B35', fontSize: 16, fontWeight: '600' },
+  cardFooter: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    borderTopWidth: 1, borderTopColor: '#f3f4f6', paddingTop: 12,
+  },
+  total: { fontSize: 17, fontWeight: 'bold', color: '#FF6B35' },
+
+  actionBtn:     { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#10B981', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 8 },
+  actionBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+
+  btnGroup:     { flexDirection: 'row', gap: 8 },
+  viewBtn:      { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1.5, borderColor: '#FF6B35', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
+  viewBtnText:  { color: '#FF6B35', fontSize: 13, fontWeight: '700' },
+  claimBtn:     { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FF6B35', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 8 },
+  claimBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+
+  emptyState:        { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
+  emptyTitle:        { fontSize: 24, fontWeight: 'bold', color: '#1a1a1a', marginTop: 16 },
+  emptyText:         { fontSize: 16, color: '#666', marginTop: 8, textAlign: 'center' },
+  refreshButton:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 20, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 8, borderWidth: 2, borderColor: '#FF6B35' },
+  refreshButtonText: { color: '#FF6B35', fontSize: 16, fontWeight: '600' },
 });
