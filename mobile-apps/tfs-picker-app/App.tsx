@@ -24,6 +24,10 @@ import {
   registerForPushNotifications,
 } from './src/services/NotificationService';
 
+// ── NEW: wrap the whole app in AppModalProvider so any screen can use
+//         useAppModal() instead of Alert.alert (fixes iOS stacking alerts)
+import { AppModalProvider } from './src/components/AppModal';
+
 const Stack = createStackNavigator();
 const Tab   = createBottomTabNavigator();
 
@@ -41,6 +45,7 @@ function MainTabs({ navigation }: any) {
         headerShown:      true,
         headerStyle:      { backgroundColor: '#fff' },
         headerTitleStyle: { fontWeight: '700', color: '#1a1a1a' },
+        tabBarStyle:      { display: 'none' }, // ← hides the bottom tab bar from UI
         headerRight: () => (
           <TouchableOpacity
             style={tabStyles.branchBtn}
@@ -103,17 +108,17 @@ function MainTabs({ navigation }: any) {
 
 const tabStyles = StyleSheet.create({
   branchBtn: {
-    flexDirection:    'row',
-    alignItems:       'center',
-    gap:              4,
-    marginRight:      16,
-    backgroundColor:  '#fff7f3',
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               4,
+    marginRight:       16,
+    backgroundColor:   '#fff7f3',
     paddingHorizontal: 12,
-    paddingVertical:  6,
-    borderRadius:     20,
-    borderWidth:      1,
-    borderColor:      '#fed7aa',
-    maxWidth:         140,
+    paddingVertical:   6,
+    borderRadius:      20,
+    borderWidth:       1,
+    borderColor:       '#fed7aa',
+    maxWidth:          140,
   },
   branchBtnText: {
     fontSize:   12,
@@ -141,25 +146,29 @@ export default function App() {
   }, [user]);
 
   return (
-    <NavigationContainer ref={navigationRef}>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {!user ? (
-          <Stack.Screen name="Login" component={LoginScreen} />
-        ) : (
-          <>
-            <Stack.Screen
-              name="BranchSelect"
-              component={BranchSelectScreen}
-              options={{ presentation: activeBranch ? 'modal' : 'card' }}
-            />
-            <Stack.Screen name="Main"               component={MainTabs} />
-            <Stack.Screen name="Picking"            component={PickingScreen} />
-            <Stack.Screen name="Packaging"          component={PackagingScreen} />
-            <Stack.Screen name="DeliveryCollection" component={DeliveryCollectionScreen} />
-            <Stack.Screen name="DeliveryDetail"     component={DeliveryScreen} />
-          </>
-        )}
-      </Stack.Navigator>
-    </NavigationContainer>
+    // AppModalProvider must wrap NavigationContainer so that screens
+    // nested anywhere in the tree can call useAppModal()
+    <AppModalProvider>
+      <NavigationContainer ref={navigationRef}>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          {!user ? (
+            <Stack.Screen name="Login" component={LoginScreen} />
+          ) : (
+            <>
+              <Stack.Screen
+                name="BranchSelect"
+                component={BranchSelectScreen}
+                options={{ presentation: activeBranch ? 'modal' : 'card' }}
+              />
+              <Stack.Screen name="Main"               component={MainTabs} />
+              <Stack.Screen name="Picking"            component={PickingScreen} />
+              <Stack.Screen name="Packaging"          component={PackagingScreen} />
+              <Stack.Screen name="DeliveryCollection" component={DeliveryCollectionScreen} />
+              <Stack.Screen name="DeliveryDetail"     component={DeliveryScreen} />
+            </>
+          )}
+        </Stack.Navigator>
+      </NavigationContainer>
+    </AppModalProvider>
   );
 }
