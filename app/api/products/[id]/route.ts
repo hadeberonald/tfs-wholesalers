@@ -64,7 +64,6 @@ export async function PUT(
     }
 
     // Normalise tags: lowercase, strip invalid chars, dedupe
-    // Use Array.from(new Set(...)) — spread of Set requires ES2015+ target
     if (Array.isArray(updateData.tags)) {
       updateData.tags = Array.from(
         new Set(
@@ -109,7 +108,7 @@ export async function PUT(
         _id: v._id || new ObjectId().toString(),
       }));
 
-      // FIX: skip linked variants — their barcode lives on their own product document,
+      // skip linked variants — their barcode lives on their own product document,
       // so checking them here would produce a false duplicate error.
       const variantBarcodes: string[] = updateData.variants
         .filter((v: any) => v.barcode && !v.linkedProductId)
@@ -155,6 +154,53 @@ export async function PUT(
       return NextResponse.json({ error: 'Product not found' }, { status: 404 });
     }
 
+    // Sync isLinkedVariant on linked product documents
+    if (updateData.hasVariants) {
+      const parentId = new ObjectId(params.id);
+
+      const linkedIds = (updateData.variants ?? [])
+        .filter((v: any) => v.linkedProductId)
+        .map((v: any) => new ObjectId(v.linkedProductId));
+
+      // Mark current linked products as hidden variants of this parent
+      if (linkedIds.length > 0) {
+        await db.collection('products').updateMany(
+          { _id: { $in: linkedIds } },
+          {
+            $set: {
+              isLinkedVariant: true,
+              linkedVariantParentId: parentId,
+            },
+          }
+        );
+      }
+
+      // Unmark any products that were previously linked to THIS parent but no longer are
+      await db.collection('products').updateMany(
+        {
+          linkedVariantParentId: parentId,
+          _id: { $nin: linkedIds },
+        },
+        {
+          $unset: {
+            isLinkedVariant: '',
+            linkedVariantParentId: '',
+          },
+        }
+      );
+    } else {
+      // hasVariants was turned off entirely — unmark all previously linked products
+      await db.collection('products').updateMany(
+        { linkedVariantParentId: new ObjectId(params.id) },
+        {
+          $unset: {
+            isLinkedVariant: '',
+            linkedVariantParentId: '',
+          },
+        }
+      );
+    }
+
     console.log('✅ Product updated:', params.id);
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -190,6 +236,17 @@ export async function DELETE(
     ) {
       return NextResponse.json({ error: 'Not authorized to delete this product' }, { status: 403 });
     }
+
+    // If this parent is deleted, unmark all its linked variant products
+    await db.collection('products').updateMany(
+      { linkedVariantParentId: new ObjectId(params.id) },
+      {
+        $unset: {
+          isLinkedVariant: '',
+          linkedVariantParentId: '',
+        },
+      }
+    );
 
     await db.collection('products').deleteOne({ _id: new ObjectId(params.id) });
 
