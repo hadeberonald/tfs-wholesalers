@@ -62,10 +62,7 @@ export default async function BranchHomePage({ params }: BranchHomePageProps) {
     <div>
       <HeroSection branchId={data.branch.id} />
 
-      {/* Compact listed-category nav tiles — no heading, directly after hero */}
-      <div className="max-w-7xl mx-auto px-4 pt-4 pb-2">
-        <ListedCategoriesStrip />
-      </div>
+      
 
       <SpecialsSection />
       <FeaturedCategoriesCarousel />
