@@ -35,6 +35,7 @@ export async function GET(request: NextRequest) {
       }
     } else {
       query.active = true;
+      query.isLinkedVariant = { $ne: true }; // hide products that are linked as variants on a parent
       if (branchId) {
         query.branchId = new ObjectId(branchId);
       }
@@ -161,7 +162,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.hasVariants && body.variants?.length > 0) {
-      // FIX: skip linked variants — their barcode lives on their own product document,
+      // skip linked variants — their barcode lives on their own product document,
       // so checking them here would produce a false duplicate error.
       const variantBarcodes: string[] = body.variants
         .filter((v: any) => v.barcode && !v.linkedProductId)
@@ -196,7 +197,6 @@ export async function POST(request: NextRequest) {
     if (!Array.isArray(categories)) categories = categories ? [categories] : [];
 
     // Normalise tags: lowercase, strip invalid chars, dedupe
-    // Use Array.from(new Set(...)) — spread of Set requires ES2015+ target
     const rawTags: string[] = Array.isArray(body.tags) ? body.tags : [];
     const tags: string[] = Array.from(
       new Set(
@@ -228,6 +228,25 @@ export async function POST(request: NextRequest) {
 
     const result = await db.collection('products').insertOne(product);
     console.log('✅ Product created for branch:', adminInfo.branchId.toString());
+
+    // Mark linked variant products so they're hidden from the main listing
+    if (product.hasVariants && variants.length > 0) {
+      const linkedIds = variants
+        .filter((v: any) => v.linkedProductId)
+        .map((v: any) => new ObjectId(v.linkedProductId));
+
+      if (linkedIds.length > 0) {
+        await db.collection('products').updateMany(
+          { _id: { $in: linkedIds } },
+          {
+            $set: {
+              isLinkedVariant: true,
+              linkedVariantParentId: result.insertedId,
+            },
+          }
+        );
+      }
+    }
 
     return NextResponse.json({ id: result.insertedId }, { status: 201 });
   } catch (error) {
