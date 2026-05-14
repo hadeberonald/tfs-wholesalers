@@ -12,7 +12,7 @@
  * delete that file and use this one instead.
  */
 
-import InnerPage from './dashboard/_page';
+import InnerPage from './_page';
 
 export default function AdminHomePage() {
   return <InnerPage />;
