@@ -2,14 +2,13 @@
 
 import { usePathname } from 'next/navigation';
 import Header from './Header';
-import AdminHeader from './AdminHeader';
 
 export default function ConditionalHeader() {
   const pathname = usePathname();
-  
-  // Match pattern: /{anything}/admin or /admin
-  // This will match both /durban/admin and /admin routes
-  const isAdminRoute = pathname.includes('/admin');
-  
-  return isAdminRoute ? <AdminHeader /> : <Header />;
+
+  // Admin routes render their own AdminHeader via the admin layout.
+  // Rendering Header here too causes the double-header bug — so we bail out.
+  if (pathname.includes('/admin')) return null;
+
+  return <Header />;
 }

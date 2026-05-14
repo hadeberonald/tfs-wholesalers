@@ -1,17 +1,18 @@
-// app/[slug]/login/page.tsx (Next.js 14 Compatible)
+// app/[slug]/login/page.tsx
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
-import { Lock, Mail, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { getPostLoginUrl } from '@/lib/login-redirect';
 
 function LoginForm() {
   const params = useParams();
   const slug = params?.slug as string;
-  
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -19,23 +20,23 @@ function LoginForm() {
   const [error, setError] = useState('');
   const [branch, setBranch] = useState<any>(null);
   const [fetchingBranch, setFetchingBranch] = useState(true);
+
   const { login, user } = useAuth();
   const searchParams = useSearchParams();
   const router = useRouter();
   const redirect = searchParams.get('redirect');
 
   useEffect(() => {
-    if (slug) {
-      fetchBranch();
-    }
+    if (slug) fetchBranch();
   }, [slug]);
 
+  // If the user is already logged in, redirect them to the right place
   useEffect(() => {
     if (user && branch) {
       if (redirect) {
         router.push(`/${slug}/${redirect}`);
       } else {
-        router.push(`/${slug}/account`);
+        router.push(getPostLoginUrl(user, slug));
       }
     }
   }, [user, branch, redirect, router, slug]);
@@ -44,13 +45,11 @@ function LoginForm() {
     try {
       setFetchingBranch(true);
       const res = await fetch(`/api/branches/${slug}`);
-      
       if (!res.ok) {
         toast.error('Branch not found');
         router.push('/');
         return;
       }
-      
       const data = await res.json();
       setBranch(data.branch);
     } catch (error) {
@@ -68,13 +67,15 @@ function LoginForm() {
     setLoading(true);
 
     try {
-      await login(email, password, slug);
+      const loggedInUser = await login(email, password, slug);
       toast.success('Welcome back!');
-      
+
       if (redirect) {
         router.push(`/${slug}/${redirect}`);
       } else {
-        router.push(`/${slug}/account`);
+        // Use the returned user object for an immediate redirect —
+        // don't wait for the useEffect so there's no flicker
+        router.push(getPostLoginUrl(loggedInUser ?? { role: 'customer' }, slug));
       }
     } catch (err: any) {
       setError(err.message || 'Invalid email or password');
@@ -88,7 +89,7 @@ function LoginForm() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center px-4 py-12">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-orange mx-auto mb-4"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-orange mx-auto mb-4" />
           <p className="text-gray-600">Loading...</p>
         </div>
       </div>
@@ -122,7 +123,7 @@ function LoginForm() {
           <form onSubmit={handleSubmit} className="space-y-6">
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start space-x-3">
-                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
                 <p className="text-sm text-red-800">{error}</p>
               </div>
             )}
@@ -132,18 +133,15 @@ function LoginForm() {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Email Address
               </label>
-              <div className="relative">
-                
-                <input
-                  type="email"
-                  required
-                  className="input-field pl-10 pr-4"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  autoComplete="email"
-                />
-              </div>
+              <input
+                type="email"
+                required
+                className="input-field"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                autoComplete="email"
+              />
             </div>
 
             {/* Password */}
@@ -152,11 +150,10 @@ function LoginForm() {
                 Password
               </label>
               <div className="relative">
-                
                 <input
                   type={showPassword ? 'text' : 'password'}
                   required
-                  className="input-field pl-10 pr-10"
+                  className="input-field pr-10"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter your password"
@@ -169,11 +166,7 @@ function LoginForm() {
                   tabIndex={-1}
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
-                  {showPassword ? (
-                    <EyeOff className="w-5 h-5" />
-                  ) : (
-                    <Eye className="w-5 h-5" />
-                  )}
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
             </div>
@@ -186,7 +179,10 @@ function LoginForm() {
                 />
                 <span className="ml-2 text-sm text-gray-600">Remember me</span>
               </label>
-              <Link href={`/${slug}/forgot-password`} className="text-sm text-brand-orange hover:text-orange-600">
+              <Link
+                href={`/${slug}/forgot-password`}
+                className="text-sm text-brand-orange hover:text-orange-600"
+              >
                 Forgot password?
               </Link>
             </div>
@@ -197,8 +193,8 @@ function LoginForm() {
               className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (
-                <span className="flex items-center justify-center space-x-2">
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                <span className="flex items-center justify-center gap-2">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
                   <span>Signing in...</span>
                 </span>
               ) : (
@@ -209,20 +205,19 @@ function LoginForm() {
 
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-600">
-              Don't have an account?{' '}
-              <Link href={`/${slug}/register`} className="text-brand-orange font-semibold hover:text-orange-600">
+              Don&apos;t have an account?{' '}
+              <Link
+                href={`/${slug}/register`}
+                className="text-brand-orange font-semibold hover:text-orange-600"
+              >
                 Create one
               </Link>
             </p>
           </div>
         </div>
 
-        {/* Back to Store */}
         <div className="text-center mt-6">
-          <Link 
-            href={`/${slug}`} 
-            className="text-sm text-gray-500 hover:text-gray-700"
-          >
+          <Link href={`/${slug}`} className="text-sm text-gray-500 hover:text-gray-700">
             ← Back to {branch.name || 'Store'}
           </Link>
         </div>
@@ -233,16 +228,18 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-brand-orange rounded-2xl mb-4 animate-pulse">
-            <span className="text-white font-bold text-2xl">TFS</span>
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-gray-50">
+          <div className="text-center">
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-brand-orange rounded-2xl mb-4 animate-pulse">
+              <span className="text-white font-bold text-2xl">TFS</span>
+            </div>
+            <p className="text-gray-600">Loading...</p>
           </div>
-          <p className="text-gray-600">Loading...</p>
         </div>
-      </div>
-    }>
+      }
+    >
       <LoginForm />
     </Suspense>
   );

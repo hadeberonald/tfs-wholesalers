@@ -1,24 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
-import { getAdminBranch } from '@/lib/get-admin-branch';
+import { requirePermission } from '@/lib/with-permission';
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
-
-    const special = await db.collection('specials').findOne({
-      _id: new ObjectId(params.id)
-    });
-
-    if (!special) {
-      return NextResponse.json({ error: 'Special not found' }, { status: 404 });
-    }
-
+    const special = await db.collection('specials').findOne({ _id: new ObjectId(params.id) });
+    if (!special) return NextResponse.json({ error: 'Special not found' }, { status: 404 });
     return NextResponse.json({ special });
   } catch (error) {
     console.error('Failed to fetch special:', error);
@@ -26,43 +16,25 @@ export async function GET(
   }
 }
 
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const adminInfo = await getAdminBranch();
-    if ('error' in adminInfo) {
-      return NextResponse.json({ error: adminInfo.error }, { status: adminInfo.status });
-    }
+export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+  const auth = await requirePermission('specials:write');
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
+  try {
     const body = await request.json();
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
 
-    // ✅ Verify ownership
-    const existing = await db.collection('specials').findOne({
-      _id: new ObjectId(params.id)
-    });
-    
-    if (!existing) {
-      return NextResponse.json({ error: 'Special not found' }, { status: 404 });
-    }
-    
-    if (!adminInfo.isSuperAdmin && existing.branchId.toString() !== adminInfo.branchId.toString()) {
+    const existing = await db.collection('specials').findOne({ _id: new ObjectId(params.id) });
+    if (!existing) return NextResponse.json({ error: 'Special not found' }, { status: 404 });
+    if (!auth.isSuperAdmin && existing.branchId.toString() !== auth.branchId.toString()) {
       return NextResponse.json({ error: 'Not authorized to edit this special' }, { status: 403 });
     }
 
     const { _id, branchId, createdAt, ...updateData } = body;
     updateData.updatedAt = new Date();
-
-    await db.collection('specials').updateOne(
-      { _id: new ObjectId(params.id) },
-      { $set: updateData }
-    );
-
+    await db.collection('specials').updateOne({ _id: new ObjectId(params.id) }, { $set: updateData });
     console.log('✅ Special updated:', params.id);
-
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Failed to update special:', error);
@@ -70,38 +42,22 @@ export async function PUT(
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const adminInfo = await getAdminBranch();
-    if ('error' in adminInfo) {
-      return NextResponse.json({ error: adminInfo.error }, { status: adminInfo.status });
-    }
+export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+  const auth = await requirePermission('specials:write');
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
+  try {
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
 
-    // ✅ Verify ownership
-    const existing = await db.collection('specials').findOne({
-      _id: new ObjectId(params.id)
-    });
-    
-    if (!existing) {
-      return NextResponse.json({ error: 'Special not found' }, { status: 404 });
-    }
-    
-    if (!adminInfo.isSuperAdmin && existing.branchId.toString() !== adminInfo.branchId.toString()) {
+    const existing = await db.collection('specials').findOne({ _id: new ObjectId(params.id) });
+    if (!existing) return NextResponse.json({ error: 'Special not found' }, { status: 404 });
+    if (!auth.isSuperAdmin && existing.branchId.toString() !== auth.branchId.toString()) {
       return NextResponse.json({ error: 'Not authorized to delete this special' }, { status: 403 });
     }
 
-    await db.collection('specials').deleteOne({
-      _id: new ObjectId(params.id)
-    });
-
+    await db.collection('specials').deleteOne({ _id: new ObjectId(params.id) });
     console.log('✅ Special deleted:', params.id);
-
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Failed to delete special:', error);
