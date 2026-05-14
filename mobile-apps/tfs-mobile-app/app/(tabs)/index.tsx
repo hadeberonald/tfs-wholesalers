@@ -145,17 +145,36 @@ export default function HomeScreen() {
                   </View>
                 )}
                 <LinearGradient
-                  colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.7)']}
-                  style={styles.carouselOverlay}
-                  locations={[0, 0.5, 1]}
-                >
-                  <Text style={styles.carouselTitle}>{category.name}</Text>
-                  {category.description && (
-                    <Text style={styles.carouselDescription} numberOfLines={2}>
-                      {category.description}
-                    </Text>
-                  )}
-                </LinearGradient>
+  colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.75)']}
+  style={styles.carouselOverlay}
+  locations={[0, 0.45, 1]}
+>
+  <View style={styles.carouselContentInner}>
+    <Text style={styles.carouselTitle}>
+      {category.name}
+    </Text>
+
+    {category.description && (
+      <Text
+        style={styles.carouselDescription}
+        numberOfLines={2}
+      >
+        {category.description}
+      </Text>
+    )}
+
+    <View style={styles.shopNowButton}>
+      <Text style={styles.shopNowText}>
+        Shop Now
+      </Text>
+
+      <ArrowRight
+        color="#fff"
+        size={16}
+      />
+    </View>
+  </View>
+</LinearGradient>
               </TouchableOpacity>
             ))}
           </ScrollView>
@@ -252,6 +271,30 @@ const styles = StyleSheet.create({
   indicators:          { flexDirection: 'row', justifyContent: 'center', gap: 8, paddingVertical: 10 },
   indicator:           { width: 8, height: 8, borderRadius: 4, backgroundColor: '#d1d5db' },
   indicatorActive:     { width: 24, backgroundColor: '#FF6B35' },
+  carouselContentInner: {
+  transform: [{ translateY: 0 }],
+},
+
+shopNowButton: {
+  marginTop: 14,
+  alignSelf: 'flex-start',
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 6,
+
+  backgroundColor: '#FF6B35',
+
+  paddingHorizontal: 16,
+  paddingVertical: 10,
+
+  borderRadius: 999,
+},
+
+shopNowText: {
+  color: '#fff',
+  fontSize: 14,
+  fontWeight: '700',
+},
 
   // Strip sits flush under the carousel with its own white background + border
   stripSection: {

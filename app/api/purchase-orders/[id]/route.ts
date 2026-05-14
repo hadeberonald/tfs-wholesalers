@@ -1,33 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
-import { getAdminBranch } from '@/lib/get-admin-branch';
+import { requirePermission } from '@/lib/with-permission';
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  const auth = await requirePermission('purchase-orders:read');
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
   try {
-    const adminInfo = await getAdminBranch();
-    if ('error' in adminInfo) {
-      return NextResponse.json({ error: adminInfo.error }, { status: adminInfo.status });
-    }
-
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
-    
     const query: any = { _id: new ObjectId(params.id) };
-    
-    if (!adminInfo.isSuperAdmin && adminInfo.branchId) {
-      query.branchId = adminInfo.branchId;
-    }
-    
+    if (!auth.isSuperAdmin && auth.branchId) query.branchId = auth.branchId;
     const purchaseOrder = await db.collection('purchaseOrders').findOne(query);
-
-    if (!purchaseOrder) {
-      return NextResponse.json({ error: 'Purchase order not found' }, { status: 404 });
-    }
-
+    if (!purchaseOrder) return NextResponse.json({ error: 'Purchase order not found' }, { status: 404 });
     return NextResponse.json({ purchaseOrder });
   } catch (error) {
     console.error('Failed to fetch purchase order:', error);
@@ -35,59 +21,28 @@ export async function GET(
   }
 }
 
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const adminInfo = await getAdminBranch();
-    if ('error' in adminInfo) {
-      return NextResponse.json({ error: adminInfo.error }, { status: adminInfo.status });
-    }
+export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+  const auth = await requirePermission('purchase-orders:write');
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
+  try {
     const body = await request.json();
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
-
     const query: any = { _id: new ObjectId(params.id) };
-    
-    if (!adminInfo.isSuperAdmin && adminInfo.branchId) {
-      query.branchId = adminInfo.branchId;
-    }
+    if (!auth.isSuperAdmin && auth.branchId) query.branchId = auth.branchId;
 
     const existing = await db.collection('purchaseOrders').findOne(query);
-    
-    if (!existing) {
-      return NextResponse.json({ error: 'Purchase order not found' }, { status: 404 });
-    }
+    if (!existing) return NextResponse.json({ error: 'Purchase order not found' }, { status: 404 });
 
-    const updateData: any = {
-      ...body,
-      updatedAt: new Date()
-    };
-
-    if (body.status === 'confirmed' && existing.status !== 'confirmed') {
-      updateData.approvedBy = adminInfo.userId;
-      updateData.approvedAt = new Date();
-    }
-
-    if (body.status === 'sent' && existing.status !== 'sent') {
-      updateData.sentAt = new Date();
-    }
-
-    if (body.status === 'received' && existing.status !== 'received') {
-      updateData.receivedAt = new Date();
-    }
-
+    const updateData: any = { ...body, updatedAt: new Date() };
+    if (body.status === 'confirmed' && existing.status !== 'confirmed') { updateData.approvedBy = auth.userId; updateData.approvedAt = new Date(); }
+    if (body.status === 'sent' && existing.status !== 'sent') updateData.sentAt = new Date();
+    if (body.status === 'received' && existing.status !== 'received') updateData.receivedAt = new Date();
     delete updateData._id;
 
-    await db.collection('purchaseOrders').updateOne(
-      { _id: new ObjectId(params.id) },
-      { $set: updateData }
-    );
-
+    await db.collection('purchaseOrders').updateOne({ _id: new ObjectId(params.id) }, { $set: updateData });
     console.log('✅ Purchase order updated:', params.id);
-
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Failed to update purchase order:', error);
@@ -95,39 +50,21 @@ export async function PUT(
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const adminInfo = await getAdminBranch();
-    if ('error' in adminInfo) {
-      return NextResponse.json({ error: adminInfo.error }, { status: adminInfo.status });
-    }
+export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+  const auth = await requirePermission('purchase-orders:write');
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
+  try {
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
-
     const query: any = { _id: new ObjectId(params.id) };
-    
-    if (!adminInfo.isSuperAdmin && adminInfo.branchId) {
-      query.branchId = adminInfo.branchId;
-    }
+    if (!auth.isSuperAdmin && auth.branchId) query.branchId = auth.branchId;
 
     const existing = await db.collection('purchaseOrders').findOne(query);
-    
-    if (!existing) {
-      return NextResponse.json({ error: 'Purchase order not found' }, { status: 404 });
-    }
-
-    if (existing.status !== 'draft') {
-      return NextResponse.json({ 
-        error: 'Only draft purchase orders can be deleted' 
-      }, { status: 400 });
-    }
+    if (!existing) return NextResponse.json({ error: 'Purchase order not found' }, { status: 404 });
+    if (existing.status !== 'draft') return NextResponse.json({ error: 'Only draft purchase orders can be deleted' }, { status: 400 });
 
     await db.collection('purchaseOrders').deleteOne({ _id: new ObjectId(params.id) });
-
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Failed to delete purchase order:', error);

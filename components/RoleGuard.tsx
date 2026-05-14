@@ -3,30 +3,18 @@
 /**
  * components/RoleGuard.tsx
  *
- * Wrap any admin page with this component to enforce client-side access control.
- * The API routes are ALSO protected server-side — this is a UX layer on top.
+ * Wraps admin pages with a client-side permission check.
+ * The API routes are ALSO protected server-side — this is purely a UX layer.
  *
- * USAGE:
- *
- *   // Require read access (default)
- *   export default function SpecialsPage() {
- *     return (
- *       <RoleGuard routeKey="specials">
- *         <AdminSpecialsPage />
- *       </RoleGuard>
- *     );
- *   }
- *
- *   // Require write access for a create/edit page
- *   <RoleGuard routeKey="specials" require="write">
- *     ...
- *   </RoleGuard>
+ * Special case: routeKey === "dashboard" is always allowed for any authenticated
+ * admin user so the landing page never shows "Access Denied" on first load.
  */
 
 import { useAuth } from '@/lib/auth-context';
 import { MANIFEST_BY_KEY } from '@/lib/route-manifest';
 import { ShieldOff, Loader2 } from 'lucide-react';
 import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import { useMemo } from 'react';
 
 interface RoleGuardProps {
@@ -43,15 +31,20 @@ export default function RoleGuard({
   children,
 }: RoleGuardProps) {
   const { user, loading, can } = useAuth();
+  const params = useParams();
+  const slug = params?.slug as string | undefined;
 
   const permission = `${routeKey}:${level}`;
   const route = MANIFEST_BY_KEY[routeKey];
 
   const hasAccess = useMemo(() => {
     if (!user) return false;
+    // Super-admins always pass
     if (user.role === 'super-admin') return true;
+    // Dashboard is the admin home — any authenticated admin/staff can see it
+    if (routeKey === 'dashboard') return true;
     return can(permission);
-  }, [user, permission]);
+  }, [user, routeKey, permission, can]);
 
   if (loading) {
     return (
@@ -68,6 +61,14 @@ export default function RoleGuard({
           <ShieldOff className="w-12 h-12 text-gray-300 mx-auto mb-3" />
           <h2 className="text-xl font-bold text-gray-900 mb-1">Not signed in</h2>
           <p className="text-gray-500 text-sm">Please sign in to access this page.</p>
+          {slug && (
+            <Link
+              href={`/${slug}/login`}
+              className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-xl transition-colors"
+            >
+              Sign In
+            </Link>
+          )}
         </div>
       </div>
     );
@@ -90,10 +91,11 @@ export default function RoleGuard({
             <span className="font-semibold">{route?.label ?? routeKey}</span>.
           </p>
           <p className="text-gray-400 text-xs mb-6">
-            Required: <code className="bg-gray-100 px-1.5 py-0.5 rounded">{permission}</code>
+            Required:{' '}
+            <code className="bg-gray-100 px-1.5 py-0.5 rounded">{permission}</code>
           </p>
           <Link
-            href="./admin"
+            href={slug ? `/${slug}/admin` : '/admin'}
             className="inline-flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-xl transition-colors"
           >
             Back to Dashboard
