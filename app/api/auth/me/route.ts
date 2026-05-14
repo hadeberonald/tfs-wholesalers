@@ -1,7 +1,8 @@
 /**
- * app/api/auth/me/route.ts  (UPDATED)
+ * app/api/auth/me/route.ts  — Updated to match consolidated auth
  *
- * Returns the current user's profile including resolved permissions.
+ * Mirrors the same branchId/activeBranchId resolution as getAdminBranch
+ * so the client-side User object stays in sync with server-side checks.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -53,14 +54,23 @@ export async function GET(request: NextRequest) {
         getUserPermissions(user.adminRoleId),
         getRoleById(user.adminRoleId),
       ]);
-      permissions = resolvedPermissions ?? [];
+
+      // Expand write → read (same logic as getAdminBranch)
+      const permSet = new Set<string>(resolvedPermissions ?? []);
+(resolvedPermissions ?? []).forEach((perm) => {
+  if (perm.endsWith(':write')) permSet.add(perm.replace(':write', ':read'));
+});
+permissions = Array.from(permSet);
       adminRoleName = roleDoc?.name ?? null;
     }
 
-    // Super-admins signal universal access with a sentinel
     if (user.role === 'super-admin') {
       permissions = ['*'];
     }
+
+    // Support both field names so the client always gets a branchId
+    const branchId =
+      user.activeBranchId?.toString() ?? user.branchId?.toString() ?? null;
 
     return NextResponse.json({
       user: {
@@ -71,10 +81,11 @@ export async function GET(request: NextRequest) {
         permissions,
         adminRoleId: user.adminRoleId?.toString() ?? null,
         adminRoleName,
+        branchId,
       },
     });
   } catch (error) {
-    console.error('Auth me error:', error);
+    console.error('[/api/auth/me] Error:', error);
     return NextResponse.json({ error: 'Failed to get user' }, { status: 500 });
   }
 }
