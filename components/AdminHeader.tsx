@@ -1,25 +1,10 @@
 'use client';
 
-/**
- * components/AdminHeader.tsx
- *
- * Single source of truth for the admin nav. ConditionalHeader returns null on
- * admin routes, so this is the ONLY header rendered there.
- *
- * Changes vs previous version:
- * - Removed the dynamic <div> spacer (it was causing the phantom-header gap)
- * - Fixed the show/hide nav toggle — it collapses the nav row only, the top bar
- *   always stays so the page content never jumps under a hidden element
- * - All manifest groups (including "System") are always shown when the user has
- *   the required permissions
- * - Kept the same permission logic
- */
-
 import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import {
-  LogOut, Menu, X, Store, ChevronDown, ChevronUp, ShieldCheck,
+  LogOut, Menu, X, Store, ChevronDown, ChevronUp, ShieldCheck, Loader2,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { getVisibleRoutes, groupRoutes, MANIFEST_GROUPS } from '@/lib/route-manifest';
@@ -27,7 +12,7 @@ import { getVisibleRoutes, groupRoutes, MANIFEST_GROUPS } from '@/lib/route-mani
 export default function AdminHeader() {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, logout } = useAuth();
+  const { user, loading } = useAuth();
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isNavExpanded, setIsNavExpanded] = useState(true);
@@ -45,24 +30,24 @@ export default function AdminHeader() {
     try { localStorage.setItem('adminNavExpanded', String(next)); } catch {}
   };
 
-  // Branch slug from URL  (/[slug]/admin/...)
   const slug = useMemo(() => {
     const parts = pathname.split('/').filter(Boolean);
-    // parts[0] = slug, parts[1] = 'admin'
     if (parts.length >= 2 && parts[1] === 'admin') return parts[0];
     return null;
   }, [pathname]);
 
-  // Derive visible routes from permissions
+  // ── Wait for auth to resolve before computing visible routes ──────────────
+  // Without this, user is null on first render and the nav shows empty,
+  // requiring a refresh to populate.
   const visibleRoutes = useMemo(() => {
-    const isSuperAdmin = user?.role === 'super-admin';
-    const permissions = user?.permissions ?? [];
+    if (loading || !user) return [];
+    const isSuperAdmin = user.role === 'super-admin';
+    const permissions = user.permissions ?? [];
     return getVisibleRoutes(permissions, isSuperAdmin);
-  }, [user]);
+  }, [user, loading]);
 
   const groupedRoutes = useMemo(() => groupRoutes(visibleRoutes), [visibleRoutes]);
 
-  // Only groups that have at least one visible route, in manifest order
   const activeGroups = useMemo(
     () => MANIFEST_GROUPS.filter((g) => (groupedRoutes[g]?.length ?? 0) > 0),
     [groupedRoutes],
@@ -81,10 +66,7 @@ export default function AdminHeader() {
     router.push(slug ? `/${slug}/login` : '/select-branch');
   };
 
-  // ─── height constants (keep in sync with the CSS below) ───────────────────
-  // Top bar: h-14 (56px). Nav bar: ~py-2 + rows ≈ 72px max.
-  // We use a fixed padding-top on the page wrapper instead of a dynamic spacer.
-  const TOP_BAR_H = 56; // px — h-14
+  const { logout } = useAuth();
 
   return (
     <>
@@ -109,29 +91,34 @@ export default function AdminHeader() {
 
             {/* Right side */}
             <div className="flex items-center gap-2">
-              {/* User info */}
-              <div className="hidden lg:flex items-center gap-2 mr-1">
-                <div className="text-right">
-                  <p className="text-white text-xs font-medium leading-tight">{user?.name}</p>
-                  <p className="text-gray-400 text-[10px] leading-tight">
-                    {user?.role === 'super-admin'
-                      ? 'Super Admin'
-                      : (user?.adminRoleName ?? user?.email)}
-                  </p>
-                </div>
-                <div className="w-8 h-8 bg-brand-orange rounded-full flex items-center justify-center shrink-0">
-                  <span className="text-white font-bold text-xs">
-                    {user?.name?.charAt(0).toUpperCase()}
-                  </span>
-                </div>
-              </div>
+              {loading ? (
+                // Show a subtle spinner while auth resolves instead of empty nav
+                <Loader2 className="w-4 h-4 text-gray-400 animate-spin" />
+              ) : (
+                <>
+                  <div className="hidden lg:flex items-center gap-2 mr-1">
+                    <div className="text-right">
+                      <p className="text-white text-xs font-medium leading-tight">{user?.name}</p>
+                      <p className="text-gray-400 text-[10px] leading-tight">
+                        {user?.role === 'super-admin'
+                          ? 'Super Admin'
+                          : (user?.adminRoleName ?? user?.email)}
+                      </p>
+                    </div>
+                    <div className="w-8 h-8 bg-brand-orange rounded-full flex items-center justify-center shrink-0">
+                      <span className="text-white font-bold text-xs">
+                        {user?.name?.charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
 
-              {/* Role badge */}
-              {user?.adminRoleName && user.role !== 'super-admin' && (
-                <span className="hidden lg:inline-flex items-center gap-1 px-2 py-1 bg-orange-500/20 border border-orange-400/30 text-orange-300 text-xs font-semibold rounded-lg">
-                  <ShieldCheck className="w-3 h-3" />
-                  {user.adminRoleName}
-                </span>
+                  {user?.adminRoleName && user.role !== 'super-admin' && (
+                    <span className="hidden lg:inline-flex items-center gap-1 px-2 py-1 bg-orange-500/20 border border-orange-400/30 text-orange-300 text-xs font-semibold rounded-lg">
+                      <ShieldCheck className="w-3 h-3" />
+                      {user.adminRoleName}
+                    </span>
+                  )}
+                </>
               )}
 
               <Link
@@ -172,8 +159,8 @@ export default function AdminHeader() {
             </div>
           </div>
 
-          {/* ── Desktop nav — collapsible ── */}
-          {activeGroups.length > 0 && (
+          {/* ── Desktop nav — only render once auth has resolved ── */}
+          {!loading && activeGroups.length > 0 && (
             <div
               className={`hidden md:block overflow-hidden transition-all duration-200 ease-in-out border-t border-white/10 ${
                 isNavExpanded ? 'max-h-40 py-2 opacity-100' : 'max-h-0 py-0 opacity-0'
@@ -216,7 +203,7 @@ export default function AdminHeader() {
           )}
 
           {/* Collapsed hint */}
-          {!isNavExpanded && (
+          {!loading && !isNavExpanded && (
             <div className="hidden md:flex items-center justify-center py-0.5 border-t border-white/10">
               <button
                 onClick={toggleNav}
@@ -241,41 +228,45 @@ export default function AdminHeader() {
                 </div>
               )}
 
-              {activeGroups.length === 0 && (
+              {loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
+                </div>
+              ) : activeGroups.length === 0 ? (
                 <p className="text-gray-500 text-sm text-center py-4">
                   No pages assigned to your role yet.
                 </p>
-              )}
-
-              {activeGroups.map((group) => (
-                <div key={group} className="mb-4">
-                  <p className="text-gray-400 text-xs uppercase font-semibold tracking-wider px-2 mb-2">
-                    {group}
-                  </p>
-                  <div className="space-y-1">
-                    {groupedRoutes[group].map((route) => {
-                      const href = slug ? `/${slug}${route.href}` : route.href;
-                      const active = isActive(route.href);
-                      const Icon = route.icon;
-                      return (
-                        <Link
-                          key={route.key}
-                          href={href}
-                          onClick={() => setIsMobileMenuOpen(false)}
-                          className={`flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all ${
-                            active
-                              ? 'bg-brand-orange text-white'
-                              : 'text-gray-300 hover:bg-white/10 hover:text-white'
-                          }`}
-                        >
-                          <Icon className="w-5 h-5" />
-                          <span className="font-medium">{route.label}</span>
-                        </Link>
-                      );
-                    })}
+              ) : (
+                activeGroups.map((group) => (
+                  <div key={group} className="mb-4">
+                    <p className="text-gray-400 text-xs uppercase font-semibold tracking-wider px-2 mb-2">
+                      {group}
+                    </p>
+                    <div className="space-y-1">
+                      {groupedRoutes[group].map((route) => {
+                        const href = slug ? `/${slug}${route.href}` : route.href;
+                        const active = isActive(route.href);
+                        const Icon = route.icon;
+                        return (
+                          <Link
+                            key={route.key}
+                            href={href}
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className={`flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all ${
+                              active
+                                ? 'bg-brand-orange text-white'
+                                : 'text-gray-300 hover:bg-white/10 hover:text-white'
+                            }`}
+                          >
+                            <Icon className="w-5 h-5" />
+                            <span className="font-medium">{route.label}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
 
               <div className="pt-4 mt-2 border-t border-white/10 space-y-2">
                 <Link
