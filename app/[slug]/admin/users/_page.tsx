@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import {
   Plus, Edit, Trash2, Users, Search, Package, Truck,
-  ShoppingBag, Shield, ShieldCheck, Loader2, X, Save,
+  ShoppingBag, Shield, ShieldCheck, Loader2, X, Save, Building2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/lib/auth-context';
@@ -18,6 +18,12 @@ interface AdminRole {
   isSystem: boolean;
 }
 
+interface Branch {
+  _id: string;
+  name: string;
+  slug: string;
+}
+
 interface User {
   _id: string;
   name: string;
@@ -25,6 +31,8 @@ interface User {
   role: 'customer' | 'picker' | 'delivery' | 'admin';
   phone?: string;
   active: boolean;
+  activeBranchId?: string;
+  activeBranchName?: string;
   adminRoleId?: string | null;
   adminRoleName?: string | null;
   createdAt: string;
@@ -38,11 +46,18 @@ interface FormData {
   phone: string;
   active: boolean;
   adminRoleId: string;
+  activeBranchId: string;
 }
 
 const EMPTY_FORM: FormData = {
-  name: '', email: '', password: '', role: 'customer',
-  phone: '', active: true, adminRoleId: '',
+  name: '',
+  email: '',
+  password: '',
+  role: 'customer',
+  phone: '',
+  active: true,
+  adminRoleId: '',
+  activeBranchId: '',
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -71,6 +86,7 @@ export default function AdminUsersPage() {
 
   const [users, setUsers]           = useState<User[]>([]);
   const [adminRoles, setAdminRoles] = useState<AdminRole[]>([]);
+  const [branches, setBranches]     = useState<Branch[]>([]);
   const [loading, setLoading]       = useState(true);
   const [saving, setSaving]         = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -82,6 +98,7 @@ export default function AdminUsersPage() {
   useEffect(() => {
     fetchUsers();
     fetchAdminRoles();
+    fetchBranches();
   }, []);
 
   // ── Data fetching ────────────────────────────────────────────────────────
@@ -114,6 +131,18 @@ export default function AdminUsersPage() {
     }
   };
 
+  const fetchBranches = async () => {
+    try {
+      const res = await fetch('/api/branches');
+      if (res.ok) {
+        const data = await res.json();
+        setBranches(data.branches || []);
+      }
+    } catch {
+      console.error('Failed to load branches');
+    }
+  };
+
   // ── CRUD ─────────────────────────────────────────────────────────────────
 
   const resetForm = () => { setFormData(EMPTY_FORM); setEditingUser(null); };
@@ -121,13 +150,14 @@ export default function AdminUsersPage() {
   const openEdit = (user: User) => {
     setEditingUser(user);
     setFormData({
-      name:        user.name,
-      email:       user.email,
-      password:    '',
-      role:        user.role,
-      phone:       user.phone || '',
-      active:      user.active,
-      adminRoleId: user.adminRoleId || '',
+      name:           user.name,
+      email:          user.email,
+      password:       '',
+      role:           user.role,
+      phone:          user.phone || '',
+      active:         user.active,
+      adminRoleId:    user.adminRoleId || '',
+      activeBranchId: user.activeBranchId || '',
     });
     setShowModal(true);
   };
@@ -136,24 +166,47 @@ export default function AdminUsersPage() {
     if (!confirm('Are you sure you want to delete this user?')) return;
     try {
       const res = await fetch(`/api/admin/users/${id}`, { method: 'DELETE' });
-      if (res.ok) { toast.success('User deleted'); fetchUsers(); }
-      else { const d = await res.json(); toast.error(d.error || 'Failed to delete user'); }
-    } catch { toast.error('An error occurred'); }
+      if (res.ok) {
+        toast.success('User deleted');
+        fetchUsers();
+      } else {
+        const d = await res.json();
+        toast.error(d.error || 'Failed to delete user');
+      }
+    } catch {
+      toast.error('An error occurred');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingUser && !formData.password) { toast.error('Password is required for new users'); return; }
+
+    if (!editingUser && !formData.password) {
+      toast.error('Password is required for new users');
+      return;
+    }
+
+    if (formData.role === 'admin' && !formData.activeBranchId) {
+      toast.error('Admin users must be assigned to a branch');
+      return;
+    }
 
     setSaving(true);
     try {
       const url    = editingUser ? `/api/admin/users/${editingUser._id}` : '/api/admin/users';
       const method = editingUser ? 'PUT' : 'POST';
 
-      // Build payload — omit empty password on edit, omit adminRoleId if role isn't admin
       const payload: any = { ...formData };
+
+      // Don't send blank password on edit
       if (editingUser && !formData.password) delete payload.password;
-      if (formData.role !== 'admin') delete payload.adminRoleId;
+
+      // Non-admin users don't need these fields
+      if (formData.role !== 'admin') {
+        delete payload.adminRoleId;
+        delete payload.activeBranchId;
+      }
+
       if (!payload.adminRoleId) payload.adminRoleId = null;
 
       const res = await fetch(url, {
@@ -171,8 +224,11 @@ export default function AdminUsersPage() {
         const error = await res.json();
         toast.error(error.error || 'Failed to save user');
       }
-    } catch { toast.error('An error occurred'); }
-    finally { setSaving(false); }
+    } catch {
+      toast.error('An error occurred');
+    } finally {
+      setSaving(false);
+    }
   };
 
   // ── Derived state ─────────────────────────────────────────────────────────
@@ -186,7 +242,7 @@ export default function AdminUsersPage() {
   });
 
   const stats = {
-    total:    users.length,
+    total:     users.length,
     customers: users.filter(u => u.role === 'customer').length,
     pickers:   users.filter(u => u.role === 'picker').length,
     delivery:  users.filter(u => u.role === 'delivery').length,
@@ -216,11 +272,11 @@ export default function AdminUsersPage() {
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
           {[
-            { label: 'Total',         value: stats.total,     icon: Users,       color: 'bg-blue-500'   },
-            { label: 'Customers',     value: stats.customers, icon: ShoppingBag, color: 'bg-gray-500'   },
-            { label: 'Pickers',       value: stats.pickers,   icon: Package,     color: 'bg-purple-500' },
-            { label: 'Delivery',      value: stats.delivery,  icon: Truck,       color: 'bg-green-500'  },
-            { label: 'Admins',        value: stats.admins,    icon: Shield,      color: 'bg-orange-500' },
+            { label: 'Total',     value: stats.total,     icon: Users,       color: 'bg-blue-500'   },
+            { label: 'Customers', value: stats.customers, icon: ShoppingBag, color: 'bg-gray-500'   },
+            { label: 'Pickers',   value: stats.pickers,   icon: Package,     color: 'bg-purple-500' },
+            { label: 'Delivery',  value: stats.delivery,  icon: Truck,       color: 'bg-green-500'  },
+            { label: 'Admins',    value: stats.admins,    icon: Shield,      color: 'bg-orange-500' },
           ].map((stat) => (
             <div key={stat.label} className="bg-white rounded-2xl p-5 shadow-sm">
               <div className={`w-10 h-10 ${stat.color} rounded-xl flex items-center justify-center mb-3`}>
@@ -269,7 +325,9 @@ export default function AdminUsersPage() {
             <Users className="w-14 h-14 text-gray-200 mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-gray-900 mb-2">No users found</h3>
             <p className="text-gray-500 text-sm">
-              {searchTerm || roleFilter !== 'all' ? 'Try adjusting your search or filters' : 'Add your first user to get started'}
+              {searchTerm || roleFilter !== 'all'
+                ? 'Try adjusting your search or filters'
+                : 'Add your first user to get started'}
             </p>
           </div>
         ) : (
@@ -281,7 +339,7 @@ export default function AdminUsersPage() {
                     <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">User</th>
                     <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Role</th>
                     <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide hidden md:table-cell">Admin Role</th>
-                    <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">Phone</th>
+                    <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">Branch</th>
                     <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
                     <th className="px-5 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Actions</th>
                   </tr>
@@ -312,7 +370,6 @@ export default function AdminUsersPage() {
                           </span>
                         </td>
 
-                        {/* Admin role column — only meaningful for admins */}
                         <td className="px-5 py-4 hidden md:table-cell">
                           {user.role === 'admin' ? (
                             user.adminRoleName ? (
@@ -321,19 +378,30 @@ export default function AdminUsersPage() {
                                 {user.adminRoleName}
                               </span>
                             ) : (
-                              <span className="text-xs text-gray-400 italic">No role assigned</span>
+                              <span className="text-xs text-red-400 italic">No role assigned</span>
                             )
                           ) : (
                             <span className="text-xs text-gray-300">—</span>
                           )}
                         </td>
 
-                        <td className="px-5 py-4 hidden lg:table-cell text-sm text-gray-600">
-                          {user.phone || '—'}
+                        <td className="px-5 py-4 hidden lg:table-cell">
+                          {user.activeBranchName ? (
+                            <span className="inline-flex items-center gap-1.5 text-xs text-gray-600">
+                              <Building2 className="w-3 h-3 text-gray-400" />
+                              {user.activeBranchName}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-300">—</span>
+                          )}
                         </td>
 
                         <td className="px-5 py-4">
-                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${user.active ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-600 border border-red-200'}`}>
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
+                            user.active
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-red-50 text-red-600 border border-red-200'
+                          }`}>
                             {user.active ? 'Active' : 'Inactive'}
                           </span>
                         </td>
@@ -371,10 +439,10 @@ export default function AdminUsersPage() {
          ═══════════════════════════════ */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl max-h-[90vh] overflow-y-auto">
 
             {/* Modal header */}
-            <div className="p-6 border-b flex items-center justify-between">
+            <div className="p-6 border-b flex items-center justify-between sticky top-0 bg-white z-10">
               <h2 className="text-xl font-bold text-gray-900">
                 {editingUser ? 'Edit User' : 'Add New User'}
               </h2>
@@ -388,12 +456,13 @@ export default function AdminUsersPage() {
 
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
 
-              {/* Name */}
+              {/* Name + Email */}
               <div className="grid md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Full Name *</label>
                   <input
-                    type="text" required
+                    type="text"
+                    required
                     className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
                     value={formData.name}
                     onChange={e => setFormData({ ...formData, name: e.target.value })}
@@ -402,7 +471,8 @@ export default function AdminUsersPage() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Email *</label>
                   <input
-                    type="email" required
+                    type="email"
+                    required
                     className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
                     value={formData.email}
                     onChange={e => setFormData({ ...formData, email: e.target.value })}
@@ -457,17 +527,41 @@ export default function AdminUsersPage() {
                   required
                   className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
                   value={formData.role}
-                  onChange={e => setFormData({ ...formData, role: e.target.value, adminRoleId: '' })}
+                  onChange={e => setFormData({ ...formData, role: e.target.value, adminRoleId: '', activeBranchId: '' })}
                 >
                   <option value="customer">Customer</option>
                   <option value="picker">Picker</option>
                   <option value="delivery">Delivery Staff</option>
-                  {/* Only super-admins can create/edit admin accounts */}
                   {(isSuperAdmin || editingUser?.role === 'admin') && (
                     <option value="admin">Admin</option>
                   )}
                 </select>
               </div>
+
+              {/* Branch — required for admin users */}
+              {formData.role === 'admin' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Branch <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    required
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
+                    value={formData.activeBranchId}
+                    onChange={e => setFormData({ ...formData, activeBranchId: e.target.value })}
+                  >
+                    <option value="">— Select a branch —</option>
+                    {branches.map(b => (
+                      <option key={b._id} value={b._id}>{b.name}</option>
+                    ))}
+                  </select>
+                  {!formData.activeBranchId && (
+                    <p className="text-xs text-red-500 mt-1">
+                      Required — admin users without a branch cannot access the portal.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Admin Role — only shown when role === 'admin' */}
               {formData.role === 'admin' && (
@@ -493,7 +587,6 @@ export default function AdminUsersPage() {
                     ))}
                   </select>
 
-                  {/* Preview the selected role's description */}
                   {formData.adminRoleId && (() => {
                     const selected = adminRoles.find(r => r._id === formData.adminRoleId);
                     return selected ? (

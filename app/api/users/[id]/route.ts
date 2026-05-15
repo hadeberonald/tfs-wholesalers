@@ -1,5 +1,8 @@
 /**
- * app/api/admin/users/[id]/route.ts  (UPDATED)
+ * app/api/admin/users/[id]/route.ts
+ *
+ * PUT    — update user, normalises branch to activeBranchId
+ * DELETE — delete user
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -23,23 +26,31 @@ export async function PUT(
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
 
-    const { password, adminRoleId, ...updateData } = body;
+    const { password, adminRoleId, activeBranchId, branchId, ...rest } = body;
+    const updateData: any = { ...rest };
 
     // Only super-admins can change the top-level role field
     if (updateData.role !== undefined && !auth.isSuperAdmin) {
-      return NextResponse.json({ error: 'Not authorized to change user roles' }, { status: 403 });
+      return NextResponse.json(
+        { error: 'Not authorized to change user roles' },
+        { status: 403 }
+      );
     }
 
+    // Password update
     if (password) {
       if (password.length < 6) {
-        return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
+        return NextResponse.json(
+          { error: 'Password must be at least 6 characters' },
+          { status: 400 }
+        );
       }
       updateData.password = await hashPassword(password);
     }
 
-    // Validate and resolve adminRoleId
+    // Resolve adminRoleId
     if (adminRoleId !== undefined) {
-      if (adminRoleId === null || adminRoleId === '') {
+      if (!adminRoleId) {
         updateData.adminRoleId = null;
       } else {
         const roleDoc = await db.collection('admin_roles').findOne({
@@ -52,6 +63,23 @@ export async function PUT(
       }
     }
 
+    // Resolve branch — always write to activeBranchId, always null out branchId
+    // so the document is fully migrated on first edit.
+    const rawBranch = activeBranchId ?? branchId ?? undefined;
+    if (rawBranch !== undefined) {
+      if (!rawBranch) {
+        updateData.activeBranchId = null;
+      } else {
+        try {
+          updateData.activeBranchId = new ObjectId(rawBranch);
+        } catch {
+          return NextResponse.json({ error: 'Invalid branch ID' }, { status: 400 });
+        }
+      }
+      // Null out the legacy field so the doc is clean going forward
+      updateData.branchId = null;
+    }
+
     updateData.updatedAt = new Date();
 
     await db.collection('users').updateOne(
@@ -59,8 +87,7 @@ export async function PUT(
       { $set: updateData }
     );
 
-    // If we changed this user's role assignment, bust the permissions cache
-    // so their next request re-resolves from DB (not stale cache)
+    // Bust permission cache if the role assignment changed
     if (adminRoleId !== undefined) {
       bustRoleCache();
     }
@@ -85,9 +112,15 @@ export async function DELETE(
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
 
-    const targetUser = await db.collection('users').findOne({ _id: new ObjectId(params.id) });
-    if (targetUser && targetUser.role === 'super-admin' && !auth.isSuperAdmin) {
-      return NextResponse.json({ error: 'Not authorized to delete super-admin accounts' }, { status: 403 });
+    const targetUser = await db.collection('users').findOne({
+      _id: new ObjectId(params.id),
+    });
+
+    if (targetUser?.role === 'super-admin' && !auth.isSuperAdmin) {
+      return NextResponse.json(
+        { error: 'Not authorized to delete super-admin accounts' },
+        { status: 403 }
+      );
     }
 
     await db.collection('users').deleteOne({ _id: new ObjectId(params.id) });
