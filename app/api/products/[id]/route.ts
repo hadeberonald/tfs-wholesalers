@@ -34,10 +34,18 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
     const { _id, branchId, ...updateData } = body;
 
-    if (updateData.categories && !Array.isArray(updateData.categories)) updateData.categories = [updateData.categories];
+    if (updateData.categories && !Array.isArray(updateData.categories)) {
+      updateData.categories = [updateData.categories];
+    }
 
     if (Array.isArray(updateData.tags)) {
-      updateData.tags = Array.from(new Set(updateData.tags.map((t: string) => t.toLowerCase().replace(/[^a-z0-9-]/g, '')).filter(Boolean)));
+      updateData.tags = Array.from(
+        new Set(
+          updateData.tags
+            .map((t: string) => t.toLowerCase().replace(/[^a-z0-9-]/g, ''))
+            .filter(Boolean)
+        )
+      );
     } else {
       updateData.tags = [];
     }
@@ -47,34 +55,98 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
         delete updateData.barcode;
       } else {
         updateData.barcode = String(updateData.barcode).trim();
-        const existingWithBarcode = await db.collection('products').findOne({ _id: { $ne: new ObjectId(params.id) }, branchId: existing.branchId, $or: [{ barcode: updateData.barcode }, { 'variants.barcode': updateData.barcode }] });
-        if (existingWithBarcode) return NextResponse.json({ error: 'Barcode already in use in your branch', product: existingWithBarcode.name }, { status: 400 });
+        const existingWithBarcode = await db.collection('products').findOne({
+          _id: { $ne: new ObjectId(params.id) },
+          branchId: existing.branchId,
+          $or: [{ barcode: updateData.barcode }, { 'variants.barcode': updateData.barcode }],
+        });
+        if (existingWithBarcode) {
+          return NextResponse.json(
+            { error: 'Barcode already in use in your branch', product: existingWithBarcode.name },
+            { status: 400 }
+          );
+        }
       }
     }
 
     if (updateData.hasVariants && updateData.variants?.length > 0) {
-      updateData.variants = updateData.variants.map((v: any) => ({ ...v, _id: v._id || new ObjectId().toString() }));
-      const variantBarcodes: string[] = updateData.variants.filter((v: any) => v.barcode && !v.linkedProductId).map((v: any) => v.barcode);
+      updateData.variants = updateData.variants.map((v: any) => ({
+        ...v,
+        _id: v._id || new ObjectId().toString(),
+      }));
+
+      // Only check barcodes for non-linked variants (linked products own their own barcodes)
+      const variantBarcodes: string[] = updateData.variants
+        .filter((v: any) => v.barcode && !v.linkedProductId)
+        .map((v: any) => v.barcode);
+
       if (variantBarcodes.length > 0) {
-        const duplicates = variantBarcodes.filter((item: string, index: number) => variantBarcodes.indexOf(item) !== index);
-        if (duplicates.length > 0) return NextResponse.json({ error: 'Duplicate barcode(s) in variants: ' + duplicates.join(', ') }, { status: 400 });
-        const existingWithBarcode = await db.collection('products').findOne({ _id: { $ne: new ObjectId(params.id) }, branchId: existing.branchId, $or: [{ barcode: { $in: variantBarcodes } }, { 'variants.barcode': { $in: variantBarcodes } }] });
-        if (existingWithBarcode) return NextResponse.json({ error: 'One or more variant barcodes already in use in your branch', product: existingWithBarcode.name }, { status: 400 });
+        const duplicates = variantBarcodes.filter(
+          (item: string, index: number) => variantBarcodes.indexOf(item) !== index
+        );
+        if (duplicates.length > 0) {
+          return NextResponse.json(
+            { error: 'Duplicate barcode(s) in variants: ' + duplicates.join(', ') },
+            { status: 400 }
+          );
+        }
+        const existingWithBarcode = await db.collection('products').findOne({
+          _id: { $ne: new ObjectId(params.id) },
+          branchId: existing.branchId,
+          $or: [
+            { barcode: { $in: variantBarcodes } },
+            { 'variants.barcode': { $in: variantBarcodes } },
+          ],
+        });
+        if (existingWithBarcode) {
+          return NextResponse.json(
+            { error: 'One or more variant barcodes already in use in your branch', product: existingWithBarcode.name },
+            { status: 400 }
+          );
+        }
       }
     }
 
     updateData.updatedAt = new Date();
 
-    const result = await db.collection('products').updateOne({ _id: new ObjectId(params.id) }, { $set: updateData });
-    if (result.matchedCount === 0) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    const result = await db.collection('products').updateOne(
+      { _id: new ObjectId(params.id) },
+      { $set: updateData }
+    );
+    if (result.matchedCount === 0) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+
+    const parentId = new ObjectId(params.id);
 
     if (updateData.hasVariants) {
-      const parentId = new ObjectId(params.id);
-      const linkedIds = (updateData.variants ?? []).filter((v: any) => v.linkedProductId).map((v: any) => new ObjectId(v.linkedProductId));
-      if (linkedIds.length > 0) await db.collection('products').updateMany({ _id: { $in: linkedIds } }, { $set: { isLinkedVariant: true, linkedVariantParentId: parentId } });
-      await db.collection('products').updateMany({ linkedVariantParentId: parentId, _id: { $nin: linkedIds } }, { $unset: { isLinkedVariant: '', linkedVariantParentId: '' } });
+      const linkedIds = (updateData.variants ?? [])
+        .filter((v: any) => v.linkedProductId)
+        .map((v: any) => new ObjectId(v.linkedProductId));
+
+      // ── FIX 1: Before marking new linked children, strip isLinkedVariant from
+      // products that were previously linked to THIS parent but are no longer in
+      // the current variant list. This prevents orphaned flags after re-linking.
+      await db.collection('products').updateMany(
+        { linkedVariantParentId: parentId, _id: { $nin: linkedIds } },
+        { $unset: { isLinkedVariant: '', linkedVariantParentId: '' } }
+      );
+
+      if (linkedIds.length > 0) {
+        // ── FIX 2: Also clear any stale parent pointer these products may have
+        // from a previous (different) parent before setting the new one.
+        // This resolves the cross-linking orphan bug.
+        await db.collection('products').updateMany(
+          { _id: { $in: linkedIds } },
+          { $set: { isLinkedVariant: true, linkedVariantParentId: parentId } }
+        );
+      }
     } else {
-      await db.collection('products').updateMany({ linkedVariantParentId: new ObjectId(params.id) }, { $unset: { isLinkedVariant: '', linkedVariantParentId: '' } });
+      // Product no longer has variants — free all previously linked children
+      await db.collection('products').updateMany(
+        { linkedVariantParentId: parentId },
+        { $unset: { isLinkedVariant: '', linkedVariantParentId: '' } }
+      );
     }
 
     console.log('✅ Product updated:', params.id);
@@ -100,7 +172,12 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       return NextResponse.json({ error: 'Not authorized to delete this product' }, { status: 403 });
     }
 
-    await db.collection('products').updateMany({ linkedVariantParentId: new ObjectId(params.id) }, { $unset: { isLinkedVariant: '', linkedVariantParentId: '' } });
+    // Free all children so they reappear as standalone products
+    await db.collection('products').updateMany(
+      { linkedVariantParentId: new ObjectId(params.id) },
+      { $unset: { isLinkedVariant: '', linkedVariantParentId: '' } }
+    );
+
     await db.collection('products').deleteOne({ _id: new ObjectId(params.id) });
     return NextResponse.json({ success: true });
   } catch (error) {
