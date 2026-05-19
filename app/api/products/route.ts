@@ -8,17 +8,21 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const category = searchParams.get('category');
-    const special  = searchParams.get('special');
-    const featured = searchParams.get('featured');
-    const slug     = searchParams.get('slug');
-    const limit    = searchParams.get('limit');
-    const page     = searchParams.get('page');
-    const sort     = searchParams.get('sort');
-    const all      = searchParams.get('all');
-    const barcode  = searchParams.get('barcode');
-    const branchId = searchParams.get('branchId');
-    const search   = searchParams.get('search');
+    const category  = searchParams.get('category');
+    const special   = searchParams.get('special');
+    const featured  = searchParams.get('featured');
+    const slug      = searchParams.get('slug');
+    const limit     = searchParams.get('limit');
+    const page      = searchParams.get('page');
+    const sort      = searchParams.get('sort');
+    const all       = searchParams.get('all');
+    const barcode   = searchParams.get('barcode');
+    const branchId  = searchParams.get('branchId');
+    const search    = searchParams.get('search');
+    // NEW: excludeId lets the link modal hide the product being edited
+    const excludeId = searchParams.get('excludeId');
+    // NEW: excludeLinked=true hides products already flagged as linked variants
+    const excludeLinked = searchParams.get('excludeLinked');
 
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
@@ -34,39 +38,73 @@ export async function GET(request: NextRequest) {
       if (branchId) query.branchId = new ObjectId(branchId);
     }
 
+    // ── FIX 3: Exclude the product currently being edited from link results
+    if (excludeId) {
+      try {
+        query._id = { $ne: new ObjectId(excludeId) };
+      } catch {
+        // ignore malformed id
+      }
+    }
+
+    // ── FIX 4: Optionally hide products that are already linked as variants
+    // of any parent (prevents picking them for a second parent simultaneously).
+    // The link modal passes excludeLinked=true so only free products appear.
+    if (excludeLinked === 'true') {
+      query.isLinkedVariant = { $ne: true };
+    }
+
     if (search && search.trim().length >= 2) {
       const raw = search.trim();
       const escaped = raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const nameRegex = new RegExp('(^|\\b)' + escaped, 'i');
       const codeRegex = new RegExp(escaped, 'i');
       const tagRegex  = new RegExp('^' + escaped + '$', 'i');
-      query.$or = [{ name: nameRegex }, { sku: codeRegex }, { barcode: codeRegex }, { tags: tagRegex }, { 'variants.name': nameRegex }, { 'variants.sku': codeRegex }, { 'variants.barcode': codeRegex }];
+      query.$or = [
+        { name: nameRegex },
+        { sku: codeRegex },
+        { barcode: codeRegex },
+        { tags: tagRegex },
+        { 'variants.name': nameRegex },
+        { 'variants.sku': codeRegex },
+        { 'variants.barcode': codeRegex },
+      ];
     }
 
     if (category) {
       try {
         const categoryDoc = await db.collection('categories').findOne({ _id: new ObjectId(category) });
-        query.categories = categoryDoc ? { $in: [categoryDoc.slug, category, new ObjectId(category)] } : { $in: [category] };
-      } catch { query.categories = { $in: [category] }; }
+        query.categories = categoryDoc
+          ? { $in: [categoryDoc.slug, category, new ObjectId(category)] }
+          : { $in: [category] };
+      } catch {
+        query.categories = { $in: [category] };
+      }
     }
 
-    if (special === 'true') query.onSpecial = true;
-    if (featured === 'true') query.featured = true;
+    if (special  === 'true') query.onSpecial  = true;
+    if (featured === 'true') query.featured   = true;
     if (slug) query.slug = slug;
     if (barcode) query.$or = [{ barcode }, { 'variants.barcode': barcode }];
 
     let sortOption: any = { createdAt: -1, _id: -1 };
-    if (sort === 'name') sortOption = { name: 1, _id: 1 };
-    else if (sort === 'price-asc') sortOption = { price: 1, _id: 1 };
+    if (sort === 'name')        sortOption = { name:  1, _id: 1 };
+    else if (sort === 'price-asc')  sortOption = { price:  1, _id: 1 };
     else if (sort === 'price-desc') sortOption = { price: -1, _id: 1 };
 
-    const pageNum = page ? parseInt(page) : 1;
-    const limitNum = limit ? parseInt(limit) : 25;
-    const skip = search ? 0 : (pageNum - 1) * limitNum;
+    const pageNum       = page  ? parseInt(page)  : 1;
+    const limitNum      = limit ? parseInt(limit) : 25;
+    const skip          = search ? 0 : (pageNum - 1) * limitNum;
     const effectiveLimit = search ? Math.min(parseInt(limit || '200'), 500) : limitNum;
 
-    const total = await db.collection('products').countDocuments(query);
-    const products = await db.collection('products').find(query).sort(sortOption).skip(skip).limit(effectiveLimit).toArray();
+    const total    = await db.collection('products').countDocuments(query);
+    const products = await db
+      .collection('products')
+      .find(query)
+      .sort(sortOption)
+      .skip(skip)
+      .limit(effectiveLimit)
+      .toArray();
 
     if (barcode && products.length > 0) {
       const product = products[0];
@@ -77,7 +115,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ product, matchType: 'product' });
     }
 
-    return NextResponse.json({ products, total, page: pageNum, limit: effectiveLimit, totalPages: Math.ceil(total / limitNum) });
+    return NextResponse.json({
+      products,
+      total,
+      page: pageNum,
+      limit: effectiveLimit,
+      totalPages: Math.ceil(total / limitNum),
+    });
   } catch (error) {
     console.error('Failed to fetch products:', error);
     return NextResponse.json({ error: 'Failed to fetch products' }, { status: 500 });
@@ -89,26 +133,58 @@ export async function POST(request: NextRequest) {
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   if (auth.isSuperAdmin) {
-    return NextResponse.json({ error: 'Super admins cannot create products directly. Please assign to a branch.' }, { status: 403 });
+    return NextResponse.json(
+      { error: 'Super admins cannot create products directly. Please assign to a branch.' },
+      { status: 403 }
+    );
   }
 
   try {
-    const body = await request.json();
+    const body   = await request.json();
     const client = await clientPromise;
-    const db = client.db('tfs-wholesalers');
+    const db     = client.db('tfs-wholesalers');
 
     if (body.barcode) {
-      const existing = await db.collection('products').findOne({ branchId: auth.branchId, $or: [{ barcode: body.barcode }, { 'variants.barcode': body.barcode }] });
-      if (existing) return NextResponse.json({ error: 'A product with this barcode already exists in your branch' }, { status: 400 });
+      const existing = await db.collection('products').findOne({
+        branchId: auth.branchId,
+        $or: [{ barcode: body.barcode }, { 'variants.barcode': body.barcode }],
+      });
+      if (existing) {
+        return NextResponse.json(
+          { error: 'A product with this barcode already exists in your branch' },
+          { status: 400 }
+        );
+      }
     }
 
     if (body.hasVariants && body.variants?.length > 0) {
-      const variantBarcodes: string[] = body.variants.filter((v: any) => v.barcode && !v.linkedProductId).map((v: any) => v.barcode);
+      const variantBarcodes: string[] = body.variants
+        .filter((v: any) => v.barcode && !v.linkedProductId)
+        .map((v: any) => v.barcode);
+
       if (variantBarcodes.length > 0) {
-        const existing = await db.collection('products').findOne({ branchId: auth.branchId, $or: [{ barcode: { $in: variantBarcodes } }, { 'variants.barcode': { $in: variantBarcodes } }] });
-        if (existing) return NextResponse.json({ error: 'One or more variant barcodes already exist in your branch' }, { status: 400 });
-        const duplicates = variantBarcodes.filter((item: string, index: number) => variantBarcodes.indexOf(item) !== index);
-        if (duplicates.length > 0) return NextResponse.json({ error: 'Duplicate barcode(s) in variants: ' + duplicates.join(', ') }, { status: 400 });
+        const existing = await db.collection('products').findOne({
+          branchId: auth.branchId,
+          $or: [
+            { barcode: { $in: variantBarcodes } },
+            { 'variants.barcode': { $in: variantBarcodes } },
+          ],
+        });
+        if (existing) {
+          return NextResponse.json(
+            { error: 'One or more variant barcodes already exist in your branch' },
+            { status: 400 }
+          );
+        }
+        const duplicates = variantBarcodes.filter(
+          (item: string, index: number) => variantBarcodes.indexOf(item) !== index
+        );
+        if (duplicates.length > 0) {
+          return NextResponse.json(
+            { error: 'Duplicate barcode(s) in variants: ' + duplicates.join(', ') },
+            { status: 400 }
+          );
+        }
       }
     }
 
@@ -116,21 +192,44 @@ export async function POST(request: NextRequest) {
     if (!Array.isArray(categories)) categories = categories ? [categories] : [];
 
     const rawTags: string[] = Array.isArray(body.tags) ? body.tags : [];
-    const tags: string[] = Array.from(new Set(rawTags.map((t: string) => t.toLowerCase().replace(/[^a-z0-9-]/g, '')).filter(Boolean)));
+    const tags: string[] = Array.from(
+      new Set(
+        rawTags
+          .map((t: string) => t.toLowerCase().replace(/[^a-z0-9-]/g, ''))
+          .filter(Boolean)
+      )
+    );
 
-    const variants = body.hasVariants && body.variants
-      ? body.variants.map((v: any) => ({ ...v, _id: v._id || new ObjectId().toString() }))
-      : [];
+    const variants =
+      body.hasVariants && body.variants
+        ? body.variants.map((v: any) => ({ ...v, _id: v._id || new ObjectId().toString() }))
+        : [];
 
-    const product = { ...body, categories, tags, variants, hasVariants: body.hasVariants || false, barcode: body.barcode || null, branchId: auth.branchId, createdAt: new Date(), updatedAt: new Date() };
+    const product = {
+      ...body,
+      categories,
+      tags,
+      variants,
+      hasVariants: body.hasVariants || false,
+      barcode: body.barcode || null,
+      branchId: auth.branchId,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
 
     const result = await db.collection('products').insertOne(product);
     console.log('✅ Product created for branch:', auth.branchId.toString());
 
     if (product.hasVariants && variants.length > 0) {
-      const linkedIds = variants.filter((v: any) => v.linkedProductId).map((v: any) => new ObjectId(v.linkedProductId));
+      const linkedIds = variants
+        .filter((v: any) => v.linkedProductId)
+        .map((v: any) => new ObjectId(v.linkedProductId));
+
       if (linkedIds.length > 0) {
-        await db.collection('products').updateMany({ _id: { $in: linkedIds } }, { $set: { isLinkedVariant: true, linkedVariantParentId: result.insertedId } });
+        await db.collection('products').updateMany(
+          { _id: { $in: linkedIds } },
+          { $set: { isLinkedVariant: true, linkedVariantParentId: result.insertedId } }
+        );
       }
     }
 

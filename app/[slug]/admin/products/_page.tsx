@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import {
   Plus, Edit, Trash2, Package, Search, Save, X, Upload,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  Link2, Lock, CheckCircle2, Loader2, RefreshCw, Tag
+  Link2, Lock, CheckCircle2, Loader2, RefreshCw, Tag, Check
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useBranch } from '@/lib/branch-context';
@@ -62,6 +62,31 @@ interface Category {
   children?: Category[];
 }
 
+const emptyForm = {
+  name: '',
+  description: '',
+  categories: [] as string[],
+  tags: [] as string[],
+  price: '',
+  compareAtPrice: '',
+  costPrice: '',
+  sku: '',
+  barcode: '',
+  stockLevel: '',
+  lowStockThreshold: '10',
+  images: [] as string[],
+  hasVariants: false,
+  variants: [] as ProductVariant[],
+  onSpecial: false,
+  specialPrice: '',
+  specialStartDate: '',
+  specialEndDate: '',
+  active: true,
+  featured: false,
+  unit: '',
+  weight: '',
+};
+
 export default function AdminProductsPage() {
   const params = useParams();
   const slug = params.slug as string;
@@ -69,68 +94,48 @@ export default function AdminProductsPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.role === 'super-admin';
 
-  const [products, setProducts] = useState<Product[]>([]);
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [showModal, setShowModal] = useState(false);
+  const [products, setProducts]         = useState<Product[]>([]);
+  const [categories, setCategories]     = useState<Category[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [saving, setSaving]             = useState(false);
+  const [showModal, setShowModal]       = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [uploading, setUploading]       = useState(false);
   const [expandedVariants, setExpandedVariants] = useState<Set<number>>(new Set());
 
   // Search
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm]     = useState('');
   const [searchLoading, setSearchLoading] = useState(false);
   const [isSearchMode, setIsSearchMode] = useState(false);
-  const searchDebounceRef = useRef<NodeJS.Timeout>();
+  const searchDebounceRef               = useRef<NodeJS.Timeout>();
 
   // Pagination
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage, setCurrentPage]   = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
   const [totalProducts, setTotalProducts] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
+  const [totalPages, setTotalPages]     = useState(0);
 
-  // Link existing product as variant
-  const [showLinkModal, setShowLinkModal] = useState(false);
+  // ── Multi-select link modal ──────────────────────────────────────────────────
+  const [showLinkModal, setShowLinkModal]       = useState(false);
+  // The variant index we're linking INTO (or null when doing multi-add-at-once)
   const [linkingVariantIndex, setLinkingVariantIndex] = useState<number | null>(null);
-  const [linkSearch, setLinkSearch] = useState('');
-  const [linkResults, setLinkResults] = useState<Product[]>([]);
-  const [linkLoading, setLinkLoading] = useState(false);
+  const [linkSearch, setLinkSearch]             = useState('');
+  const [linkResults, setLinkResults]           = useState<Product[]>([]);
+  const [linkLoading, setLinkLoading]           = useState(false);
+  // NEW: track which products the user has checked in the modal
+  const [selectedLinkIds, setSelectedLinkIds]   = useState<Set<string>>(new Set());
+  // ────────────────────────────────────────────────────────────────────────────
 
   // Tag input
   const [tagInput, setTagInput] = useState('');
 
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    categories: [] as string[],
-    tags: [] as string[],
-    price: '',
-    compareAtPrice: '',
-    costPrice: '',
-    sku: '',
-    barcode: '',
-    stockLevel: '',
-    lowStockThreshold: '10',
-    images: [] as string[],
-    hasVariants: false,
-    variants: [] as ProductVariant[],
-    onSpecial: false,
-    specialPrice: '',
-    specialStartDate: '',
-    specialEndDate: '',
-    active: true,
-    featured: false,
-    unit: '',
-    weight: '',
-  });
+  const [formData, setFormData] = useState({ ...emptyForm });
 
+  // ── Data fetching ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!branchLoading && branch) {
       fetchProducts();
       fetchCategories();
-      fetchAllProducts();
     }
   }, [branchLoading, branch, currentPage, itemsPerPage]);
 
@@ -183,17 +188,6 @@ export default function AdminProductsPage() {
     }
   };
 
-  const fetchAllProducts = async () => {
-    if (!branch) return;
-    try {
-      const res = await fetch(`/api/products?all=true&limit=500`);
-      if (res.ok) {
-        const data = await res.json();
-        setAllProducts(data.products || []);
-      }
-    } catch { console.error('Failed to fetch all products for linking'); }
-  };
-
   const fetchCategories = async () => {
     try {
       const res = await fetch('/api/categories?all=true&withChildren=true');
@@ -204,63 +198,128 @@ export default function AdminProductsPage() {
     } catch { console.error('Failed to load categories'); }
   };
 
-  const searchForLink = async (query: string) => {
-    if (!query.trim() || query.trim().length < 2) {
-      setLinkResults(allProducts.slice(0, 20));
-      return;
-    }
+  // ── Link-modal search ────────────────────────────────────────────────────────
+  // FIX: pass excludeId (base product) and excludeLinked so already-linked and
+  // the product being edited never appear in the picker.
+  const fetchLinkCandidates = useCallback(async (query: string) => {
+    if (!branch) return;
     setLinkLoading(true);
     try {
-      const res = await fetch(`/api/products?all=true&search=${encodeURIComponent(query)}&limit=30`);
+      const baseExclude = editingProduct ? `&excludeId=${editingProduct._id}` : '';
+      const searchPart  = query.trim().length >= 2
+        ? `&search=${encodeURIComponent(query.trim())}`
+        : '';
+      const res = await fetch(
+        `/api/products?all=true&excludeLinked=true${baseExclude}${searchPart}&limit=50`
+      );
       if (res.ok) {
         const data = await res.json();
         setLinkResults(data.products || []);
       }
     } catch { console.error('Link search error'); }
     finally { setLinkLoading(false); }
+  }, [branch, editingProduct]);
+
+  useEffect(() => {
+    if (showLinkModal) {
+      setSelectedLinkIds(new Set());
+      fetchLinkCandidates('');
+    }
+  }, [showLinkModal]);
+
+  useEffect(() => {
+    const t = setTimeout(() => fetchLinkCandidates(linkSearch), 300);
+    return () => clearTimeout(t);
+  }, [linkSearch, fetchLinkCandidates]);
+
+  // ── Toggle a product's selection in the link modal ───────────────────────────
+  const toggleLinkSelection = (productId: string) => {
+    setSelectedLinkIds(prev => {
+      const next = new Set(prev);
+      next.has(productId) ? next.delete(productId) : next.add(productId);
+      return next;
+    });
   };
 
-  useEffect(() => {
-    if (showLinkModal) setLinkResults(allProducts.slice(0, 20));
-  }, [showLinkModal, allProducts]);
+  // ── Confirm multi-select: append all chosen products as linked variants ───────
+  // FIX: race condition solved — we compute the new variants list functionally
+  // so we never depend on a stale `formData.variants` snapshot.
+  const confirmLinkSelections = () => {
+    if (selectedLinkIds.size === 0) {
+      toast.error('Select at least one product to link');
+      return;
+    }
 
-  useEffect(() => {
-    const t = setTimeout(() => searchForLink(linkSearch), 300);
-    return () => clearTimeout(t);
-  }, [linkSearch]);
+    const chosen = linkResults.filter(p => selectedLinkIds.has(p._id));
 
-  // ── Linked variant fix ───────────────────────────────────────────────────────
-  // Do NOT copy sku/barcode from the linked product into the variant slot.
-  // Those fields belong to the original product document. Copying them here
-  // causes false duplicate-barcode errors on save because the original product
-  // still exists in the DB with those exact values.
-  // The linkedProductId reference is sufficient to resolve full product data.
-  const handleLinkProduct = (product: Product) => {
-    if (linkingVariantIndex === null) return;
-    const variant: ProductVariant = {
-      name: product.name,
-      sku: '',            // intentionally blank — SKU lives on the linked product
-      barcode: undefined, // same — don't duplicate the barcode into this slot
-      price: product.price,
-      stockLevel: product.stockLevel,
-      images: product.images,
-      active: product.active,
-      linkedProductId: product._id,
-    };
-    setFormData(prev => ({
-      ...prev,
-      variants: prev.variants.map((v, i) => i === linkingVariantIndex ? variant : v),
-    }));
+    if (linkingVariantIndex !== null) {
+      // Replacing a single variant slot
+      const product = chosen[0];
+      setFormData(prev => ({
+        ...prev,
+        variants: prev.variants.map((v, i) =>
+          i === linkingVariantIndex
+            ? {
+                name: product.name,
+                sku: '',
+                barcode: undefined,
+                price: product.price,
+                stockLevel: product.stockLevel,
+                images: product.images,
+                active: product.active,
+                linkedProductId: product._id,
+              }
+            : v
+        ),
+      }));
+      // Auto-expand so user sees the result
+      setExpandedVariants(prev => {
+        const next = new Set(prev);
+        next.add(linkingVariantIndex);
+        return next;
+      });
+    } else {
+      // Multi-add: append a new linked variant row for each selection
+      setFormData(prev => {
+        const newVariants: ProductVariant[] = chosen.map(product => ({
+          name: product.name,
+          sku: '',
+          barcode: undefined,
+          price: product.price,
+          stockLevel: product.stockLevel,
+          images: product.images,
+          active: product.active,
+          linkedProductId: product._id,
+        }));
+        const startIdx = prev.variants.length;
+        // Expand newly added rows
+        setExpandedVariants(exp => {
+          const next = new Set(exp);
+          newVariants.forEach((_, i) => next.add(startIdx + i));
+          return next;
+        });
+        return { ...prev, variants: [...prev.variants, ...newVariants] };
+      });
+    }
+
     setShowLinkModal(false);
     setLinkingVariantIndex(null);
     setLinkSearch('');
-    toast.success(`Linked "${product.name}" as variant`);
+    setSelectedLinkIds(new Set());
+    toast.success(
+      chosen.length === 1
+        ? `Linked "${chosen[0].name}" as variant`
+        : `Linked ${chosen.length} products as variants`
+    );
   };
 
-  const openLinkModal = (variantIndex: number) => {
+  const openLinkModal = (variantIndex: number | null = null) => {
     setLinkingVariantIndex(variantIndex);
+    setLinkSearch('');
+    setSelectedLinkIds(new Set());
     setShowLinkModal(true);
   };
+  // ────────────────────────────────────────────────────────────────────────────
 
   // ── Tag helpers ──────────────────────────────────────────────────────────────
   const addTag = (raw: string) => {
@@ -283,7 +342,10 @@ export default function AdminProductsPage() {
   };
   // ────────────────────────────────────────────────────────────────────────────
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, variantIndex?: number) => {
+  const handleImageUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    variantIndex?: number
+  ) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
@@ -330,14 +392,20 @@ export default function AdminProductsPage() {
   const addVariant = () =>
     setFormData(prev => ({
       ...prev,
-      variants: [...prev.variants, { name: '', sku: '', barcode: '', stockLevel: 0, images: [], active: true }],
+      variants: [
+        ...prev.variants,
+        { name: '', sku: '', barcode: '', stockLevel: 0, images: [], active: true },
+      ],
     }));
 
   const removeVariant = (index: number) => {
     setFormData(prev => ({ ...prev, variants: prev.variants.filter((_, i) => i !== index) }));
     setExpandedVariants(prev => {
       const next = new Set<number>();
-      prev.forEach(i => { if (i < index) next.add(i); else if (i > index) next.add(i - 1); });
+      prev.forEach(i => {
+        if (i < index) next.add(i);
+        else if (i > index) next.add(i - 1);
+      });
       return next;
     });
   };
@@ -345,7 +413,7 @@ export default function AdminProductsPage() {
   const updateVariant = (index: number, field: string, value: any) =>
     setFormData(prev => ({
       ...prev,
-      variants: prev.variants.map((v, i) => i === index ? { ...v, [field]: value } : v),
+      variants: prev.variants.map((v, i) => (i === index ? { ...v, [field]: value } : v)),
     }));
 
   const toggleVariantExpanded = (index: number) =>
@@ -356,13 +424,7 @@ export default function AdminProductsPage() {
     });
 
   const resetForm = () => {
-    setFormData({
-      name: '', description: '', categories: [], tags: [], price: '', compareAtPrice: '',
-      costPrice: '', sku: '', barcode: '', stockLevel: '', lowStockThreshold: '10',
-      images: [], hasVariants: false, variants: [], onSpecial: false,
-      specialPrice: '', specialStartDate: '', specialEndDate: '',
-      active: true, featured: false, unit: '', weight: '',
-    });
+    setFormData({ ...emptyForm });
     setTagInput('');
     setExpandedVariants(new Set());
   };
@@ -421,7 +483,10 @@ export default function AdminProductsPage() {
 
   const renderCategoryCheckboxes = (cats: Category[], level = 0): JSX.Element[] =>
     cats.flatMap(cat => [
-      <label key={cat._id} className={`flex items-center space-x-2 cursor-pointer p-2 hover:bg-orange-50 rounded-lg transition-colors ${level > 0 ? `ml-${level * 4}` : ''}`}>
+      <label
+        key={cat._id}
+        className={`flex items-center space-x-2 cursor-pointer p-2 hover:bg-orange-50 rounded-lg transition-colors ${level > 0 ? `ml-${level * 4}` : ''}`}
+      >
         <input
           type="checkbox"
           checked={formData.categories.includes(cat.slug)}
@@ -455,15 +520,17 @@ export default function AdminProductsPage() {
         weight: formData.weight ? parseFloat(formData.weight) : undefined,
         slug: formData.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
         tags: formData.tags,
-        variants: formData.hasVariants ? formData.variants.map(v => ({
-          ...v,
-          price: v.price ? parseFloat(v.price as any) : undefined,
-          compareAtPrice: v.compareAtPrice ? parseFloat(v.compareAtPrice as any) : undefined,
-          specialPrice: v.specialPrice ? parseFloat(v.specialPrice as any) : undefined,
-        })) : undefined,
+        variants: formData.hasVariants
+          ? formData.variants.map(v => ({
+              ...v,
+              price: v.price ? parseFloat(v.price as any) : undefined,
+              compareAtPrice: v.compareAtPrice ? parseFloat(v.compareAtPrice as any) : undefined,
+              specialPrice: v.specialPrice ? parseFloat(v.specialPrice as any) : undefined,
+            }))
+          : undefined,
       };
 
-      const url = editingProduct ? `/api/products/${editingProduct._id}` : '/api/products';
+      const url    = editingProduct ? `/api/products/${editingProduct._id}` : '/api/products';
       const method = editingProduct ? 'PUT' : 'POST';
 
       const res = await fetch(url, {
@@ -494,6 +561,7 @@ export default function AdminProductsPage() {
 
   const priceDisabled = !!editingProduct && !isSuperAdmin;
 
+  // ── Early returns ────────────────────────────────────────────────────────────
   if (branchLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
@@ -513,6 +581,7 @@ export default function AdminProductsPage() {
     );
   }
 
+  // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-50 pt-32 md:pt-28">
       <div className="max-w-7xl mx-auto px-4 py-8">
@@ -610,7 +679,10 @@ export default function AdminProductsPage() {
               {searchTerm ? 'Try different keywords or tags' : 'Add your first product to get started'}
             </p>
             {!searchTerm && (
-              <button onClick={() => setShowModal(true)} className="inline-flex items-center gap-2 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl transition-colors">
+              <button
+                onClick={() => setShowModal(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl transition-colors"
+              >
                 <Plus className="w-4 h-4" /> Add Product
               </button>
             )}
@@ -635,11 +707,12 @@ export default function AdminProductsPage() {
                   <tbody className="divide-y divide-gray-50">
                     {products.map((product) => {
                       const stock = getTotalStock(product);
-                      const stockColor = stock > product.lowStockThreshold
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                        : stock > 0
-                        ? 'bg-amber-50 text-amber-700 border-amber-200'
-                        : 'bg-red-50 text-red-700 border-red-200';
+                      const stockColor =
+                        stock > product.lowStockThreshold
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : stock > 0
+                          ? 'bg-amber-50 text-amber-700 border-amber-200'
+                          : 'bg-red-50 text-red-700 border-red-200';
                       return (
                         <tr key={product._id} className="hover:bg-orange-50/30 transition-colors group">
                           <td className="px-5 py-4">
@@ -732,8 +805,11 @@ export default function AdminProductsPage() {
                   Showing {((currentPage - 1) * itemsPerPage) + 1}–{Math.min(currentPage * itemsPerPage, totalProducts)} of {totalProducts}
                 </p>
                 <div className="flex items-center gap-1.5">
-                  <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}
-                    className="p-2 rounded-xl border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="p-2 rounded-xl border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
                   {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
@@ -743,14 +819,20 @@ export default function AdminProductsPage() {
                     else if (currentPage >= totalPages - 2) page = totalPages - 4 + i;
                     else page = currentPage - 2 + i;
                     return (
-                      <button key={page} onClick={() => setCurrentPage(page)}
-                        className={`w-9 h-9 rounded-xl text-sm font-medium border transition-colors ${currentPage === page ? 'bg-orange-500 text-white border-orange-500' : 'border-gray-200 hover:bg-gray-50 text-gray-700'}`}>
+                      <button
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        className={`w-9 h-9 rounded-xl text-sm font-medium border transition-colors ${currentPage === page ? 'bg-orange-500 text-white border-orange-500' : 'border-gray-200 hover:bg-gray-50 text-gray-700'}`}
+                      >
                         {page}
                       </button>
                     );
                   })}
-                  <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}
-                    className="p-2 rounded-xl border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="p-2 rounded-xl border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
                     <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -760,27 +842,45 @@ export default function AdminProductsPage() {
         )}
       </div>
 
-      {/* ══════════════════════════════
-           LINK EXISTING PRODUCT MODAL
-         ══════════════════════════════ */}
+      {/* ══════════════════════════════════════════════════════════
+           MULTI-SELECT LINK MODAL
+         ══════════════════════════════════════════════════════════ */}
       {showLinkModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl">
-            <div className="p-5 border-b flex items-center justify-between">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl flex flex-col max-h-[85vh]">
+            {/* Header */}
+            <div className="p-5 border-b flex items-center justify-between flex-shrink-0">
               <div>
                 <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                  <Link2 className="w-5 h-5 text-orange-500" /> Link Existing Product as Variant
+                  <Link2 className="w-5 h-5 text-orange-500" />
+                  {linkingVariantIndex !== null ? 'Link a Product as Variant' : 'Link Products as Variants'}
                 </h3>
-                <p className="text-sm text-gray-500 mt-0.5">Search and select a product to link</p>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  {linkingVariantIndex !== null
+                    ? 'Select a product to replace this variant slot'
+                    : 'Select one or more products to add as linked variants'}
+                </p>
               </div>
-              <button onClick={() => { setShowLinkModal(false); setLinkingVariantIndex(null); setLinkSearch(''); }} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+              <button
+                onClick={() => {
+                  setShowLinkModal(false);
+                  setLinkingVariantIndex(null);
+                  setLinkSearch('');
+                  setSelectedLinkIds(new Set());
+                }}
+                className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
+              >
                 <X className="w-5 h-5 text-gray-500" />
               </button>
             </div>
-            <div className="p-5">
-              <div className="relative mb-4">
+
+            {/* Search */}
+            <div className="px-5 pt-4 pb-2 flex-shrink-0">
+              <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                {linkLoading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-orange-400 animate-spin" />}
+                {linkLoading && (
+                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-orange-400 animate-spin" />
+                )}
                 <input
                   type="text"
                   placeholder="Search by product name or SKU…"
@@ -790,38 +890,118 @@ export default function AdminProductsPage() {
                   autoFocus
                 />
               </div>
-              <div className="max-h-80 overflow-y-auto space-y-1">
-                {linkResults.length === 0 && !linkLoading && (
-                  <div className="text-center py-8 text-gray-500 text-sm">
-                    {linkSearch ? 'No products found' : 'Start typing to search'}
-                  </div>
-                )}
-                {linkResults.map(product => (
-                  <button key={product._id} onClick={() => handleLinkProduct(product)}
-                    className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-orange-50 border border-transparent hover:border-orange-200 transition-all text-left group">
+              {/* Selection count badge */}
+              {selectedLinkIds.size > 0 && (
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="text-xs font-semibold text-orange-600 bg-orange-50 border border-orange-200 px-2.5 py-1 rounded-lg">
+                    {selectedLinkIds.size} selected
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedLinkIds(new Set())}
+                    className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Results list */}
+            <div className="flex-1 overflow-y-auto px-5 pb-2 space-y-1 min-h-0">
+              {linkResults.length === 0 && !linkLoading && (
+                <div className="text-center py-10 text-gray-500 text-sm">
+                  {linkSearch ? 'No products found' : 'Start typing to search'}
+                </div>
+              )}
+              {linkResults.map(product => {
+                const isSelected = selectedLinkIds.has(product._id);
+                return (
+                  <button
+                    key={product._id}
+                    type="button"
+                    onClick={() => toggleLinkSelection(product._id)}
+                    className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left group ${
+                      isSelected
+                        ? 'bg-orange-50 border-orange-300 shadow-sm'
+                        : 'border-transparent hover:bg-gray-50 hover:border-gray-200'
+                    }`}
+                  >
+                    {/* Checkbox visual */}
+                    <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+                      isSelected ? 'bg-orange-500 border-orange-500' : 'border-gray-300 group-hover:border-orange-400'
+                    }`}>
+                      {isSelected && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+                    </div>
+
+                    {/* Thumbnail */}
                     <div className="w-10 h-10 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
                       {product.images[0] ? (
                         <img src={product.images[0]} alt={product.name} className="w-full h-full object-cover" />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center"><Package className="w-4 h-4 text-gray-300" /></div>
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Package className="w-4 h-4 text-gray-300" />
+                        </div>
                       )}
                     </div>
+
+                    {/* Info */}
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-gray-900 text-sm truncate group-hover:text-orange-600 transition-colors">{product.name}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">SKU: {product.sku} &bull; R{product.price.toFixed(2)} &bull; {product.stockLevel} in stock</p>
+                      <p className={`font-semibold text-sm truncate transition-colors ${isSelected ? 'text-orange-700' : 'text-gray-900 group-hover:text-gray-700'}`}>
+                        {product.name}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        SKU: {product.sku} &bull; R{product.price.toFixed(2)} &bull;{' '}
+                        <span className={product.stockLevel === 0 ? 'text-red-400' : 'text-gray-400'}>
+                          {product.stockLevel} in stock
+                        </span>
+                      </p>
                     </div>
-                    <CheckCircle2 className="w-4 h-4 text-orange-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                   </button>
-                ))}
+                );
+              })}
+            </div>
+
+            {/* Footer actions */}
+            <div className="p-5 border-t flex-shrink-0 flex items-center justify-between gap-3">
+              <p className="text-xs text-gray-400">
+                {editingProduct
+                  ? 'The product being edited and already-linked variants are hidden'
+                  : 'Already-linked variants are hidden'}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLinkModal(false);
+                    setLinkingVariantIndex(null);
+                    setLinkSearch('');
+                    setSelectedLinkIds(new Set());
+                  }}
+                  className="px-4 py-2 text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmLinkSelections}
+                  disabled={selectedLinkIds.size === 0}
+                  className="px-4 py-2 text-sm font-semibold bg-orange-500 hover:bg-orange-600 disabled:bg-orange-200 text-white rounded-xl transition-colors inline-flex items-center gap-1.5"
+                >
+                  <Link2 className="w-3.5 h-3.5" />
+                  {selectedLinkIds.size > 1
+                    ? `Link ${selectedLinkIds.size} Products`
+                    : 'Link Product'}
+                </button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* ══════════════════════════════
+      {/* ══════════════════════════════════════════════════════════
               PRODUCT MODAL
-         ══════════════════════════════ */}
+         ══════════════════════════════════════════════════════════ */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-start justify-center z-50 p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-4xl w-full my-8 shadow-2xl">
@@ -836,7 +1016,10 @@ export default function AdminProductsPage() {
                   </p>
                 )}
               </div>
-              <button onClick={() => { setShowModal(false); setEditingProduct(null); resetForm(); }} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+              <button
+                onClick={() => { setShowModal(false); setEditingProduct(null); resetForm(); }}
+                className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
+              >
                 <X className="w-5 h-5 text-gray-500" />
               </button>
             </div>
@@ -920,7 +1103,12 @@ export default function AdminProductsPage() {
               {/* ── Variants Toggle ── */}
               <section className="border-t pt-6">
                 <label className="flex items-start gap-3 cursor-pointer p-4 bg-gray-50 rounded-xl border border-gray-200 hover:border-orange-300 transition-colors">
-                  <input type="checkbox" checked={formData.hasVariants} onChange={e => setFormData({ ...formData, hasVariants: e.target.checked })} className="w-4 h-4 mt-0.5 accent-orange-500 rounded" />
+                  <input
+                    type="checkbox"
+                    checked={formData.hasVariants}
+                    onChange={e => setFormData({ ...formData, hasVariants: e.target.checked })}
+                    className="w-4 h-4 mt-0.5 accent-orange-500 rounded"
+                  />
                   <div>
                     <p className="font-semibold text-gray-900 text-sm">This product has variants</p>
                     <p className="text-xs text-gray-500 mt-0.5">e.g. different flavours, sizes, or colours. You can also link existing products as variants.</p>
@@ -934,13 +1122,19 @@ export default function AdminProductsPage() {
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">Variants ({formData.variants.length})</h3>
                     <div className="flex gap-2">
-                      <button type="button"
-                        onClick={() => { addVariant(); setLinkingVariantIndex(formData.variants.length); setShowLinkModal(true); }}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl border border-blue-200 transition-colors">
+                      {/* FIX: open modal without pre-creating a variant slot; multi-select handles appending */}
+                      <button
+                        type="button"
+                        onClick={() => openLinkModal(null)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl border border-blue-200 transition-colors"
+                      >
                         <Link2 className="w-3.5 h-3.5" /> Link Existing
                       </button>
-                      <button type="button" onClick={addVariant}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-xl border border-orange-200 transition-colors">
+                      <button
+                        type="button"
+                        onClick={addVariant}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-xl border border-orange-200 transition-colors"
+                      >
                         <Plus className="w-3.5 h-3.5" /> New Variant
                       </button>
                     </div>
@@ -954,10 +1148,12 @@ export default function AdminProductsPage() {
                         <button type="button" onClick={addVariant} className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-orange-500 hover:bg-orange-600 text-white rounded-xl transition-colors">
                           <Plus className="w-4 h-4" /> New Variant
                         </button>
-                        <button type="button"
-                          onClick={() => { addVariant(); setTimeout(() => { setLinkingVariantIndex(0); setShowLinkModal(true); }, 0); }}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-blue-500 hover:bg-blue-600 text-white rounded-xl transition-colors">
-                          <Link2 className="w-4 h-4" /> Link Product
+                        <button
+                          type="button"
+                          onClick={() => openLinkModal(null)}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-blue-500 hover:bg-blue-600 text-white rounded-xl transition-colors"
+                        >
+                          <Link2 className="w-4 h-4" /> Link Products
                         </button>
                       </div>
                     </div>
@@ -976,7 +1172,13 @@ export default function AdminProductsPage() {
                               )}
                             </button>
                             <div className="flex items-center gap-2">
-                              <button type="button" onClick={() => openLinkModal(index)} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors" title="Link to existing product">
+                              {/* Re-link button opens modal in single-replace mode */}
+                              <button
+                                type="button"
+                                onClick={() => openLinkModal(index)}
+                                className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                                title="Replace with a different linked product"
+                              >
                                 <Link2 className="w-3.5 h-3.5" />
                               </button>
                               <button type="button" onClick={() => removeVariant(index)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
@@ -990,9 +1192,16 @@ export default function AdminProductsPage() {
                               <div className="grid md:grid-cols-2 gap-4">
                                 <div>
                                   <label className="block text-xs font-medium text-gray-600 mb-1.5">Variant Name *</label>
-                                  <input type="text" required className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" value={variant.name} onChange={e => updateVariant(index, 'name', e.target.value)} placeholder="e.g. Apple, 500g" />
+                                  <input
+                                    type="text"
+                                    required
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                                    value={variant.name}
+                                    onChange={e => updateVariant(index, 'name', e.target.value)}
+                                    placeholder="e.g. Apple, 500g"
+                                  />
                                 </div>
-                                {/* SKU/barcode hidden for linked variants — they live on the linked product document */}
+                                {/* SKU & barcode hidden for linked variants — they live on the linked product */}
                                 {!variant.linkedProductId && (
                                   <div>
                                     <label className="block text-xs font-medium text-gray-600 mb-1.5">SKU *</label>
@@ -1013,21 +1222,26 @@ export default function AdminProductsPage() {
                                   <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1.5">
                                     Price Override (R) {priceDisabled && <Lock className="w-3 h-3 text-amber-500" />}
                                   </label>
-                                  <input type="number" step="0.01"
+                                  <input
+                                    type="number" step="0.01"
                                     className={`w-full px-3 py-2 border rounded-xl text-sm focus:outline-none transition-all ${priceDisabled ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'border-gray-200 focus:ring-2 focus:ring-orange-400'}`}
                                     value={variant.price || ''}
                                     onChange={e => !priceDisabled && updateVariant(index, 'price', e.target.value ? parseFloat(e.target.value) : undefined)}
-                                    disabled={priceDisabled} placeholder="Leave empty to use base price" />
+                                    disabled={priceDisabled}
+                                    placeholder="Leave empty to use base price"
+                                  />
                                 </div>
                                 <div>
                                   <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1.5">
                                     Compare at Price (R) {priceDisabled && <Lock className="w-3 h-3 text-amber-500" />}
                                   </label>
-                                  <input type="number" step="0.01"
+                                  <input
+                                    type="number" step="0.01"
                                     className={`w-full px-3 py-2 border rounded-xl text-sm focus:outline-none transition-all ${priceDisabled ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'border-gray-200 focus:ring-2 focus:ring-orange-400'}`}
                                     value={variant.compareAtPrice || ''}
                                     onChange={e => !priceDisabled && updateVariant(index, 'compareAtPrice', e.target.value ? parseFloat(e.target.value) : undefined)}
-                                    disabled={priceDisabled} />
+                                    disabled={priceDisabled}
+                                  />
                                 </div>
                               </div>
 
@@ -1089,11 +1303,14 @@ export default function AdminProductsPage() {
                           <label className="block text-sm font-medium text-gray-700 mb-1.5 flex items-center gap-1.5">
                             {label} {priceDisabled && <Lock className="w-3 h-3 text-amber-500" />}
                           </label>
-                          <input type="number" step="0.01"
-                            required={required && !priceDisabled} disabled={priceDisabled}
+                          <input
+                            type="number" step="0.01"
+                            required={required && !priceDisabled}
+                            disabled={priceDisabled}
                             className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none transition-all ${priceDisabled ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'border-gray-200 focus:ring-2 focus:ring-orange-400'}`}
                             value={(formData as any)[key]}
-                            onChange={e => !priceDisabled && setFormData({ ...formData, [key]: e.target.value })} />
+                            onChange={e => !priceDisabled && setFormData({ ...formData, [key]: e.target.value })}
+                          />
                         </div>
                       ))}
                     </div>
@@ -1113,9 +1330,12 @@ export default function AdminProductsPage() {
                           <label className="block text-sm font-medium text-gray-700 mb-1.5 flex items-center gap-1.5">
                             Special Price (R) * {priceDisabled && <Lock className="w-3 h-3 text-amber-500" />}
                           </label>
-                          <input type="number" step="0.01" required={formData.onSpecial} disabled={priceDisabled}
+                          <input
+                            type="number" step="0.01" required={formData.onSpecial} disabled={priceDisabled}
                             className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none transition-all ${priceDisabled ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'border-gray-200 focus:ring-2 focus:ring-orange-400'}`}
-                            value={formData.specialPrice} onChange={e => !priceDisabled && setFormData({ ...formData, specialPrice: e.target.value })} />
+                            value={formData.specialPrice}
+                            onChange={e => !priceDisabled && setFormData({ ...formData, specialPrice: e.target.value })}
+                          />
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1.5">Start Date</label>
@@ -1242,12 +1462,18 @@ export default function AdminProductsPage() {
 
               {/* ── Form Actions ── */}
               <div className="sticky bottom-0 bg-white border-t pt-4 pb-1 flex items-center justify-end gap-3">
-                <button type="button" onClick={() => { setShowModal(false); setEditingProduct(null); resetForm(); }}
-                  className="px-5 py-2.5 border border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition-colors text-sm">
+                <button
+                  type="button"
+                  onClick={() => { setShowModal(false); setEditingProduct(null); resetForm(); }}
+                  className="px-5 py-2.5 border border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition-colors text-sm"
+                >
                   Cancel
                 </button>
-                <button type="submit" disabled={saving || uploading}
-                  className="inline-flex items-center gap-2 px-6 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white font-semibold rounded-xl transition-colors text-sm shadow-sm">
+                <button
+                  type="submit"
+                  disabled={saving || uploading}
+                  className="inline-flex items-center gap-2 px-6 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white font-semibold rounded-xl transition-colors text-sm shadow-sm"
+                >
                   {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   {saving ? 'Saving…' : editingProduct ? 'Update Product' : 'Create Product'}
                 </button>
