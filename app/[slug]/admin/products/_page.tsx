@@ -5,12 +5,16 @@ import { useParams } from 'next/navigation';
 import {
   Plus, Edit, Trash2, Package, Search, Save, X, Upload,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  Link2, Lock, CheckCircle2, Loader2, RefreshCw, Tag, Check
+  Link2, Lock, Loader2, RefreshCw, Tag, Check, AlertCircle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useBranch } from '@/lib/branch-context';
 import { uploadMultipleToCloudinary } from '@/lib/cloudinary';
 import { useAuth } from '@/lib/auth-context';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
 
 interface ProductVariant {
   _id?: string;
@@ -25,6 +29,13 @@ interface ProductVariant {
   active: boolean;
   attributes?: { [key: string]: string };
   linkedProductId?: string;
+  // Fields editable inline for linked variants (synced back to the child doc)
+  linkedName?: string;
+  linkedDescription?: string;
+  linkedPrice?: number;
+  linkedImages?: string[];
+  linkedStockLevel?: number;
+  linkedActive?: boolean;
 }
 
 interface Product {
@@ -52,6 +63,8 @@ interface Product {
   featured: boolean;
   unit?: string;
   weight?: number;
+  isLinkedVariant?: boolean;
+  linkedVariantParentId?: string;
 }
 
 interface Category {
@@ -61,6 +74,10 @@ interface Category {
   parentId?: string | null;
   children?: Category[];
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Empty form
+// ─────────────────────────────────────────────────────────────────────────────
 
 const emptyForm = {
   name: '',
@@ -87,51 +104,57 @@ const emptyForm = {
   weight: '',
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function AdminProductsPage() {
   const params = useParams();
-  const slug = params.slug as string;
   const { branch, loading: branchLoading } = useBranch();
   const { user } = useAuth();
   const isSuperAdmin = user?.role === 'super-admin';
 
-  const [products, setProducts]         = useState<Product[]>([]);
-  const [categories, setCategories]     = useState<Category[]>([]);
-  const [loading, setLoading]           = useState(true);
-  const [saving, setSaving]             = useState(false);
-  const [showModal, setShowModal]       = useState(false);
+  const [products, setProducts]             = useState<Product[]>([]);
+  const [categories, setCategories]         = useState<Category[]>([]);
+  const [loading, setLoading]               = useState(true);
+  const [saving, setSaving]                 = useState(false);
+  const [showModal, setShowModal]           = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [uploading, setUploading]       = useState(false);
+  const [uploading, setUploading]           = useState(false);
   const [expandedVariants, setExpandedVariants] = useState<Set<number>>(new Set());
 
   // Search
-  const [searchTerm, setSearchTerm]     = useState('');
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [isSearchMode, setIsSearchMode] = useState(false);
-  const searchDebounceRef               = useRef<NodeJS.Timeout>();
+  const [searchTerm, setSearchTerm]         = useState('');
+  const [searchLoading, setSearchLoading]   = useState(false);
+  const [isSearchMode, setIsSearchMode]     = useState(false);
+  const searchDebounceRef                   = useRef<NodeJS.Timeout>();
 
   // Pagination
-  const [currentPage, setCurrentPage]   = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(25);
-  const [totalProducts, setTotalProducts] = useState(0);
-  const [totalPages, setTotalPages]     = useState(0);
+  const [currentPage, setCurrentPage]       = useState(1);
+  const [itemsPerPage, setItemsPerPage]     = useState(25);
+  const [totalProducts, setTotalProducts]   = useState(0);
+  const [totalPages, setTotalPages]         = useState(0);
 
-  // ── Multi-select link modal ──────────────────────────────────────────────────
-  const [showLinkModal, setShowLinkModal]       = useState(false);
-  // The variant index we're linking INTO (or null when doing multi-add-at-once)
+  // ── Link modal state ────────────────────────────────────────────────────────
+  const [showLinkModal, setShowLinkModal]           = useState(false);
   const [linkingVariantIndex, setLinkingVariantIndex] = useState<number | null>(null);
-  const [linkSearch, setLinkSearch]             = useState('');
-  const [linkResults, setLinkResults]           = useState<Product[]>([]);
-  const [linkLoading, setLinkLoading]           = useState(false);
-  // NEW: track which products the user has checked in the modal
-  const [selectedLinkIds, setSelectedLinkIds]   = useState<Set<string>>(new Set());
-  // ────────────────────────────────────────────────────────────────────────────
+  const [linkSearch, setLinkSearch]                 = useState('');
+  const [linkResults, setLinkResults]               = useState<Product[]>([]);
+  const [linkLoading, setLinkLoading]               = useState(false);
+  const [selectedLinkIds, setSelectedLinkIds]       = useState<Set<string>>(new Set());
+  const [linkPage, setLinkPage]                     = useState(1);
+  const [linkTotalPages, setLinkTotalPages]         = useState(1);
+  const [linkLoadingMore, setLinkLoadingMore]       = useState(false);
+  const LINK_PAGE_SIZE = 30;
 
   // Tag input
   const [tagInput, setTagInput] = useState('');
-
   const [formData, setFormData] = useState({ ...emptyForm });
 
-  // ── Data fetching ────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // Data fetching
+  // ─────────────────────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (!branchLoading && branch) {
       fetchProducts();
@@ -161,11 +184,8 @@ export default function AdminProductsPage() {
         setTotalProducts(data.total || 0);
         setTotalPages(1);
       }
-    } catch (err) {
-      console.error('Search error:', err);
-    } finally {
-      setSearchLoading(false);
-    }
+    } catch (err) { console.error('Search error:', err); }
+    finally { setSearchLoading(false); }
   };
 
   const fetchProducts = async () => {
@@ -178,14 +198,9 @@ export default function AdminProductsPage() {
         setProducts(data.products || []);
         setTotalProducts(data.total || 0);
         setTotalPages(data.totalPages || 0);
-      } else {
-        toast.error('Failed to load products');
-      }
-    } catch {
-      toast.error('Failed to load products');
-    } finally {
-      setLoading(false);
-    }
+      } else { toast.error('Failed to load products'); }
+    } catch { toast.error('Failed to load products'); }
+    finally { setLoading(false); }
   };
 
   const fetchCategories = async () => {
@@ -198,41 +213,59 @@ export default function AdminProductsPage() {
     } catch { console.error('Failed to load categories'); }
   };
 
-  // ── Link-modal search ────────────────────────────────────────────────────────
-  // FIX: pass excludeId (base product) and excludeLinked so already-linked and
-  // the product being edited never appear in the picker.
-  const fetchLinkCandidates = useCallback(async (query: string) => {
+  // ─────────────────────────────────────────────────────────────────────────
+  // Link modal — paginated fetch
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const fetchLinkCandidates = useCallback(async (query: string, page: number, append = false) => {
     if (!branch) return;
-    setLinkLoading(true);
+    append ? setLinkLoadingMore(true) : setLinkLoading(true);
     try {
       const baseExclude = editingProduct ? `&excludeId=${editingProduct._id}` : '';
       const searchPart  = query.trim().length >= 2
         ? `&search=${encodeURIComponent(query.trim())}`
         : '';
       const res = await fetch(
-        `/api/products?all=true&excludeLinked=true${baseExclude}${searchPart}&limit=50`
+        `/api/products?all=true&excludeLinked=true${baseExclude}${searchPart}&page=${page}&limit=${LINK_PAGE_SIZE}`
       );
       if (res.ok) {
         const data = await res.json();
-        setLinkResults(data.products || []);
+        setLinkResults(prev => append ? [...prev, ...(data.products || [])] : (data.products || []));
+        setLinkTotalPages(data.totalPages || 1);
+        setLinkPage(page);
       }
     } catch { console.error('Link search error'); }
-    finally { setLinkLoading(false); }
+    finally { append ? setLinkLoadingMore(false) : setLinkLoading(false); }
   }, [branch, editingProduct]);
 
   useEffect(() => {
     if (showLinkModal) {
       setSelectedLinkIds(new Set());
-      fetchLinkCandidates('');
+      setLinkPage(1);
+      setLinkResults([]);
+      fetchLinkCandidates('', 1, false);
     }
   }, [showLinkModal]);
 
   useEffect(() => {
-    const t = setTimeout(() => fetchLinkCandidates(linkSearch), 300);
+    const t = setTimeout(() => {
+      setLinkPage(1);
+      setLinkResults([]);
+      fetchLinkCandidates(linkSearch, 1, false);
+    }, 300);
     return () => clearTimeout(t);
   }, [linkSearch, fetchLinkCandidates]);
 
-  // ── Toggle a product's selection in the link modal ───────────────────────────
+  const handleLinkLoadMore = () => {
+    if (linkPage < linkTotalPages && !linkLoadingMore) {
+      fetchLinkCandidates(linkSearch, linkPage + 1, true);
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Link selection helpers
+  // ─────────────────────────────────────────────────────────────────────────
+
   const toggleLinkSelection = (productId: string) => {
     setSelectedLinkIds(prev => {
       const next = new Set(prev);
@@ -241,19 +274,11 @@ export default function AdminProductsPage() {
     });
   };
 
-  // ── Confirm multi-select: append all chosen products as linked variants ───────
-  // FIX: race condition solved — we compute the new variants list functionally
-  // so we never depend on a stale `formData.variants` snapshot.
   const confirmLinkSelections = () => {
-    if (selectedLinkIds.size === 0) {
-      toast.error('Select at least one product to link');
-      return;
-    }
-
+    if (selectedLinkIds.size === 0) { toast.error('Select at least one product to link'); return; }
     const chosen = linkResults.filter(p => selectedLinkIds.has(p._id));
 
     if (linkingVariantIndex !== null) {
-      // Replacing a single variant slot
       const product = chosen[0];
       setFormData(prev => ({
         ...prev,
@@ -268,18 +293,18 @@ export default function AdminProductsPage() {
                 images: product.images,
                 active: product.active,
                 linkedProductId: product._id,
+                linkedName: product.name,
+                linkedDescription: product.description,
+                linkedPrice: product.price,
+                linkedImages: [...product.images],
+                linkedStockLevel: product.stockLevel,
+                linkedActive: product.active,
               }
             : v
         ),
       }));
-      // Auto-expand so user sees the result
-      setExpandedVariants(prev => {
-        const next = new Set(prev);
-        next.add(linkingVariantIndex);
-        return next;
-      });
+      setExpandedVariants(prev => new Set([...prev, linkingVariantIndex]));
     } else {
-      // Multi-add: append a new linked variant row for each selection
       setFormData(prev => {
         const newVariants: ProductVariant[] = chosen.map(product => ({
           name: product.name,
@@ -290,9 +315,14 @@ export default function AdminProductsPage() {
           images: product.images,
           active: product.active,
           linkedProductId: product._id,
+          linkedName: product.name,
+          linkedDescription: product.description,
+          linkedPrice: product.price,
+          linkedImages: [...product.images],
+          linkedStockLevel: product.stockLevel,
+          linkedActive: product.active,
         }));
         const startIdx = prev.variants.length;
-        // Expand newly added rows
         setExpandedVariants(exp => {
           const next = new Set(exp);
           newVariants.forEach((_, i) => next.add(startIdx + i));
@@ -317,34 +347,38 @@ export default function AdminProductsPage() {
     setLinkingVariantIndex(variantIndex);
     setLinkSearch('');
     setSelectedLinkIds(new Set());
+    setLinkResults([]);
+    setLinkPage(1);
     setShowLinkModal(true);
   };
-  // ────────────────────────────────────────────────────────────────────────────
 
-  // ── Tag helpers ──────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // Tag helpers
+  // ─────────────────────────────────────────────────────────────────────────
+
   const addTag = (raw: string) => {
     const tag = raw.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
     if (!tag || formData.tags.includes(tag)) return;
     setFormData(prev => ({ ...prev, tags: [...prev.tags, tag] }));
   };
-
   const removeTag = (tag: string) =>
     setFormData(prev => ({ ...prev, tags: prev.tags.filter(t => t !== tag) }));
-
   const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (['Enter', ',', ' '].includes(e.key)) {
-      e.preventDefault();
-      addTag(tagInput);
-      setTagInput('');
+      e.preventDefault(); addTag(tagInput); setTagInput('');
     } else if (e.key === 'Backspace' && !tagInput && formData.tags.length > 0) {
       removeTag(formData.tags[formData.tags.length - 1]);
     }
   };
-  // ────────────────────────────────────────────────────────────────────────────
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Image upload
+  // ─────────────────────────────────────────────────────────────────────────
 
   const handleImageUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
-    variantIndex?: number
+    variantIndex?: number,
+    isLinkedField = false
   ) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -361,9 +395,13 @@ export default function AdminProductsPage() {
       if (variantIndex !== undefined) {
         setFormData(prev => ({
           ...prev,
-          variants: prev.variants.map((v, i) =>
-            i === variantIndex ? { ...v, images: [...v.images, ...urls] } : v
-          ),
+          variants: prev.variants.map((v, i) => {
+            if (i !== variantIndex) return v;
+            if (isLinkedField) {
+              return { ...v, linkedImages: [...(v.linkedImages || []), ...urls] };
+            }
+            return { ...v, images: [...v.images, ...urls] };
+          }),
         }));
       } else {
         setFormData(prev => ({ ...prev, images: [...prev.images, ...urls] }));
@@ -373,39 +411,42 @@ export default function AdminProductsPage() {
       toast.error(error.message || 'Failed to upload images');
     } finally {
       setUploading(false);
+      e.target.value = '';
     }
   };
 
-  const removeImage = (index: number, variantIndex?: number) => {
+  const removeImage = (index: number, variantIndex?: number, isLinkedField = false) => {
     if (variantIndex !== undefined) {
       setFormData(prev => ({
         ...prev,
-        variants: prev.variants.map((v, i) =>
-          i === variantIndex ? { ...v, images: v.images.filter((_, idx) => idx !== index) } : v
-        ),
+        variants: prev.variants.map((v, i) => {
+          if (i !== variantIndex) return v;
+          if (isLinkedField) {
+            return { ...v, linkedImages: (v.linkedImages || []).filter((_, idx) => idx !== index) };
+          }
+          return { ...v, images: v.images.filter((_, idx) => idx !== index) };
+        }),
       }));
     } else {
       setFormData(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== index) }));
     }
   };
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Variant helpers
+  // ─────────────────────────────────────────────────────────────────────────
+
   const addVariant = () =>
     setFormData(prev => ({
       ...prev,
-      variants: [
-        ...prev.variants,
-        { name: '', sku: '', barcode: '', stockLevel: 0, images: [], active: true },
-      ],
+      variants: [...prev.variants, { name: '', sku: '', barcode: '', stockLevel: 0, images: [], active: true }],
     }));
 
   const removeVariant = (index: number) => {
     setFormData(prev => ({ ...prev, variants: prev.variants.filter((_, i) => i !== index) }));
     setExpandedVariants(prev => {
       const next = new Set<number>();
-      prev.forEach(i => {
-        if (i < index) next.add(i);
-        else if (i > index) next.add(i - 1);
-      });
+      prev.forEach(i => { if (i < index) next.add(i); else if (i > index) next.add(i - 1); });
       return next;
     });
   };
@@ -423,6 +464,10 @@ export default function AdminProductsPage() {
       return next;
     });
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Form reset / edit
+  // ─────────────────────────────────────────────────────────────────────────
+
   const resetForm = () => {
     setFormData({ ...emptyForm });
     setTagInput('');
@@ -431,6 +476,15 @@ export default function AdminProductsPage() {
 
   const handleEdit = (product: Product) => {
     setEditingProduct(product);
+    // For linked variants, pre-populate the linked* fields from the variant data
+    const variants = (product.variants || []).map(v => ({
+      ...v,
+      linkedName: v.linkedProductId ? v.name : undefined,
+      linkedImages: v.linkedProductId ? [...v.images] : undefined,
+      linkedPrice: v.linkedProductId ? v.price : undefined,
+      linkedStockLevel: v.linkedProductId ? v.stockLevel : undefined,
+      linkedActive: v.linkedProductId ? v.active : undefined,
+    }));
     setFormData({
       name: product.name,
       description: product.description,
@@ -445,7 +499,7 @@ export default function AdminProductsPage() {
       lowStockThreshold: product.lowStockThreshold.toString(),
       images: product.images,
       hasVariants: product.hasVariants || false,
-      variants: product.variants || [],
+      variants,
       onSpecial: product.onSpecial,
       specialPrice: product.specialPrice?.toString() || '',
       specialStartDate: product.specialStartDate || '',
@@ -463,48 +517,20 @@ export default function AdminProductsPage() {
     if (!confirm('Are you sure you want to delete this product?')) return;
     try {
       const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        toast.success('Product deleted');
-        fetchProducts();
-      } else {
-        const data = await res.json();
-        toast.error(data.error || 'Failed to delete product');
-      }
+      if (res.ok) { toast.success('Product deleted'); fetchProducts(); }
+      else { const data = await res.json(); toast.error(data.error || 'Failed to delete product'); }
     } catch { toast.error('An error occurred'); }
   };
 
-  const handleCategoryToggle = (categorySlug: string) =>
-    setFormData(prev => ({
-      ...prev,
-      categories: prev.categories.includes(categorySlug)
-        ? prev.categories.filter(c => c !== categorySlug)
-        : [...prev.categories, categorySlug],
-    }));
-
-  const renderCategoryCheckboxes = (cats: Category[], level = 0): JSX.Element[] =>
-    cats.flatMap(cat => [
-      <label
-        key={cat._id}
-        className={`flex items-center space-x-2 cursor-pointer p-2 hover:bg-orange-50 rounded-lg transition-colors ${level > 0 ? `ml-${level * 4}` : ''}`}
-      >
-        <input
-          type="checkbox"
-          checked={formData.categories.includes(cat.slug)}
-          onChange={() => handleCategoryToggle(cat.slug)}
-          className="w-4 h-4 accent-orange-500 rounded"
-        />
-        <span className="text-sm text-gray-700">{cat.name}</span>
-      </label>,
-      ...(cat.children?.length ? renderCategoryCheckboxes(cat.children, level + 1) : []),
-    ]);
+  // ─────────────────────────────────────────────────────────────────────────
+  // Submit — also patch linked child products inline
+  // ─────────────────────────────────────────────────────────────────────────
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
-      if (formData.categories.length === 0) {
-        toast.error('Please select at least one category'); return;
-      }
+      if (formData.categories.length === 0) { toast.error('Please select at least one category'); return; }
       if (formData.hasVariants && formData.variants.length === 0) {
         toast.error('Please add at least one variant or disable variants'); return;
       }
@@ -539,19 +565,59 @@ export default function AdminProductsPage() {
         body: JSON.stringify(productData),
       });
 
-      if (res.ok) {
-        toast.success(editingProduct ? 'Product updated!' : 'Product created!');
-        setShowModal(false);
-        setEditingProduct(null);
-        resetForm();
-        isSearchMode ? performSearch(searchTerm) : fetchProducts();
-      } else {
+      if (!res.ok) {
         const error = await res.json();
         toast.error(error.error || 'Failed to save product');
+        return;
       }
+
+      // ── Patch linked child products with inline edits ──────────────────────
+      const linkedVariants = formData.variants.filter(v => v.linkedProductId);
+      if (linkedVariants.length > 0) {
+        await Promise.allSettled(
+          linkedVariants.map(async v => {
+            // Fetch current child data first so we don't nuke fields we didn't touch
+            const childRes = await fetch(`/api/products/${v.linkedProductId}`);
+            if (!childRes.ok) return;
+            const { product: childDoc } = await childRes.json();
+
+            const patchData: any = {};
+            if (v.linkedName !== undefined && v.linkedName !== childDoc.name)
+              patchData.name = v.linkedName;
+            if (v.linkedPrice !== undefined && v.linkedPrice !== childDoc.price)
+              patchData.price = v.linkedPrice;
+            if (v.linkedStockLevel !== undefined && v.linkedStockLevel !== childDoc.stockLevel)
+              patchData.stockLevel = v.linkedStockLevel;
+            if (v.linkedActive !== undefined && v.linkedActive !== childDoc.active)
+              patchData.active = v.linkedActive;
+            if (
+              v.linkedImages !== undefined &&
+              JSON.stringify(v.linkedImages) !== JSON.stringify(childDoc.images)
+            ) patchData.images = v.linkedImages;
+
+            if (Object.keys(patchData).length === 0) return; // nothing changed
+
+            await fetch(`/api/products/${v.linkedProductId}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ...childDoc, ...patchData }),
+            });
+          })
+        );
+      }
+
+      toast.success(editingProduct ? 'Product updated!' : 'Product created!');
+      setShowModal(false);
+      setEditingProduct(null);
+      resetForm();
+      isSearchMode ? performSearch(searchTerm) : fetchProducts();
     } catch { toast.error('An error occurred'); }
     finally { setSaving(false); }
   };
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Table helpers
+  // ─────────────────────────────────────────────────────────────────────────
 
   const getTotalStock = (product: Product) => {
     if (product.hasVariants && product.variants)
@@ -559,9 +625,37 @@ export default function AdminProductsPage() {
     return product.stockLevel;
   };
 
+  const handleCategoryToggle = (categorySlug: string) =>
+    setFormData(prev => ({
+      ...prev,
+      categories: prev.categories.includes(categorySlug)
+        ? prev.categories.filter(c => c !== categorySlug)
+        : [...prev.categories, categorySlug],
+    }));
+
+  const renderCategoryCheckboxes = (cats: Category[], level = 0): JSX.Element[] =>
+    cats.flatMap(cat => [
+      <label
+        key={cat._id}
+        className={`flex items-center space-x-2 cursor-pointer p-2 hover:bg-orange-50 rounded-lg transition-colors ${level > 0 ? `ml-${level * 4}` : ''}`}
+      >
+        <input
+          type="checkbox"
+          checked={formData.categories.includes(cat.slug)}
+          onChange={() => handleCategoryToggle(cat.slug)}
+          className="w-4 h-4 accent-orange-500 rounded"
+        />
+        <span className="text-sm text-gray-700">{cat.name}</span>
+      </label>,
+      ...(cat.children?.length ? renderCategoryCheckboxes(cat.children, level + 1) : []),
+    ]);
+
   const priceDisabled = !!editingProduct && !isSuperAdmin;
 
-  // ── Early returns ────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // Early returns
+  // ─────────────────────────────────────────────────────────────────────────
+
   if (branchLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
@@ -569,7 +663,6 @@ export default function AdminProductsPage() {
       </div>
     );
   }
-
   if (!branch) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -581,12 +674,15 @@ export default function AdminProductsPage() {
     );
   }
 
-  // ── Render ───────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────────────────
+
   return (
     <div className="min-h-screen bg-gray-50 pt-32 md:pt-28">
       <div className="max-w-7xl mx-auto px-4 py-8">
 
-        {/* ── Header ── */}
+        {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Products</h1>
@@ -603,11 +699,11 @@ export default function AdminProductsPage() {
           </button>
         </div>
 
-        {/* ── Search & Controls ── */}
+        {/* Search & Controls */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-6">
           <div className="flex flex-col md:flex-row gap-3">
             <div className="relative flex-1">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-gray-400" />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               {searchLoading && (
                 <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-orange-400 animate-spin" />
               )}
@@ -662,7 +758,7 @@ export default function AdminProductsPage() {
           )}
         </div>
 
-        {/* ── Table ── */}
+        {/* ── Products Table ── */}
         {loading && !isSearchMode ? (
           <div className="grid grid-cols-1 gap-3">
             {[1, 2, 3, 4, 5].map(i => (
@@ -705,94 +801,116 @@ export default function AdminProductsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {products.map((product) => {
-                      const stock = getTotalStock(product);
-                      const stockColor =
-                        stock > product.lowStockThreshold
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : stock > 0
-                          ? 'bg-amber-50 text-amber-700 border-amber-200'
-                          : 'bg-red-50 text-red-700 border-red-200';
-                      return (
-                        <tr key={product._id} className="hover:bg-orange-50/30 transition-colors group">
-                          <td className="px-5 py-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-11 h-11 bg-gray-100 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100">
-                                {product.images[0] ? (
-                                  <img src={product.images[0]} alt={product.name} className="w-full h-full object-cover" />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center">
-                                    <Package className="w-5 h-5 text-gray-300" />
-                                  </div>
+                    {products
+                      // Hide child linked variants from the table — they appear under their parent
+                      .filter(p => !p.isLinkedVariant)
+                      .map((product) => {
+                        const stock = getTotalStock(product);
+                        const stockColor =
+                          stock > product.lowStockThreshold
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : stock > 0
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                            : 'bg-red-50 text-red-700 border-red-200';
+
+                        return (
+                          <tr key={product._id} className="hover:bg-orange-50/30 transition-colors group">
+                            <td className="px-5 py-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-11 h-11 bg-gray-100 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100">
+                                  {product.images[0] ? (
+                                    <img src={product.images[0]} alt={product.name} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center">
+                                      <Package className="w-5 h-5 text-gray-300" />
+                                    </div>
+                                  )}
+                                </div>
+                                <div>
+                                  <p className="font-semibold text-gray-900 text-sm leading-tight">{product.name}</p>
+                                  {product.hasVariants && product.variants && product.variants.length > 0 && (
+                                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                      {/* Show variant thumbnails */}
+                                      <div className="flex -space-x-1.5">
+                                        {product.variants.slice(0, 4).map((v, vi) => (
+                                          <div key={vi} className="w-5 h-5 rounded-full border-2 border-white bg-gray-100 overflow-hidden">
+                                            {v.images?.[0]
+                                              ? <img src={v.images[0]} alt={v.name} className="w-full h-full object-cover" />
+                                              : <div className="w-full h-full bg-orange-200" />
+                                            }
+                                          </div>
+                                        ))}
+                                      </div>
+                                      <p className="text-xs text-gray-400">
+                                        {product.variants.length} variant{product.variants.length !== 1 ? 's' : ''}
+                                        {product.variants.some(v => v.linkedProductId) && (
+                                          <span className="ml-1 text-blue-400">(linked)</span>
+                                        )}
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-5 py-4">
+                              <code className="text-xs bg-gray-100 px-2 py-1 rounded-lg text-gray-600">{product.sku}</code>
+                            </td>
+                            <td className="px-5 py-4 hidden md:table-cell">
+                              <div className="flex flex-wrap gap-1">
+                                {product.categories?.slice(0, 2).map((cat, i) => (
+                                  <span key={i} className="inline-block px-2 py-0.5 bg-blue-50 text-blue-600 text-xs rounded-lg border border-blue-100">{cat}</span>
+                                ))}
+                                {(product.categories?.length || 0) > 2 && (
+                                  <span className="inline-block px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-lg">+{product.categories.length - 2}</span>
                                 )}
                               </div>
-                              <div>
-                                <p className="font-semibold text-gray-900 text-sm leading-tight">{product.name}</p>
-                                {product.hasVariants && product.variants && (
-                                  <p className="text-xs text-gray-400 mt-0.5">{product.variants.length} variants</p>
+                            </td>
+                            <td className="px-5 py-4 hidden lg:table-cell">
+                              <div className="flex flex-wrap gap-1">
+                                {(product.tags || []).slice(0, 3).map((tag, i) => (
+                                  <span key={i} className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-purple-50 text-purple-600 text-xs rounded-lg border border-purple-100">
+                                    <Tag className="w-2.5 h-2.5" />{tag}
+                                  </span>
+                                ))}
+                                {(product.tags?.length || 0) > 3 && (
+                                  <span className="inline-block px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-lg">+{product.tags.length - 3}</span>
                                 )}
                               </div>
-                            </div>
-                          </td>
-                          <td className="px-5 py-4">
-                            <code className="text-xs bg-gray-100 px-2 py-1 rounded-lg text-gray-600">{product.sku}</code>
-                          </td>
-                          <td className="px-5 py-4 hidden md:table-cell">
-                            <div className="flex flex-wrap gap-1">
-                              {product.categories?.slice(0, 2).map((cat, i) => (
-                                <span key={i} className="inline-block px-2 py-0.5 bg-blue-50 text-blue-600 text-xs rounded-lg border border-blue-100">{cat}</span>
-                              ))}
-                              {(product.categories?.length || 0) > 2 && (
-                                <span className="inline-block px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-lg">+{product.categories.length - 2}</span>
+                            </td>
+                            <td className="px-5 py-4">
+                              <p className="font-bold text-gray-900 text-sm">R{(product.specialPrice || product.price).toFixed(2)}</p>
+                              {product.specialPrice && (
+                                <span className="text-xs text-orange-500 font-medium">On Special</span>
                               )}
-                            </div>
-                          </td>
-                          <td className="px-5 py-4 hidden lg:table-cell">
-                            <div className="flex flex-wrap gap-1">
-                              {(product.tags || []).slice(0, 3).map((tag, i) => (
-                                <span key={i} className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-purple-50 text-purple-600 text-xs rounded-lg border border-purple-100">
-                                  <Tag className="w-2.5 h-2.5" />{tag}
-                                </span>
-                              ))}
-                              {(product.tags?.length || 0) > 3 && (
-                                <span className="inline-block px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-lg">+{product.tags.length - 3}</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-5 py-4">
-                            <p className="font-bold text-gray-900 text-sm">R{(product.specialPrice || product.price).toFixed(2)}</p>
-                            {product.specialPrice && (
-                              <span className="text-xs text-orange-500 font-medium">On Special</span>
-                            )}
-                          </td>
-                          <td className="px-5 py-4">
-                            <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold border ${stockColor}`}>
-                              {stock} units
-                            </span>
-                          </td>
-                          <td className="px-5 py-4 hidden lg:table-cell">
-                            <div className="flex flex-col gap-1">
-                              <span className={`text-xs px-2 py-0.5 rounded-lg w-fit font-medium ${product.active ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-500'}`}>
-                                {product.active ? 'Active' : 'Hidden'}
+                            </td>
+                            <td className="px-5 py-4">
+                              <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold border ${stockColor}`}>
+                                {stock} units
                               </span>
-                              {product.featured && (
-                                <span className="text-xs px-2 py-0.5 rounded-lg w-fit bg-blue-50 text-blue-600 border border-blue-200 font-medium">Featured</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-5 py-4">
-                            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={() => handleEdit(product)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-xl transition-colors" title="Edit product">
-                                <Edit className="w-4 h-4" />
-                              </button>
-                              <button onClick={() => handleDelete(product._id)} className="p-2 text-red-500 hover:bg-red-50 rounded-xl transition-colors" title="Delete product">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                            </td>
+                            <td className="px-5 py-4 hidden lg:table-cell">
+                              <div className="flex flex-col gap-1">
+                                <span className={`text-xs px-2 py-0.5 rounded-lg w-fit font-medium ${product.active ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-500'}`}>
+                                  {product.active ? 'Active' : 'Hidden'}
+                                </span>
+                                {product.featured && (
+                                  <span className="text-xs px-2 py-0.5 rounded-lg w-fit bg-blue-50 text-blue-600 border border-blue-200 font-medium">Featured</span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-5 py-4">
+                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={() => handleEdit(product)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-xl transition-colors" title="Edit product">
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => handleDelete(product._id)} className="p-2 text-red-500 hover:bg-red-50 rounded-xl transition-colors" title="Delete product">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                   </tbody>
                 </table>
               </div>
@@ -843,7 +961,7 @@ export default function AdminProductsPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════
-           MULTI-SELECT LINK MODAL
+           MULTI-SELECT LINK MODAL (with Load More)
          ══════════════════════════════════════════════════════════ */}
       {showLinkModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
@@ -862,12 +980,7 @@ export default function AdminProductsPage() {
                 </p>
               </div>
               <button
-                onClick={() => {
-                  setShowLinkModal(false);
-                  setLinkingVariantIndex(null);
-                  setLinkSearch('');
-                  setSelectedLinkIds(new Set());
-                }}
+                onClick={() => { setShowLinkModal(false); setLinkingVariantIndex(null); setLinkSearch(''); setSelectedLinkIds(new Set()); }}
                 className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
               >
                 <X className="w-5 h-5 text-gray-500" />
@@ -890,17 +1003,12 @@ export default function AdminProductsPage() {
                   autoFocus
                 />
               </div>
-              {/* Selection count badge */}
               {selectedLinkIds.size > 0 && (
                 <div className="mt-2 flex items-center gap-2">
                   <span className="text-xs font-semibold text-orange-600 bg-orange-50 border border-orange-200 px-2.5 py-1 rounded-lg">
                     {selectedLinkIds.size} selected
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedLinkIds(new Set())}
-                    className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
-                  >
+                  <button type="button" onClick={() => setSelectedLinkIds(new Set())} className="text-xs text-gray-400 hover:text-gray-600 transition-colors">
                     Clear
                   </button>
                 </div>
@@ -911,7 +1019,7 @@ export default function AdminProductsPage() {
             <div className="flex-1 overflow-y-auto px-5 pb-2 space-y-1 min-h-0">
               {linkResults.length === 0 && !linkLoading && (
                 <div className="text-center py-10 text-gray-500 text-sm">
-                  {linkSearch ? 'No products found' : 'Start typing to search'}
+                  {linkSearch ? 'No products found' : 'No linkable products found'}
                 </div>
               )}
               {linkResults.map(product => {
@@ -922,30 +1030,20 @@ export default function AdminProductsPage() {
                     type="button"
                     onClick={() => toggleLinkSelection(product._id)}
                     className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left group ${
-                      isSelected
-                        ? 'bg-orange-50 border-orange-300 shadow-sm'
-                        : 'border-transparent hover:bg-gray-50 hover:border-gray-200'
+                      isSelected ? 'bg-orange-50 border-orange-300 shadow-sm' : 'border-transparent hover:bg-gray-50 hover:border-gray-200'
                     }`}
                   >
-                    {/* Checkbox visual */}
                     <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
                       isSelected ? 'bg-orange-500 border-orange-500' : 'border-gray-300 group-hover:border-orange-400'
                     }`}>
                       {isSelected && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
                     </div>
-
-                    {/* Thumbnail */}
                     <div className="w-10 h-10 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
-                      {product.images[0] ? (
-                        <img src={product.images[0]} alt={product.name} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <Package className="w-4 h-4 text-gray-300" />
-                        </div>
-                      )}
+                      {product.images[0]
+                        ? <img src={product.images[0]} alt={product.name} className="w-full h-full object-cover" />
+                        : <div className="w-full h-full flex items-center justify-center"><Package className="w-4 h-4 text-gray-300" /></div>
+                      }
                     </div>
-
-                    {/* Info */}
                     <div className="flex-1 min-w-0">
                       <p className={`font-semibold text-sm truncate transition-colors ${isSelected ? 'text-orange-700' : 'text-gray-900 group-hover:text-gray-700'}`}>
                         {product.name}
@@ -960,24 +1058,32 @@ export default function AdminProductsPage() {
                   </button>
                 );
               })}
+
+              {/* ── Load More button ── */}
+              {linkPage < linkTotalPages && (
+                <div className="pt-2 pb-1">
+                  <button
+                    type="button"
+                    onClick={handleLinkLoadMore}
+                    disabled={linkLoadingMore}
+                    className="w-full py-2.5 text-sm font-semibold text-orange-600 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-xl transition-colors disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                  >
+                    {linkLoadingMore
+                      ? <><Loader2 className="w-4 h-4 animate-spin" /> Loading…</>
+                      : <>Load More <span className="text-orange-400 font-normal text-xs">(page {linkPage} of {linkTotalPages})</span></>
+                    }
+                  </button>
+                </div>
+              )}
             </div>
 
-            {/* Footer actions */}
+            {/* Footer */}
             <div className="p-5 border-t flex-shrink-0 flex items-center justify-between gap-3">
-              <p className="text-xs text-gray-400">
-                {editingProduct
-                  ? 'The product being edited and already-linked variants are hidden'
-                  : 'Already-linked variants are hidden'}
-              </p>
+              <p className="text-xs text-gray-400">Already-linked variants are hidden</p>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowLinkModal(false);
-                    setLinkingVariantIndex(null);
-                    setLinkSearch('');
-                    setSelectedLinkIds(new Set());
-                  }}
+                  onClick={() => { setShowLinkModal(false); setLinkingVariantIndex(null); setLinkSearch(''); setSelectedLinkIds(new Set()); }}
                   className="px-4 py-2 text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-xl transition-colors"
                 >
                   Cancel
@@ -989,9 +1095,7 @@ export default function AdminProductsPage() {
                   className="px-4 py-2 text-sm font-semibold bg-orange-500 hover:bg-orange-600 disabled:bg-orange-200 text-white rounded-xl transition-colors inline-flex items-center gap-1.5"
                 >
                   <Link2 className="w-3.5 h-3.5" />
-                  {selectedLinkIds.size > 1
-                    ? `Link ${selectedLinkIds.size} Products`
-                    : 'Link Product'}
+                  {selectedLinkIds.size > 1 ? `Link ${selectedLinkIds.size} Products` : 'Link Product'}
                 </button>
               </div>
             </div>
@@ -1000,7 +1104,7 @@ export default function AdminProductsPage() {
       )}
 
       {/* ══════════════════════════════════════════════════════════
-              PRODUCT MODAL
+           PRODUCT MODAL
          ══════════════════════════════════════════════════════════ */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-start justify-center z-50 p-4 overflow-y-auto">
@@ -1026,7 +1130,7 @@ export default function AdminProductsPage() {
 
             <form onSubmit={handleSubmit} className="p-6 space-y-8 max-h-[calc(100vh-160px)] overflow-y-auto">
 
-              {/* ── Basic Info ── */}
+              {/* Basic Info */}
               <section>
                 <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Basic Information</h3>
                 <div className="grid md:grid-cols-2 gap-4">
@@ -1049,19 +1153,18 @@ export default function AdminProductsPage() {
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         {formData.categories.map(c => (
                           <span key={c} className="inline-flex items-center gap-1 px-2.5 py-1 bg-orange-100 text-orange-700 text-xs rounded-lg font-medium">
-                            {c}
-                            <button type="button" onClick={() => handleCategoryToggle(c)}><X className="w-3 h-3" /></button>
+                            {c}<button type="button" onClick={() => handleCategoryToggle(c)}><X className="w-3 h-3" /></button>
                           </span>
                         ))}
                       </div>
                     )}
                   </div>
 
-                  {/* ── Tags ── */}
+                  {/* Tags */}
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">
                       Search Tags
-                      <span className="ml-2 text-xs text-gray-400 font-normal">Press Enter, comma, or space to add · improves search accuracy</span>
+                      <span className="ml-2 text-xs text-gray-400 font-normal">Press Enter, comma, or space to add</span>
                     </label>
                     <div
                       className="flex flex-wrap gap-1.5 items-center min-h-[44px] px-3 py-2 border border-gray-200 rounded-xl bg-white focus-within:ring-2 focus-within:ring-orange-400 focus-within:border-transparent transition-all cursor-text"
@@ -1069,11 +1172,8 @@ export default function AdminProductsPage() {
                     >
                       {formData.tags.map(tag => (
                         <span key={tag} className="inline-flex items-center gap-1 px-2.5 py-1 bg-purple-100 text-purple-700 text-xs rounded-lg font-medium">
-                          <Tag className="w-2.5 h-2.5" />
-                          {tag}
-                          <button type="button" onClick={() => removeTag(tag)} className="hover:text-purple-900">
-                            <X className="w-3 h-3" />
-                          </button>
+                          <Tag className="w-2.5 h-2.5" />{tag}
+                          <button type="button" onClick={() => removeTag(tag)} className="hover:text-purple-900"><X className="w-3 h-3" /></button>
                         </span>
                       ))}
                       <input
@@ -1100,7 +1200,7 @@ export default function AdminProductsPage() {
                 </div>
               </section>
 
-              {/* ── Variants Toggle ── */}
+              {/* Variants Toggle */}
               <section className="border-t pt-6">
                 <label className="flex items-start gap-3 cursor-pointer p-4 bg-gray-50 rounded-xl border border-gray-200 hover:border-orange-300 transition-colors">
                   <input
@@ -1122,7 +1222,6 @@ export default function AdminProductsPage() {
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">Variants ({formData.variants.length})</h3>
                     <div className="flex gap-2">
-                      {/* FIX: open modal without pre-creating a variant slot; multi-select handles appending */}
                       <button
                         type="button"
                         onClick={() => openLinkModal(null)}
@@ -1148,11 +1247,7 @@ export default function AdminProductsPage() {
                         <button type="button" onClick={addVariant} className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-orange-500 hover:bg-orange-600 text-white rounded-xl transition-colors">
                           <Plus className="w-4 h-4" /> New Variant
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => openLinkModal(null)}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-blue-500 hover:bg-blue-600 text-white rounded-xl transition-colors"
-                        >
+                        <button type="button" onClick={() => openLinkModal(null)} className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-blue-500 hover:bg-blue-600 text-white rounded-xl transition-colors">
                           <Link2 className="w-4 h-4" /> Link Products
                         </button>
                       </div>
@@ -1160,11 +1255,12 @@ export default function AdminProductsPage() {
                   ) : (
                     <div className="space-y-3">
                       {formData.variants.map((variant, index) => (
-                        <div key={index} className="border border-gray-200 rounded-xl overflow-hidden">
-                          <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
+                        <div key={index} className={`border rounded-xl overflow-hidden ${variant.linkedProductId ? 'border-blue-200' : 'border-gray-200'}`}>
+                          {/* Variant header */}
+                          <div className={`flex items-center justify-between px-4 py-3 border-b ${variant.linkedProductId ? 'bg-blue-50 border-blue-100' : 'bg-gray-50 border-gray-100'}`}>
                             <button type="button" onClick={() => toggleVariantExpanded(index)} className="flex items-center gap-2 font-medium text-gray-800 text-sm">
                               {expandedVariants.has(index) ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
-                              <span>{variant.name || `Variant ${index + 1}`}</span>
+                              <span>{variant.linkedProductId ? (variant.linkedName || variant.name) : (variant.name || `Variant ${index + 1}`)}</span>
                               {variant.linkedProductId && (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-blue-100 text-blue-600 rounded-lg border border-blue-200 font-medium">
                                   <Link2 className="w-2.5 h-2.5" /> Linked
@@ -1172,13 +1268,7 @@ export default function AdminProductsPage() {
                               )}
                             </button>
                             <div className="flex items-center gap-2">
-                              {/* Re-link button opens modal in single-replace mode */}
-                              <button
-                                type="button"
-                                onClick={() => openLinkModal(index)}
-                                className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
-                                title="Replace with a different linked product"
-                              >
+                              <button type="button" onClick={() => openLinkModal(index)} className="p-1.5 text-blue-500 hover:bg-blue-100 rounded-lg transition-colors" title="Replace with a different linked product">
                                 <Link2 className="w-3.5 h-3.5" />
                               </button>
                               <button type="button" onClick={() => removeVariant(index)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
@@ -1187,91 +1277,188 @@ export default function AdminProductsPage() {
                             </div>
                           </div>
 
+                          {/* Variant body */}
                           {expandedVariants.has(index) && (
                             <div className="p-4 space-y-4">
-                              <div className="grid md:grid-cols-2 gap-4">
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-600 mb-1.5">Variant Name *</label>
-                                  <input
-                                    type="text"
-                                    required
-                                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                                    value={variant.name}
-                                    onChange={e => updateVariant(index, 'name', e.target.value)}
-                                    placeholder="e.g. Apple, 500g"
-                                  />
-                                </div>
-                                {/* SKU & barcode hidden for linked variants — they live on the linked product */}
-                                {!variant.linkedProductId && (
-                                  <div>
-                                    <label className="block text-xs font-medium text-gray-600 mb-1.5">SKU *</label>
-                                    <input type="text" required className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" value={variant.sku} onChange={e => updateVariant(index, 'sku', e.target.value)} />
-                                  </div>
-                                )}
-                                {!variant.linkedProductId && (
-                                  <div>
-                                    <label className="block text-xs font-medium text-gray-600 mb-1.5">Barcode</label>
-                                    <input type="text" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" value={variant.barcode || ''} onChange={e => updateVariant(index, 'barcode', e.target.value)} />
-                                  </div>
-                                )}
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-600 mb-1.5">Stock Level *</label>
-                                  <input type="number" required className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" value={variant.stockLevel} onChange={e => updateVariant(index, 'stockLevel', parseInt(e.target.value) || 0)} />
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1.5">
-                                    Price Override (R) {priceDisabled && <Lock className="w-3 h-3 text-amber-500" />}
-                                  </label>
-                                  <input
-                                    type="number" step="0.01"
-                                    className={`w-full px-3 py-2 border rounded-xl text-sm focus:outline-none transition-all ${priceDisabled ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'border-gray-200 focus:ring-2 focus:ring-orange-400'}`}
-                                    value={variant.price || ''}
-                                    onChange={e => !priceDisabled && updateVariant(index, 'price', e.target.value ? parseFloat(e.target.value) : undefined)}
-                                    disabled={priceDisabled}
-                                    placeholder="Leave empty to use base price"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1.5">
-                                    Compare at Price (R) {priceDisabled && <Lock className="w-3 h-3 text-amber-500" />}
-                                  </label>
-                                  <input
-                                    type="number" step="0.01"
-                                    className={`w-full px-3 py-2 border rounded-xl text-sm focus:outline-none transition-all ${priceDisabled ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'border-gray-200 focus:ring-2 focus:ring-orange-400'}`}
-                                    value={variant.compareAtPrice || ''}
-                                    onChange={e => !priceDisabled && updateVariant(index, 'compareAtPrice', e.target.value ? parseFloat(e.target.value) : undefined)}
-                                    disabled={priceDisabled}
-                                  />
-                                </div>
-                              </div>
 
-                              <div>
-                                <label className="block text-xs font-medium text-gray-600 mb-1.5">Variant Images</label>
-                                <label className={`flex items-center justify-center w-full h-20 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${uploading ? 'border-orange-300 bg-orange-50' : 'border-gray-200 hover:border-orange-300'}`}>
-                                  <div className="text-center">
-                                    <Upload className="w-5 h-5 text-gray-400 mx-auto mb-1" />
-                                    <span className="text-xs text-gray-500">{uploading ? 'Uploading…' : 'Upload images'}</span>
+                              {/* ── LINKED variant: full inline edit of child product ── */}
+                              {variant.linkedProductId ? (
+                                <>
+                                  <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl">
+                                    <AlertCircle className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                                    <p className="text-xs text-blue-700">
+                                      Changes here will be saved directly to the linked product when you click <strong>Update Product</strong>.
+                                    </p>
                                   </div>
-                                  <input type="file" multiple accept="image/*" className="hidden" onChange={e => handleImageUpload(e, index)} disabled={uploading} />
-                                </label>
-                                {variant.images.length > 0 && (
-                                  <div className="grid grid-cols-5 gap-2 mt-2">
-                                    {variant.images.map((img, imgIdx) => (
-                                      <div key={imgIdx} className="relative group">
-                                        <img src={img} alt="" className="w-full h-16 object-cover rounded-lg" />
-                                        <button type="button" onClick={() => removeImage(imgIdx, index)} className="absolute top-1 right-1 bg-red-500 text-white p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
-                                          <X className="w-2.5 h-2.5" />
-                                        </button>
+
+                                  <div className="grid md:grid-cols-2 gap-4">
+                                    {/* Display name for this variant slot */}
+                                    <div className="md:col-span-2">
+                                      <label className="block text-xs font-medium text-gray-600 mb-1.5">Variant Label (shown in picker)</label>
+                                      <input
+                                        type="text"
+                                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                                        value={variant.name}
+                                        onChange={e => updateVariant(index, 'name', e.target.value)}
+                                        placeholder="e.g. Apple, 500g"
+                                      />
+                                    </div>
+
+                                    {/* Linked product name */}
+                                    <div className="md:col-span-2">
+                                      <label className="block text-xs font-medium text-gray-600 mb-1.5">Product Name (on linked product)</label>
+                                      <input
+                                        type="text"
+                                        className="w-full px-3 py-2 border border-blue-200 bg-blue-50 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                        value={variant.linkedName ?? variant.name}
+                                        onChange={e => updateVariant(index, 'linkedName', e.target.value)}
+                                      />
+                                    </div>
+
+                                    {/* Price */}
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1.5">
+                                        Price (R) {priceDisabled && <Lock className="w-3 h-3 text-amber-500" />}
+                                      </label>
+                                      <input
+                                        type="number" step="0.01"
+                                        disabled={priceDisabled}
+                                        className={`w-full px-3 py-2 border rounded-xl text-sm focus:outline-none transition-all ${priceDisabled ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'border-blue-200 bg-blue-50 focus:ring-2 focus:ring-blue-400'}`}
+                                        value={variant.linkedPrice ?? variant.price ?? ''}
+                                        onChange={e => !priceDisabled && updateVariant(index, 'linkedPrice', e.target.value ? parseFloat(e.target.value) : undefined)}
+                                      />
+                                    </div>
+
+                                    {/* Stock */}
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-600 mb-1.5">Stock Level</label>
+                                      <input
+                                        type="number"
+                                        className="w-full px-3 py-2 border border-blue-200 bg-blue-50 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                        value={variant.linkedStockLevel ?? variant.stockLevel}
+                                        onChange={e => updateVariant(index, 'linkedStockLevel', parseInt(e.target.value) || 0)}
+                                      />
+                                    </div>
+
+                                    {/* Active toggle */}
+                                    <div className="md:col-span-2">
+                                      <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={variant.linkedActive ?? variant.active}
+                                          onChange={e => updateVariant(index, 'linkedActive', e.target.checked)}
+                                          className="w-4 h-4 accent-orange-500 rounded"
+                                        />
+                                        <span className="text-xs font-medium text-gray-600">Product Active</span>
+                                      </label>
+                                    </div>
+                                  </div>
+
+                                  {/* Linked product images */}
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-600 mb-1.5">Product Images (linked)</label>
+                                    <label className={`flex items-center justify-center w-full h-20 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${uploading ? 'border-blue-300 bg-blue-50' : 'border-blue-200 hover:border-blue-400 hover:bg-blue-50'}`}>
+                                      <div className="text-center">
+                                        <Upload className="w-5 h-5 text-blue-400 mx-auto mb-1" />
+                                        <span className="text-xs text-blue-500">{uploading ? 'Uploading…' : 'Upload images'}</span>
                                       </div>
-                                    ))}
+                                      <input type="file" multiple accept="image/*" className="hidden" onChange={e => handleImageUpload(e, index, true)} disabled={uploading} />
+                                    </label>
+                                    {(variant.linkedImages ?? variant.images).length > 0 && (
+                                      <div className="grid grid-cols-5 gap-2 mt-2">
+                                        {(variant.linkedImages ?? variant.images).map((img, imgIdx) => (
+                                          <div key={imgIdx} className="relative group">
+                                            <img src={img} alt="" className="w-full h-16 object-cover rounded-lg border border-blue-100" />
+                                            <button type="button" onClick={() => removeImage(imgIdx, index, true)} className="absolute top-1 right-1 bg-red-500 text-white p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                                              <X className="w-2.5 h-2.5" />
+                                            </button>
+                                            {imgIdx === 0 && <span className="absolute bottom-1 left-1 bg-blue-500 text-white text-[9px] px-1 py-0.5 rounded font-medium">Main</span>}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
                                   </div>
-                                )}
-                              </div>
+                                </>
+                              ) : (
+                                /* ── REGULAR (non-linked) variant ── */
+                                <>
+                                  <div className="grid md:grid-cols-2 gap-4">
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-600 mb-1.5">Variant Name *</label>
+                                      <input
+                                        type="text" required
+                                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                                        value={variant.name}
+                                        onChange={e => updateVariant(index, 'name', e.target.value)}
+                                        placeholder="e.g. Apple, 500g"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-600 mb-1.5">SKU *</label>
+                                      <input type="text" required className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" value={variant.sku} onChange={e => updateVariant(index, 'sku', e.target.value)} />
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-600 mb-1.5">Barcode</label>
+                                      <input type="text" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" value={variant.barcode || ''} onChange={e => updateVariant(index, 'barcode', e.target.value)} />
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-600 mb-1.5">Stock Level *</label>
+                                      <input type="number" required className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" value={variant.stockLevel} onChange={e => updateVariant(index, 'stockLevel', parseInt(e.target.value) || 0)} />
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1.5">
+                                        Price Override (R) {priceDisabled && <Lock className="w-3 h-3 text-amber-500" />}
+                                      </label>
+                                      <input
+                                        type="number" step="0.01" disabled={priceDisabled}
+                                        className={`w-full px-3 py-2 border rounded-xl text-sm focus:outline-none transition-all ${priceDisabled ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'border-gray-200 focus:ring-2 focus:ring-orange-400'}`}
+                                        value={variant.price || ''}
+                                        onChange={e => !priceDisabled && updateVariant(index, 'price', e.target.value ? parseFloat(e.target.value) : undefined)}
+                                        placeholder="Leave empty to use base price"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-600 mb-1.5 flex items-center gap-1.5">
+                                        Compare at Price (R) {priceDisabled && <Lock className="w-3 h-3 text-amber-500" />}
+                                      </label>
+                                      <input
+                                        type="number" step="0.01" disabled={priceDisabled}
+                                        className={`w-full px-3 py-2 border rounded-xl text-sm focus:outline-none transition-all ${priceDisabled ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'border-gray-200 focus:ring-2 focus:ring-orange-400'}`}
+                                        value={variant.compareAtPrice || ''}
+                                        onChange={e => !priceDisabled && updateVariant(index, 'compareAtPrice', e.target.value ? parseFloat(e.target.value) : undefined)}
+                                      />
+                                    </div>
+                                  </div>
 
-                              <label className="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" checked={variant.active} onChange={e => updateVariant(index, 'active', e.target.checked)} className="w-4 h-4 accent-orange-500 rounded" />
-                                <span className="text-xs font-medium text-gray-600">Variant Active</span>
-                              </label>
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-600 mb-1.5">Variant Images</label>
+                                    <label className={`flex items-center justify-center w-full h-20 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${uploading ? 'border-orange-300 bg-orange-50' : 'border-gray-200 hover:border-orange-300'}`}>
+                                      <div className="text-center">
+                                        <Upload className="w-5 h-5 text-gray-400 mx-auto mb-1" />
+                                        <span className="text-xs text-gray-500">{uploading ? 'Uploading…' : 'Upload images'}</span>
+                                      </div>
+                                      <input type="file" multiple accept="image/*" className="hidden" onChange={e => handleImageUpload(e, index, false)} disabled={uploading} />
+                                    </label>
+                                    {variant.images.length > 0 && (
+                                      <div className="grid grid-cols-5 gap-2 mt-2">
+                                        {variant.images.map((img, imgIdx) => (
+                                          <div key={imgIdx} className="relative group">
+                                            <img src={img} alt="" className="w-full h-16 object-cover rounded-lg" />
+                                            <button type="button" onClick={() => removeImage(imgIdx, index, false)} className="absolute top-1 right-1 bg-red-500 text-white p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                                              <X className="w-2.5 h-2.5" />
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <label className="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" checked={variant.active} onChange={e => updateVariant(index, 'active', e.target.checked)} className="w-4 h-4 accent-orange-500 rounded" />
+                                    <span className="text-xs font-medium text-gray-600">Variant Active</span>
+                                  </label>
+                                </>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1281,7 +1468,7 @@ export default function AdminProductsPage() {
                 </section>
               )}
 
-              {/* ── Pricing (non-variant) ── */}
+              {/* Pricing (non-variant) */}
               {!formData.hasVariants && (
                 <>
                   <section className="border-t pt-6">
@@ -1390,7 +1577,7 @@ export default function AdminProductsPage() {
                 </section>
               )}
 
-              {/* ── Product Details ── */}
+              {/* Product Details */}
               <section className="border-t pt-6">
                 <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Product Details</h3>
                 <div className="grid md:grid-cols-2 gap-4">
@@ -1413,7 +1600,7 @@ export default function AdminProductsPage() {
                 </div>
               </section>
 
-              {/* ── Images ── */}
+              {/* Images */}
               <section className="border-t pt-6">
                 <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">
                   {formData.hasVariants ? 'Default Product Images' : 'Product Images'}
@@ -1441,7 +1628,7 @@ export default function AdminProductsPage() {
                 )}
               </section>
 
-              {/* ── Status ── */}
+              {/* Status */}
               <section className="border-t pt-6">
                 <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Status</h3>
                 <div className="grid md:grid-cols-2 gap-3">
@@ -1460,7 +1647,7 @@ export default function AdminProductsPage() {
                 </div>
               </section>
 
-              {/* ── Form Actions ── */}
+              {/* Form Actions */}
               <div className="sticky bottom-0 bg-white border-t pt-4 pb-1 flex items-center justify-end gap-3">
                 <button
                   type="button"
