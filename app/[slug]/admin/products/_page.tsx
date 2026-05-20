@@ -303,7 +303,7 @@ export default function AdminProductsPage() {
             : v
         ),
       }));
-      setExpandedVariants(prev => new Set([...prev, linkingVariantIndex]));
+      setExpandedVariants(prev => { const next = new Set(prev); next.add(linkingVariantIndex!); return next; });
     } else {
       setFormData(prev => {
         const newVariants: ProductVariant[] = chosen.map(product => ({
