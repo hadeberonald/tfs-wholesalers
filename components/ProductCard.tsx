@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { ShoppingCart, Plus, Minus, Package, Check, Tag } from 'lucide-react';
+import { ShoppingCart, Plus, Minus, Package, Check, Tag, ChevronDown } from 'lucide-react';
 import { useCartStore } from '@/lib/store';
 import { useBranch } from '@/lib/branch-context';
 
@@ -62,10 +62,147 @@ interface ProductCardProps {
   product: ProductCardProduct;
 }
 
+// ── Custom variant dropdown ──────────────────────────────────────────────────
+interface VariantOption {
+  value: string; // '' = base product
+  label: string;
+  sublabel?: string;
+  outOfStock: boolean;
+}
+
+function VariantPicker({
+  options,
+  value,
+  onChange,
+}: {
+  options: VariantOption[];
+  value: string;
+  onChange: (val: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const selected = options.find(o => o.value === value) ?? options[0];
+
+  return (
+    <div
+      ref={ref}
+      className="relative w-full"
+      onClick={e => e.preventDefault()}
+    >
+      {/* Trigger */}
+      <button
+        type="button"
+        onClick={e => { e.preventDefault(); e.stopPropagation(); setOpen(o => !o); }}
+        className={`
+          w-full flex items-center justify-between gap-2
+          px-3 py-2 rounded-xl border text-left text-xs
+          bg-white transition-all duration-150
+          ${open
+            ? 'border-orange-400 ring-2 ring-orange-100 shadow-sm'
+            : 'border-gray-200 hover:border-orange-300 hover:shadow-sm'
+          }
+        `}
+      >
+        <div className="flex flex-col min-w-0">
+          <span className={`font-semibold truncate ${selected.outOfStock ? 'text-gray-400' : 'text-gray-800'}`}>
+            {selected.label}
+          </span>
+          {selected.sublabel && (
+            <span className="text-gray-400 text-[10px] truncate">{selected.sublabel}</span>
+          )}
+        </div>
+        <ChevronDown
+          className={`w-3.5 h-3.5 flex-shrink-0 text-gray-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {/* Dropdown panel */}
+      {open && (
+        <div
+          className="
+            absolute z-50 left-0 right-0 mt-1.5
+            bg-white border border-gray-200 rounded-xl shadow-xl
+            overflow-hidden
+          "
+          style={{ maxHeight: '220px', overflowY: 'auto' }}
+          onClick={e => e.stopPropagation()}
+        >
+          {options.map(opt => {
+            const isSelected = opt.value === value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                disabled={opt.outOfStock}
+                onClick={e => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (!opt.outOfStock) {
+                    onChange(opt.value);
+                    setOpen(false);
+                  }
+                }}
+                className={`
+                  w-full flex items-center justify-between gap-2
+                  px-3 py-2.5 text-left text-xs transition-colors
+                  ${isSelected
+                    ? 'bg-orange-50 text-orange-700'
+                    : opt.outOfStock
+                      ? 'bg-white text-gray-300 cursor-not-allowed'
+                      : 'bg-white text-gray-700 hover:bg-orange-50/60'
+                  }
+                `}
+              >
+                <div className="flex flex-col min-w-0">
+                  <span className="font-semibold truncate">{opt.label}</span>
+                  {opt.sublabel && (
+                    <span className={`text-[10px] truncate ${isSelected ? 'text-orange-400' : 'text-gray-400'}`}>
+                      {opt.sublabel}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {opt.outOfStock && (
+                    <span className="text-[9px] font-bold uppercase tracking-wide text-gray-300 bg-gray-100 px-1.5 py-0.5 rounded-full">
+                      Out of stock
+                    </span>
+                  )}
+                  {isSelected && !opt.outOfStock && (
+                    <div className="w-4 h-4 rounded-full bg-orange-500 flex items-center justify-center">
+                      <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
+                    </div>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+// ────────────────────────────────────────────────────────────────────────────
+
 export default function ProductCard({ product }: ProductCardProps) {
   const { branch } = useBranch();
 
-  const [selectedVariant, setSelectedVariant] = useState<ProductVariant | undefined>(undefined);
+  const getDefaultVariant = (): ProductVariant | undefined => {
+    if (!product.hasVariants || !product.variants?.length) return undefined;
+    if (product.stockLevel > 0) return undefined;
+    return product.variants.find(v => v.active && v.stockLevel > 0) ?? undefined;
+  };
+
+  const [selectedVariant, setSelectedVariant] = useState<ProductVariant | undefined>(getDefaultVariant);
   const [special, setSpecial] = useState<Special | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [imgError, setImgError] = useState(false);
@@ -73,9 +210,7 @@ export default function ProductCard({ product }: ProductCardProps) {
   const addItem = useCartStore((state) => state.addItem);
 
   useEffect(() => {
-    if (product.specialId) {
-      fetchSpecial(product.specialId);
-    }
+    if (product.specialId) fetchSpecial(product.specialId);
   }, [product.specialId]);
 
   const fetchSpecial = async (specialId: string) => {
@@ -85,12 +220,10 @@ export default function ProductCard({ product }: ProductCardProps) {
         const data = await res.json();
         if (data.special?.active) setSpecial(data.special);
       }
-    } catch (error) {
-      console.error('Failed to fetch special');
-    }
+    } catch { console.error('Failed to fetch special'); }
   };
 
-  // ── Special price calculation ──────────────────────────────────────────────
+  // ── Special price calculation ─────────────────────────────────────────────
   const getSpecialPrice = (basePrice: number): number | null => {
     if (!special) return null;
     switch (special.type) {
@@ -104,7 +237,6 @@ export default function ProductCard({ product }: ProductCardProps) {
       case 'fixed_price':
         return special.conditions.newPrice ?? null;
       case 'multibuy':
-        // Show per-item price
         return special.conditions.specialPrice
           ? (special.conditions.specialPrice / (special.conditions.requiredQuantity || 1))
           : null;
@@ -115,55 +247,44 @@ export default function ProductCard({ product }: ProductCardProps) {
     }
   };
 
-  // ── Derived display values ──────────────────────────────────────────────────
-  const displayName = selectedVariant ? selectedVariant.name : product.name;
-
-  const displayDescription = selectedVariant?.description
-    ? selectedVariant.description
-    : product.description;
-
-  const basePrice = selectedVariant
-    ? (selectedVariant.price || product.price)
-    : product.price;
-
+  // ── Derived display values ────────────────────────────────────────────────
+  const displayName       = selectedVariant ? selectedVariant.name : product.name;
+  const displayDescription = selectedVariant?.description ?? product.description;
+  const basePrice          = selectedVariant ? (selectedVariant.price || product.price) : product.price;
   const specialComputedPrice = getSpecialPrice(basePrice);
 
-  // Final display price: special computed > variant specialPrice > product specialPrice > base
   const displayPrice = specialComputedPrice !== null
     ? specialComputedPrice
     : selectedVariant
       ? (selectedVariant.specialPrice || selectedVariant.price || product.price)
       : (product.specialPrice || product.price);
 
-  // Compare-at: use base price as strikethrough when special is active
   const comparePrice = special && specialComputedPrice !== null
     ? basePrice
     : selectedVariant
       ? (selectedVariant.compareAtPrice || product.compareAtPrice)
       : product.compareAtPrice;
 
-  const hasDiscount = !!(comparePrice && comparePrice > displayPrice);
-  const discountPercent = hasDiscount
-    ? Math.round(((comparePrice! - displayPrice) / comparePrice!) * 100)
-    : 0;
+  const hasDiscount    = !!(comparePrice && comparePrice > displayPrice);
+  const discountPercent = hasDiscount ? Math.round(((comparePrice! - displayPrice) / comparePrice!) * 100) : 0;
 
   const primaryImage = selectedVariant?.images?.length
     ? selectedVariant.images[0]
     : (product.images?.[0] || '');
 
-  const stock = selectedVariant ? selectedVariant.stockLevel : product.stockLevel;
+  const stock   = selectedVariant ? selectedVariant.stockLevel : product.stockLevel;
   const inStock = stock > 0;
   const lowStock = stock > 0 && stock <= 10;
 
-  const displayUnit = selectedVariant?.unit || product.unit;
+  const displayUnit   = selectedVariant?.unit || product.unit;
   const displayWeight = selectedVariant?.weight;
-  const displaySize = displayWeight && displayUnit
+  const displaySize   = displayWeight && displayUnit
     ? `${displayWeight}${displayUnit}`
     : (product.unitQuantity && product.unit ? `${product.unitQuantity}${product.unit}` : '');
 
-  // ── Special badge ──────────────────────────────────────────────────────────
+  // ── Special badge ─────────────────────────────────────────────────────────
   const getSpecialBadge = (): string | null => {
-    if (!special || !special.active) return null;
+    if (!special?.active) return null;
     if (special.badgeText) return special.badgeText;
     switch (special.type) {
       case 'percentage_off': return `${special.conditions.discountPercentage}% OFF`;
@@ -177,17 +298,14 @@ export default function ProductCard({ product }: ProductCardProps) {
     }
   };
 
-  // ── Cart unit price (for multibuy: per-item price so qty still makes sense) ─
   const getCartUnitPrice = (): number => {
     if (!special) return displayPrice;
-    switch (special.type) {
-      case 'multibuy':
-        return special.conditions.specialPrice
-          ? (special.conditions.specialPrice / (special.conditions.requiredQuantity || 1))
-          : basePrice;
-      default:
-        return displayPrice;
+    if (special.type === 'multibuy') {
+      return special.conditions.specialPrice
+        ? (special.conditions.specialPrice / (special.conditions.requiredQuantity || 1))
+        : basePrice;
     }
+    return displayPrice;
   };
 
   const handleAddToCart = (e: React.MouseEvent) => {
@@ -205,32 +323,40 @@ export default function ProductCard({ product }: ProductCardProps) {
       originalPrice: comparePrice,
     });
     setJustAdded(true);
-    setTimeout(() => {
-      setJustAdded(false);
-      setQuantity(1);
-    }, 1500);
+    setTimeout(() => { setJustAdded(false); setQuantity(1); }, 1500);
   };
 
-  const incrementQuantity = (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (quantity < stock) setQuantity(q => q + 1);
-  };
+  const incrementQuantity = (e: React.MouseEvent) => { e.preventDefault(); if (quantity < stock) setQuantity(q => q + 1); };
+  const decrementQuantity = (e: React.MouseEvent) => { e.preventDefault(); if (quantity > 1) setQuantity(q => q - 1); };
 
-  const decrementQuantity = (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (quantity > 1) setQuantity(q => q - 1);
-  };
+  // ── Variant picker options ────────────────────────────────────────────────
+  const activeVariants = product.variants?.filter(v => v.active) ?? [];
 
-  const handleVariantChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    e.preventDefault();
-    const variantId = e.target.value;
-    setSelectedVariant(variantId ? product.variants?.find(v => v._id === variantId) : undefined);
+  const variantOptions: VariantOption[] = [
+    {
+      value: '',
+      label: product.name,
+      sublabel: `R${product.price.toFixed(2)}${product.stockLevel === 0 ? ' · Out of stock' : ''}`,
+      outOfStock: product.stockLevel === 0,
+    },
+    ...activeVariants.map(v => ({
+      value: v._id ?? v.sku,
+      label: v.name,
+      sublabel: v.price
+        ? `R${(v.specialPrice || v.price).toFixed(2)}`
+        : undefined,
+      outOfStock: v.stockLevel === 0,
+    })),
+  ];
+
+  const handleVariantChange = (val: string) => {
+    setSelectedVariant(val ? activeVariants.find(v => (v._id ?? v.sku) === val) : undefined);
     setImgError(false);
     setQuantity(1);
   };
 
   const specialBadge = getSpecialBadge();
-  const productUrl = branch ? `/${branch.slug}/shop/${product.slug}` : `/shop/${product.slug}`;
+  const productUrl   = branch ? `/${branch.slug}/shop/${product.slug}` : `/shop/${product.slug}`;
 
   const truncatedDescription = displayDescription
     ? displayDescription.length > 60
@@ -275,8 +401,7 @@ export default function ProductCard({ product }: ProductCardProps) {
         <div className="absolute top-2 left-2 flex flex-col space-y-1">
           {specialBadge && (
             <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg flex items-center space-x-1">
-              <Tag className="w-3 h-3" />
-              <span>{specialBadge}</span>
+              <Tag className="w-3 h-3" /><span>{specialBadge}</span>
             </span>
           )}
           {!specialBadge && product.onSpecial && (
@@ -287,9 +412,9 @@ export default function ProductCard({ product }: ProductCardProps) {
               {discountPercent}% OFF
             </span>
           )}
-          {product.hasVariants && product.variants && product.variants.length > 1 && (
+          {product.hasVariants && activeVariants.length > 0 && (
             <span className="bg-purple-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-              {product.variants.length + 1} OPTIONS
+              {activeVariants.length + 1} OPTIONS
             </span>
           )}
         </div>
@@ -316,25 +441,14 @@ export default function ProductCard({ product }: ProductCardProps) {
           {truncatedDescription || ''}
         </p>
 
-        {/* Variant selector */}
-        {product.hasVariants && product.variants && product.variants.length > 0 && (
-          <div className="mb-2" onClick={(e) => e.preventDefault()}>
-            <select
-              value={selectedVariant?._id || ''}
+        {/* ── Custom variant picker (replaces native <select>) ── */}
+        {product.hasVariants && activeVariants.length > 0 && (
+          <div className="mb-2">
+            <VariantPicker
+              options={variantOptions}
+              value={selectedVariant ? (selectedVariant._id ?? selectedVariant.sku) : ''}
               onChange={handleVariantChange}
-              className="w-full text-xs md:text-sm border border-gray-300 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-brand-orange focus:border-transparent bg-white"
-            >
-              <option value="">
-                {product.name} — R{product.price.toFixed(2)}
-              </option>
-              {product.variants.filter(v => v.active).map((variant) => (
-                <option key={variant._id} value={variant._id}>
-                  {variant.name}
-                  {variant.price ? ` — R${(variant.specialPrice || variant.price).toFixed(2)}` : ''}
-                  {variant.stockLevel === 0 ? ' (Out of stock)' : ''}
-                </option>
-              ))}
-            </select>
+            />
           </div>
         )}
 
@@ -357,7 +471,6 @@ export default function ProductCard({ product }: ProductCardProps) {
               </span>
             )}
           </div>
-          {/* Multibuy hint */}
           {special?.type === 'multibuy' && (
             <p className="text-xs text-purple-600 font-semibold mt-0.5">
               {special.conditions.requiredQuantity} for R{special.conditions.specialPrice}
@@ -374,7 +487,6 @@ export default function ProductCard({ product }: ProductCardProps) {
             </p>
           </div>
         )}
-
         {special?.type === 'conditional_add_on_price' && (
           <div className="mb-2 bg-amber-50 border border-amber-200 rounded-lg p-2">
             <p className="text-xs text-amber-800 font-semibold">
@@ -387,19 +499,11 @@ export default function ProductCard({ product }: ProductCardProps) {
         {inStock ? (
           <div className="flex items-center space-x-2 mt-auto" onClick={(e) => e.preventDefault()}>
             <div className="flex items-center border border-gray-300 rounded-lg">
-              <button
-                onClick={decrementQuantity}
-                className="p-1.5 hover:bg-gray-100 transition-colors"
-                disabled={quantity <= 1}
-              >
+              <button onClick={decrementQuantity} className="p-1.5 hover:bg-gray-100 transition-colors" disabled={quantity <= 1}>
                 <Minus className="w-3 h-3 md:w-4 md:h-4 text-gray-600" />
               </button>
               <span className="px-2 md:px-3 font-semibold text-brand-black text-sm">{quantity}</span>
-              <button
-                onClick={incrementQuantity}
-                className="p-1.5 hover:bg-gray-100 transition-colors"
-                disabled={quantity >= stock}
-              >
+              <button onClick={incrementQuantity} className="p-1.5 hover:bg-gray-100 transition-colors" disabled={quantity >= stock}>
                 <Plus className="w-3 h-3 md:w-4 md:h-4 text-gray-600" />
               </button>
             </div>
@@ -412,10 +516,7 @@ export default function ProductCard({ product }: ProductCardProps) {
             </button>
           </div>
         ) : (
-          <button
-            disabled
-            className="w-full py-2 bg-gray-300 text-gray-600 rounded-lg cursor-not-allowed text-xs md:text-sm mt-auto"
-          >
+          <button disabled className="w-full py-2 bg-gray-300 text-gray-600 rounded-lg cursor-not-allowed text-xs md:text-sm mt-auto">
             Out of Stock
           </button>
         )}
