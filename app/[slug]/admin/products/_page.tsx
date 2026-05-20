@@ -574,10 +574,10 @@ export default function AdminProductsPage() {
       // ── Patch linked child products with inline edits ──────────────────────
       const linkedVariants = formData.variants.filter(v => v.linkedProductId);
       if (linkedVariants.length > 0) {
+        const base = typeof window !== 'undefined' ? window.location.origin : '';
         await Promise.allSettled(
           linkedVariants.map(async v => {
-            // Fetch current child data first so we don't nuke fields we didn't touch
-            const childRes = await fetch(`/api/products/${v.linkedProductId}`);
+            const childRes = await fetch(`${base}/api/products/${v.linkedProductId}`);
             if (!childRes.ok) return;
             const { product: childDoc } = await childRes.json();
 
@@ -595,9 +595,9 @@ export default function AdminProductsPage() {
               JSON.stringify(v.linkedImages) !== JSON.stringify(childDoc.images)
             ) patchData.images = v.linkedImages;
 
-            if (Object.keys(patchData).length === 0) return; // nothing changed
+            if (Object.keys(patchData).length === 0) return;
 
-            await fetch(`/api/products/${v.linkedProductId}`, {
+            await fetch(`${base}/api/products/${v.linkedProductId}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ ...childDoc, ...patchData }),
