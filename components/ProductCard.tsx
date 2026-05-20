@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { ShoppingCart, Plus, Minus, Package, Check, Tag, ChevronDown } from 'lucide-react';
 import { useCartStore } from '@/lib/store';
@@ -62,9 +63,12 @@ interface ProductCardProps {
   product: ProductCardProduct;
 }
 
-// ── Custom variant dropdown ──────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// VariantPicker — trigger stays inline, dropdown portals to body as fixed overlay
+// ─────────────────────────────────────────────────────────────────────────────
+
 interface VariantOption {
-  value: string; // '' = base product
+  value: string;
   label: string;
   sublabel?: string;
   outOfStock: boolean;
@@ -80,118 +84,162 @@ function VariantPicker({
   onChange: (val: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close on outside click
+  // Position the portal dropdown relative to the trigger button
+  const positionDropdown = () => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const dropdownH = Math.min(280, options.length * 52);
+
+    // Open upward if not enough space below
+    if (spaceBelow < dropdownH && spaceAbove > spaceBelow) {
+      setDropdownStyle({
+        position: 'fixed',
+        left: rect.left,
+        width: rect.width,
+        bottom: window.innerHeight - rect.top,
+        zIndex: 9999,
+        maxHeight: Math.min(spaceAbove - 8, 280),
+      });
+    } else {
+      setDropdownStyle({
+        position: 'fixed',
+        left: rect.left,
+        width: rect.width,
+        top: rect.bottom + 4,
+        zIndex: 9999,
+        maxHeight: Math.min(spaceBelow - 8, 280),
+      });
+    }
+  };
+
+  const handleOpen = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    positionDropdown();
+    setOpen(o => !o);
+  };
+
+  // Close on outside click or scroll
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (
+        dropdownRef.current && !dropdownRef.current.contains(e.target as Node) &&
+        triggerRef.current && !triggerRef.current.contains(e.target as Node)
+      ) setOpen(false);
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
+    const reposition = () => positionDropdown();
+    document.addEventListener('mousedown', close);
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
+  }, [open]);
 
   const selected = options.find(o => o.value === value) ?? options[0];
 
-  return (
+  const dropdown = open ? (
     <div
-      ref={ref}
-      className="relative w-full"
-      onClick={e => e.preventDefault()}
+      ref={dropdownRef}
+      style={dropdownStyle}
+      className="bg-white border border-gray-200 rounded-xl shadow-2xl overflow-y-auto"
+      onClick={e => e.stopPropagation()}
     >
-      {/* Trigger */}
+      {options.map(opt => {
+        const isSelected = opt.value === value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            disabled={opt.outOfStock}
+            onClick={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (!opt.outOfStock) { onChange(opt.value); setOpen(false); }
+            }}
+            className={`
+              w-full flex items-center justify-between gap-2
+              px-3 py-2.5 text-left text-xs transition-colors border-b border-gray-50 last:border-0
+              ${isSelected
+                ? 'bg-orange-50 text-orange-700'
+                : opt.outOfStock
+                  ? 'text-gray-300 cursor-not-allowed bg-white'
+                  : 'text-gray-700 hover:bg-orange-50/60 bg-white'
+              }
+            `}
+          >
+            <div className="flex flex-col min-w-0">
+              <span className="font-semibold truncate">{opt.label}</span>
+              {opt.sublabel && (
+                <span className={`text-[10px] truncate ${isSelected ? 'text-orange-400' : 'text-gray-400'}`}>
+                  {opt.sublabel}
+                </span>
+              )}
+            </div>
+            <div className="flex-shrink-0 flex items-center gap-1">
+              {opt.outOfStock && (
+                <span className="text-[9px] font-bold uppercase text-gray-300 bg-gray-100 px-1.5 py-0.5 rounded-full">
+                  Out of stock
+                </span>
+              )}
+              {isSelected && !opt.outOfStock && (
+                <div className="w-4 h-4 rounded-full bg-orange-500 flex items-center justify-center">
+                  <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
+                </div>
+              )}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
+  return (
+    <>
+      {/* Compact inline trigger — single row, no height impact */}
       <button
+        ref={triggerRef}
         type="button"
-        onClick={e => { e.preventDefault(); e.stopPropagation(); setOpen(o => !o); }}
+        onClick={handleOpen}
         className={`
-          w-full flex items-center justify-between gap-2
-          px-3 py-2 rounded-xl border text-left text-xs
+          w-full flex items-center justify-between gap-1.5
+          px-2.5 py-1.5 rounded-lg border text-left text-xs
           bg-white transition-all duration-150
           ${open
-            ? 'border-orange-400 ring-2 ring-orange-100 shadow-sm'
-            : 'border-gray-200 hover:border-orange-300 hover:shadow-sm'
+            ? 'border-orange-400 ring-1 ring-orange-200'
+            : 'border-gray-200 hover:border-orange-300'
           }
         `}
       >
-        <div className="flex flex-col min-w-0">
-          <span className={`font-semibold truncate ${selected.outOfStock ? 'text-gray-400' : 'text-gray-800'}`}>
-            {selected.label}
-          </span>
-          {selected.sublabel && (
-            <span className="text-gray-400 text-[10px] truncate">{selected.sublabel}</span>
-          )}
-        </div>
+        <span className={`truncate font-medium ${selected.outOfStock ? 'text-gray-400' : 'text-gray-700'}`}>
+          {selected.label}
+        </span>
         <ChevronDown
-          className={`w-3.5 h-3.5 flex-shrink-0 text-gray-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+          className={`w-3 h-3 flex-shrink-0 text-gray-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
         />
       </button>
 
-      {/* Dropdown panel */}
-      {open && (
-        <div
-          className="
-            absolute z-50 left-0 right-0 mt-1.5
-            bg-white border border-gray-200 rounded-xl shadow-xl
-            overflow-hidden
-          "
-          style={{ maxHeight: '220px', overflowY: 'auto' }}
-          onClick={e => e.stopPropagation()}
-        >
-          {options.map(opt => {
-            const isSelected = opt.value === value;
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                disabled={opt.outOfStock}
-                onClick={e => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (!opt.outOfStock) {
-                    onChange(opt.value);
-                    setOpen(false);
-                  }
-                }}
-                className={`
-                  w-full flex items-center justify-between gap-2
-                  px-3 py-2.5 text-left text-xs transition-colors
-                  ${isSelected
-                    ? 'bg-orange-50 text-orange-700'
-                    : opt.outOfStock
-                      ? 'bg-white text-gray-300 cursor-not-allowed'
-                      : 'bg-white text-gray-700 hover:bg-orange-50/60'
-                  }
-                `}
-              >
-                <div className="flex flex-col min-w-0">
-                  <span className="font-semibold truncate">{opt.label}</span>
-                  {opt.sublabel && (
-                    <span className={`text-[10px] truncate ${isSelected ? 'text-orange-400' : 'text-gray-400'}`}>
-                      {opt.sublabel}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  {opt.outOfStock && (
-                    <span className="text-[9px] font-bold uppercase tracking-wide text-gray-300 bg-gray-100 px-1.5 py-0.5 rounded-full">
-                      Out of stock
-                    </span>
-                  )}
-                  {isSelected && !opt.outOfStock && (
-                    <div className="w-4 h-4 rounded-full bg-orange-500 flex items-center justify-center">
-                      <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
-                    </div>
-                  )}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
+      {/* Portal the dropdown so it escapes overflow:hidden on the card */}
+      {typeof document !== 'undefined' && dropdown
+        ? createPortal(dropdown, document.body)
+        : null
+      }
+    </>
   );
 }
-// ────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ProductCard
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function ProductCard({ product }: ProductCardProps) {
   const { branch } = useBranch();
@@ -223,7 +271,6 @@ export default function ProductCard({ product }: ProductCardProps) {
     } catch { console.error('Failed to fetch special'); }
   };
 
-  // ── Special price calculation ─────────────────────────────────────────────
   const getSpecialPrice = (basePrice: number): number | null => {
     if (!special) return null;
     switch (special.type) {
@@ -247,8 +294,9 @@ export default function ProductCard({ product }: ProductCardProps) {
     }
   };
 
-  // ── Derived display values ────────────────────────────────────────────────
-  const displayName       = selectedVariant ? selectedVariant.name : product.name;
+  const hasVariantPicker = !!(product.hasVariants && product.variants?.filter(v => v.active).length);
+
+  const displayName        = selectedVariant ? selectedVariant.name : product.name;
   const displayDescription = selectedVariant?.description ?? product.description;
   const basePrice          = selectedVariant ? (selectedVariant.price || product.price) : product.price;
   const specialComputedPrice = getSpecialPrice(basePrice);
@@ -265,15 +313,15 @@ export default function ProductCard({ product }: ProductCardProps) {
       ? (selectedVariant.compareAtPrice || product.compareAtPrice)
       : product.compareAtPrice;
 
-  const hasDiscount    = !!(comparePrice && comparePrice > displayPrice);
+  const hasDiscount     = !!(comparePrice && comparePrice > displayPrice);
   const discountPercent = hasDiscount ? Math.round(((comparePrice! - displayPrice) / comparePrice!) * 100) : 0;
 
   const primaryImage = selectedVariant?.images?.length
     ? selectedVariant.images[0]
     : (product.images?.[0] || '');
 
-  const stock   = selectedVariant ? selectedVariant.stockLevel : product.stockLevel;
-  const inStock = stock > 0;
+  const stock    = selectedVariant ? selectedVariant.stockLevel : product.stockLevel;
+  const inStock  = stock > 0;
   const lowStock = stock > 0 && stock <= 10;
 
   const displayUnit   = selectedVariant?.unit || product.unit;
@@ -282,17 +330,16 @@ export default function ProductCard({ product }: ProductCardProps) {
     ? `${displayWeight}${displayUnit}`
     : (product.unitQuantity && product.unit ? `${product.unitQuantity}${product.unit}` : '');
 
-  // ── Special badge ─────────────────────────────────────────────────────────
   const getSpecialBadge = (): string | null => {
     if (!special?.active) return null;
     if (special.badgeText) return special.badgeText;
     switch (special.type) {
       case 'percentage_off': return `${special.conditions.discountPercentage}% OFF`;
-      case 'amount_off': return `R${special.conditions.discountAmount} OFF`;
-      case 'fixed_price': return `NOW R${special.conditions.newPrice}`;
-      case 'multibuy': return `${special.conditions.requiredQuantity} FOR R${special.conditions.specialPrice}`;
-      case 'buy_x_get_y': return `BUY ${special.conditions.buyQuantity} GET ${special.conditions.getQuantity}`;
-      case 'bundle': return 'BUNDLE DEAL';
+      case 'amount_off':     return `R${special.conditions.discountAmount} OFF`;
+      case 'fixed_price':    return `NOW R${special.conditions.newPrice}`;
+      case 'multibuy':       return `${special.conditions.requiredQuantity} FOR R${special.conditions.specialPrice}`;
+      case 'buy_x_get_y':    return `BUY ${special.conditions.buyQuantity} GET ${special.conditions.getQuantity}`;
+      case 'bundle':         return 'BUNDLE DEAL';
       case 'conditional_add_on_price': return `UNLOCK @ R${special.conditions.overridePrice}`;
       default: return 'SPECIAL';
     }
@@ -329,7 +376,6 @@ export default function ProductCard({ product }: ProductCardProps) {
   const incrementQuantity = (e: React.MouseEvent) => { e.preventDefault(); if (quantity < stock) setQuantity(q => q + 1); };
   const decrementQuantity = (e: React.MouseEvent) => { e.preventDefault(); if (quantity > 1) setQuantity(q => q - 1); };
 
-  // ── Variant picker options ────────────────────────────────────────────────
   const activeVariants = product.variants?.filter(v => v.active) ?? [];
 
   const variantOptions: VariantOption[] = [
@@ -342,9 +388,7 @@ export default function ProductCard({ product }: ProductCardProps) {
     ...activeVariants.map(v => ({
       value: v._id ?? v.sku,
       label: v.name,
-      sublabel: v.price
-        ? `R${(v.specialPrice || v.price).toFixed(2)}`
-        : undefined,
+      sublabel: v.price ? `R${(v.specialPrice || v.price).toFixed(2)}` : undefined,
       outOfStock: v.stockLevel === 0,
     })),
   ];
@@ -358,9 +402,11 @@ export default function ProductCard({ product }: ProductCardProps) {
   const specialBadge = getSpecialBadge();
   const productUrl   = branch ? `/${branch.slug}/shop/${product.slug}` : `/shop/${product.slug}`;
 
-  const truncatedDescription = displayDescription
-    ? displayDescription.length > 60
-      ? displayDescription.substring(0, 60) + '...'
+  // Description: more chars when no picker, fewer when picker takes space
+  const descMaxChars  = hasVariantPicker ? 55 : 100;
+  const truncatedDesc = displayDescription
+    ? displayDescription.length > descMaxChars
+      ? displayDescription.substring(0, descMaxChars) + '…'
       : displayDescription
     : null;
 
@@ -412,7 +458,7 @@ export default function ProductCard({ product }: ProductCardProps) {
               {discountPercent}% OFF
             </span>
           )}
-          {product.hasVariants && activeVariants.length > 0 && (
+          {hasVariantPicker && (
             <span className="bg-purple-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
               {activeVariants.length + 1} OPTIONS
             </span>
@@ -430,20 +476,23 @@ export default function ProductCard({ product }: ProductCardProps) {
 
       {/* Content */}
       <div className="p-3 md:p-4 flex flex-col flex-grow">
-        <div className="mb-2">
-          <h3 className="text-sm md:text-base font-semibold text-brand-black line-clamp-2 group-hover:text-brand-orange transition-colors">
-            {displayName}
-          </h3>
-          {displaySize && <p className="text-xs text-gray-500 mt-0.5">{displaySize}</p>}
-        </div>
 
-        <p className="text-xs text-gray-600 mb-2 line-clamp-2 min-h-[2rem]">
-          {truncatedDescription || ''}
-        </p>
+        {/* Name */}
+        <h3 className="text-sm md:text-base font-semibold text-brand-black line-clamp-2 group-hover:text-brand-orange transition-colors mb-0.5">
+          {displayName}
+        </h3>
+        {displaySize && <p className="text-xs text-gray-400 mb-1">{displaySize}</p>}
 
-        {/* ── Custom variant picker (replaces native <select>) ── */}
-        {product.hasVariants && activeVariants.length > 0 && (
-          <div className="mb-2">
+        {/* Description — flows naturally, more text when no picker */}
+        {truncatedDesc && (
+          <p className="text-xs text-gray-500 mb-2 leading-relaxed">
+            {truncatedDesc}
+          </p>
+        )}
+
+        {/* Variant picker — compact single-row trigger, dropdown portals out */}
+        {hasVariantPicker && (
+          <div className="mb-2" onClick={e => e.preventDefault()}>
             <VariantPicker
               options={variantOptions}
               value={selectedVariant ? (selectedVariant._id ?? selectedVariant.sku) : ''}
@@ -452,23 +501,24 @@ export default function ProductCard({ product }: ProductCardProps) {
           </div>
         )}
 
+        {/* Spacer pushes price + cart to bottom */}
         <div className="flex-grow" />
 
         {/* Price */}
         <div className="mb-2">
-          <div className="flex items-baseline space-x-2 flex-wrap">
+          <div className="flex items-baseline gap-1.5 flex-wrap">
             <span className="text-lg md:text-xl font-bold text-brand-orange whitespace-nowrap">
               R{displayPrice.toFixed(2)}
             </span>
             {hasDiscount && (
-              <span className="text-xs text-gray-500 line-through whitespace-nowrap">
-                R{comparePrice!.toFixed(2)}
-              </span>
-            )}
-            {hasDiscount && (
-              <span className="text-xs text-green-600 font-semibold whitespace-nowrap">
-                Save R{(comparePrice! - displayPrice).toFixed(2)}
-              </span>
+              <>
+                <span className="text-xs text-gray-400 line-through whitespace-nowrap">
+                  R{comparePrice!.toFixed(2)}
+                </span>
+                <span className="text-xs text-green-600 font-semibold whitespace-nowrap">
+                  Save R{(comparePrice! - displayPrice).toFixed(2)}
+                </span>
+              </>
             )}
           </div>
           {special?.type === 'multibuy' && (
@@ -478,7 +528,7 @@ export default function ProductCard({ product }: ProductCardProps) {
           )}
         </div>
 
-        {/* Special info banners */}
+        {/* Special banners */}
         {special?.type === 'buy_x_get_y' && (
           <div className="mb-2 bg-blue-50 border border-blue-200 rounded-lg p-2">
             <p className="text-xs text-blue-900 font-semibold">
@@ -497,26 +547,26 @@ export default function ProductCard({ product }: ProductCardProps) {
 
         {/* Add to cart */}
         {inStock ? (
-          <div className="flex items-center space-x-2 mt-auto" onClick={(e) => e.preventDefault()}>
-            <div className="flex items-center border border-gray-300 rounded-lg">
-              <button onClick={decrementQuantity} className="p-1.5 hover:bg-gray-100 transition-colors" disabled={quantity <= 1}>
+          <div className="flex items-center gap-2 mt-auto" onClick={e => e.preventDefault()}>
+            <div className="flex items-center border border-gray-200 rounded-lg">
+              <button onClick={decrementQuantity} disabled={quantity <= 1} className="p-1.5 hover:bg-gray-100 transition-colors disabled:opacity-40">
                 <Minus className="w-3 h-3 md:w-4 md:h-4 text-gray-600" />
               </button>
               <span className="px-2 md:px-3 font-semibold text-brand-black text-sm">{quantity}</span>
-              <button onClick={incrementQuantity} className="p-1.5 hover:bg-gray-100 transition-colors" disabled={quantity >= stock}>
+              <button onClick={incrementQuantity} disabled={quantity >= stock} className="p-1.5 hover:bg-gray-100 transition-colors disabled:opacity-40">
                 <Plus className="w-3 h-3 md:w-4 md:h-4 text-gray-600" />
               </button>
             </div>
             <button
               onClick={handleAddToCart}
-              className="flex-1 flex items-center justify-center space-x-1 bg-brand-orange hover:bg-orange-600 text-white py-2 px-2 md:px-3 rounded-lg transition-colors"
+              className="flex-1 flex items-center justify-center gap-1 bg-brand-orange hover:bg-orange-600 text-white py-2 px-2 md:px-3 rounded-lg transition-colors"
             >
               <ShoppingCart className="w-3 h-3 md:w-4 md:h-4" />
               <span className="font-semibold text-xs md:text-sm">Add</span>
             </button>
           </div>
         ) : (
-          <button disabled className="w-full py-2 bg-gray-300 text-gray-600 rounded-lg cursor-not-allowed text-xs md:text-sm mt-auto">
+          <button disabled className="w-full py-2 bg-gray-100 text-gray-400 rounded-lg cursor-not-allowed text-xs md:text-sm mt-auto font-medium">
             Out of Stock
           </button>
         )}
