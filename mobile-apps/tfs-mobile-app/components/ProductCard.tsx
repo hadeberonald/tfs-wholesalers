@@ -1,13 +1,189 @@
-import { useState } from 'react';
-import { View, Text, TouchableOpacity, Image, StyleSheet, Alert } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import { useState, useRef } from 'react';
+import {
+  View, Text, TouchableOpacity, Image, StyleSheet,
+  Alert, Modal, FlatList, TouchableWithoutFeedback, Pressable,
+} from 'react-native';
 import { useRouter } from 'expo-router';
-import { ShoppingCart, Plus, Minus, Package, Tag, Heart } from 'lucide-react-native';
+import { ShoppingCart, Plus, Minus, Package, Tag, Heart, ChevronDown, Check } from 'lucide-react-native';
 import { useStore } from '@/lib/store';
 import { shared } from './cardStyles';
 import type { Product } from '@/lib/types';
 
 interface ProductCardProps { product: Product; }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VariantPickerModal
+// A compact single-row trigger. Tapping it opens a full Modal sheet so it
+// never gets clipped by the card and is always fully scrollable.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface VariantOption {
+  value: string;
+  label: string;
+  sublabel?: string;
+  outOfStock: boolean;
+}
+
+function VariantPickerModal({
+  options,
+  value,
+  onChange,
+}: {
+  options: VariantOption[];
+  value: string;
+  onChange: (val: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find(o => o.value === value) ?? options[0];
+
+  return (
+    <>
+      {/* Compact trigger row */}
+      <TouchableOpacity
+        style={pickerStyles.trigger}
+        onPress={e => { e.stopPropagation(); setOpen(true); }}
+        activeOpacity={0.7}
+      >
+        <Text style={[pickerStyles.triggerText, selected.outOfStock && pickerStyles.triggerTextMuted]} numberOfLines={1}>
+          {selected.label}
+        </Text>
+        <ChevronDown color="#9ca3af" size={13} />
+      </TouchableOpacity>
+
+      {/* Full-screen modal sheet */}
+      <Modal
+        visible={open}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setOpen(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setOpen(false)}>
+          <View style={pickerStyles.backdrop} />
+        </TouchableWithoutFeedback>
+
+        <View style={pickerStyles.sheet}>
+          {/* Handle bar */}
+          <View style={pickerStyles.handle} />
+
+          <Text style={pickerStyles.sheetTitle}>Select an option</Text>
+
+          <FlatList
+            data={options}
+            keyExtractor={o => o.value}
+            style={pickerStyles.list}
+            renderItem={({ item: opt }) => {
+              const isSelected = opt.value === value;
+              return (
+                <Pressable
+                  onPress={() => {
+                    if (!opt.outOfStock) { onChange(opt.value); setOpen(false); }
+                  }}
+                  style={[
+                    pickerStyles.option,
+                    isSelected && pickerStyles.optionSelected,
+                    opt.outOfStock && pickerStyles.optionDisabled,
+                  ]}
+                >
+                  <View style={pickerStyles.optionText}>
+                    <Text
+                      style={[
+                        pickerStyles.optionLabel,
+                        isSelected && pickerStyles.optionLabelSelected,
+                        opt.outOfStock && pickerStyles.optionLabelMuted,
+                      ]}
+                      numberOfLines={2}
+                    >
+                      {opt.label}
+                    </Text>
+                    {opt.sublabel ? (
+                      <Text style={[pickerStyles.optionSub, isSelected && pickerStyles.optionSubSelected]}>
+                        {opt.sublabel}
+                      </Text>
+                    ) : null}
+                    {opt.outOfStock ? (
+                      <Text style={pickerStyles.outOfStockLabel}>Out of stock</Text>
+                    ) : null}
+                  </View>
+                  {isSelected && !opt.outOfStock && (
+                    <View style={pickerStyles.checkCircle}>
+                      <Check color="#fff" size={12} strokeWidth={3} />
+                    </View>
+                  )}
+                </Pressable>
+              );
+            }}
+            ItemSeparatorComponent={() => <View style={pickerStyles.separator} />}
+          />
+
+          <TouchableOpacity style={pickerStyles.closeBtn} onPress={() => setOpen(false)}>
+            <Text style={pickerStyles.closeBtnText}>Close</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+    </>
+  );
+}
+
+const pickerStyles = StyleSheet.create({
+  // Trigger
+  trigger: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8,
+    backgroundColor: '#fff', paddingHorizontal: 10, paddingVertical: 6,
+    marginBottom: 6,
+  },
+  triggerText: { flex: 1, fontSize: 12, color: '#374151', fontWeight: '500', marginRight: 4 },
+  triggerTextMuted: { color: '#9ca3af' },
+
+  // Modal
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)' },
+  sheet: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    paddingBottom: 32, maxHeight: '75%',
+  },
+  handle: {
+    width: 40, height: 4, borderRadius: 2, backgroundColor: '#d1d5db',
+    alignSelf: 'center', marginTop: 10, marginBottom: 4,
+  },
+  sheetTitle: {
+    fontSize: 15, fontWeight: '700', color: '#111827',
+    paddingHorizontal: 20, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f3f4f6',
+  },
+  list: { flexGrow: 0 },
+
+  // Options
+  option: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 20, paddingVertical: 14, backgroundColor: '#fff',
+  },
+  optionSelected: { backgroundColor: '#fff7ed' },
+  optionDisabled: { opacity: 0.5 },
+  optionText: { flex: 1 },
+  optionLabel: { fontSize: 13, fontWeight: '600', color: '#1f2937' },
+  optionLabelSelected: { color: '#ea580c' },
+  optionLabelMuted: { color: '#9ca3af' },
+  optionSub: { fontSize: 11, color: '#6b7280', marginTop: 1 },
+  optionSubSelected: { color: '#fb923c' },
+  outOfStockLabel: { fontSize: 10, color: '#9ca3af', fontWeight: '700', marginTop: 2, textTransform: 'uppercase' },
+  separator: { height: 1, backgroundColor: '#f9fafb', marginHorizontal: 20 },
+  checkCircle: {
+    width: 22, height: 22, borderRadius: 11, backgroundColor: '#f97316',
+    alignItems: 'center', justifyContent: 'center', marginLeft: 10,
+  },
+
+  // Close button
+  closeBtn: {
+    marginHorizontal: 20, marginTop: 12,
+    backgroundColor: '#f3f4f6', borderRadius: 12, paddingVertical: 12, alignItems: 'center',
+  },
+  closeBtnText: { fontSize: 14, fontWeight: '600', color: '#374151' },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ProductCard
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function ProductCard({ product }: ProductCardProps) {
   const router = useRouter();
@@ -26,28 +202,35 @@ export default function ProductCard({ product }: ProductCardProps) {
   const selectedVariant = activeVariants.find((v: any) => v._id === selectedVariantId) ?? undefined;
   const hasVariants     = product.hasVariants && activeVariants.length > 0;
 
-  const displayPrice = selectedVariant
-    ? (selectedVariant.specialPrice || selectedVariant.price || product.price)
+  // Default to first in-stock variant when base product is out of stock
+  const effectiveVariant = (() => {
+    if (selectedVariantId) return selectedVariant;
+    if ((product.stockLevel ?? 0) > 0) return undefined;
+    return activeVariants.find((v: any) => v.stockLevel > 0) ?? undefined;
+  })();
+
+  const displayPrice = effectiveVariant
+    ? (effectiveVariant.specialPrice || effectiveVariant.price || product.price)
     : (product.specialPrice || product.price);
 
-  const comparePrice = selectedVariant
-    ? (selectedVariant.compareAtPrice || product.compareAtPrice)
+  const comparePrice = effectiveVariant
+    ? (effectiveVariant.compareAtPrice || product.compareAtPrice)
     : product.compareAtPrice;
 
   const hasDiscount     = !!(comparePrice && comparePrice > displayPrice);
   const discountPercent = hasDiscount
     ? Math.round(((comparePrice! - displayPrice) / comparePrice!) * 100) : 0;
 
-  const primaryImage = selectedVariant?.images?.length
-    ? selectedVariant.images[0] : (product.images?.[0] || '');
+  const primaryImage = effectiveVariant?.images?.length
+    ? effectiveVariant.images[0] : (product.images?.[0] || '');
 
-  const stock    = selectedVariant ? selectedVariant.stockLevel : (product.stockLevel ?? 0);
+  const stock    = effectiveVariant ? effectiveVariant.stockLevel : (product.stockLevel ?? 0);
   const inStock  = stock > 0;
   const lowStock = stock > 0 && stock <= 10;
 
   const isInWishlist = wishlist.some((item: any) =>
-    selectedVariant
-      ? item.id === product._id && item.variantId === selectedVariant._id
+    effectiveVariant
+      ? item.id === product._id && item.variantId === effectiveVariant._id
       : item.id === product._id && !item.variantId,
   );
 
@@ -58,13 +241,13 @@ export default function ProductCard({ product }: ProductCardProps) {
       return;
     }
     if (isInWishlist) {
-      removeFromWishlist(product._id, selectedVariant?._id);
+      removeFromWishlist(product._id, effectiveVariant?._id);
     } else {
       addToWishlist({
-        id: product._id, variantId: selectedVariant?._id,
-        name: product.name, variantName: selectedVariant?.name,
+        id: product._id, variantId: effectiveVariant?._id,
+        name: product.name, variantName: effectiveVariant?.name,
         price: displayPrice, image: primaryImage || '',
-        sku: selectedVariant?.sku || product.sku || product.slug,
+        sku: effectiveVariant?.sku || product.sku || product.slug,
         slug: product.slug,
       });
     }
@@ -73,21 +256,48 @@ export default function ProductCard({ product }: ProductCardProps) {
   const handleAddToCart = (e: any) => {
     e.stopPropagation();
     addToCart({
-      id: product._id, variantId: selectedVariant?._id,
-      name: product.name, variantName: selectedVariant?.name,
+      id: product._id, variantId: effectiveVariant?._id,
+      name: product.name, variantName: effectiveVariant?.name,
       price: displayPrice, image: primaryImage || '', quantity,
     });
     Alert.alert('Added to Cart',
-      `${quantity} × ${product.name}${selectedVariant ? ` (${selectedVariant.name})` : ''} added to your cart`);
+      `${quantity} × ${product.name}${effectiveVariant ? ` (${effectiveVariant.name})` : ''} added to your cart`);
     setQuantity(1);
   };
 
   const increment = (e: any) => { e.stopPropagation(); if (quantity < stock) setQuantity(q => q + 1); };
   const decrement = (e: any) => { e.stopPropagation(); if (quantity > 1) setQuantity(q => q - 1); };
 
-  return (
-    <TouchableOpacity style={shared.card} onPress={() => router.push(`/product/${product.slug}`)} activeOpacity={0.7}>
+  const handleVariantChange = (val: string) => {
+    setSelectedVariantId(val);
+    setQuantity(1);
+  };
 
+  const variantOptions: VariantOption[] = [
+    {
+      value: '',
+      label: product.name,
+      sublabel: `R${product.price.toFixed(2)}${(product.stockLevel ?? 0) === 0 ? ' · Out of stock' : ''}`,
+      outOfStock: (product.stockLevel ?? 0) === 0,
+    },
+    ...activeVariants.map((v: any) => ({
+      value: v._id,
+      label: v.name,
+      sublabel: v.price ? `R${(v.specialPrice || v.price).toFixed(2)}` : undefined,
+      outOfStock: v.stockLevel === 0,
+    })),
+  ];
+
+  // Description length: more text when no picker, fewer when picker is shown
+  const descLines = hasVariants ? 2 : 3;
+
+  return (
+    <TouchableOpacity
+      style={shared.card}
+      onPress={() => router.push(`/product/${product.slug}`)}
+      activeOpacity={0.7}
+    >
+      {/* Image */}
       <View style={shared.imageContainer}>
         {primaryImage
           ? <Image source={{ uri: primaryImage }} style={shared.image} />
@@ -123,6 +333,7 @@ export default function ProductCard({ product }: ProductCardProps) {
         )}
       </View>
 
+      {/* Content */}
       <View style={shared.content}>
         <Text style={shared.name} numberOfLines={2}>{product.name}</Text>
 
@@ -130,42 +341,35 @@ export default function ProductCard({ product }: ProductCardProps) {
           <Text style={shared.unitText}>{product.unitQuantity}{product.unit}</Text>
         )}
 
-        {/* Description: 3 lines when no variants/discount info below, 2 otherwise */}
-        <Text style={shared.description} numberOfLines={hasVariants ? 2 : 3}>
-          {product.description || ''}
-        </Text>
+        {/* Description — more lines when no picker */}
+        {!!product.description && (
+          <Text style={shared.description} numberOfLines={descLines}>
+            {product.description}
+          </Text>
+        )}
 
-        {/* Variant picker — only renders when needed, no empty spacer */}
+        {/* Variant picker — modal-based, no card layout impact */}
         {hasVariants && (
-          <View style={styles.pickerWrapper} onStartShouldSetResponder={() => true}>
-            <Picker
-              selectedValue={selectedVariantId}
-              onValueChange={(val) => { setSelectedVariantId(val as string); setQuantity(1); }}
-              style={styles.picker}
-              dropdownIconColor="#6b7280"
-            >
-              <Picker.Item label={`${product.name} — R${product.price.toFixed(2)}`} value="" />
-              {activeVariants.map((v: any) => (
-                <Picker.Item
-                  key={v._id}
-                  label={`${v.name}${v.price ? ` — R${(v.specialPrice || v.price).toFixed(2)}` : ''}${v.stockLevel === 0 ? ' (Out of stock)' : ''}`}
-                  value={v._id}
-                />
-              ))}
-            </Picker>
+          <View onStartShouldSetResponder={() => true}>
+            <VariantPickerModal
+              options={variantOptions}
+              value={effectiveVariant?._id ?? selectedVariantId}
+              onChange={handleVariantChange}
+            />
           </View>
         )}
 
+        {/* Price */}
         <View style={shared.priceContainer}>
           <Text style={shared.price}>R{displayPrice.toFixed(2)}</Text>
           {hasDiscount && <Text style={shared.oldPrice}>R{comparePrice!.toFixed(2)}</Text>}
         </View>
 
-        {/* Savings only renders when there IS a saving */}
         {hasDiscount && (
           <Text style={shared.savingsText}>Save R{(comparePrice! - displayPrice).toFixed(2)}</Text>
         )}
 
+        {/* Cart actions */}
         {inStock ? (
           <View style={shared.cartActions} onStartShouldSetResponder={() => true}>
             <View style={shared.quantityControl}>
@@ -190,11 +394,3 @@ export default function ProductCard({ product }: ProductCardProps) {
     </TouchableOpacity>
   );
 }
-
-const styles = StyleSheet.create({
-  pickerWrapper: {
-    borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8,
-    backgroundColor: '#fff', marginBottom: 6, overflow: 'hidden',
-  },
-  picker: { height: 36, color: '#1f2937' },
-});

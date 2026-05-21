@@ -7,10 +7,10 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const query = searchParams.get('q');
+    const query    = searchParams.get('q');
     const branchId = searchParams.get('branchId');
-    const page = searchParams.get('page');
-    const limit = searchParams.get('limit');
+    const page     = searchParams.get('page');
+    const limit    = searchParams.get('limit');
     const fetchAll = searchParams.get('all');
 
     if (!query || query.trim().length < 2) {
@@ -30,38 +30,33 @@ export async function GET(request: NextRequest) {
     const db = client.db('tfs-wholesalers');
 
     const searchTerm = query.trim();
-    const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-    // Word-boundary regex on name/variant name — stops "milk" matching "buttermilk"
-    // which was the main cause of irrelevant results with the old loose contains-regex.
-    const nameRegex = new RegExp('(^|\\b)' + escaped, 'i');
-
-    // SKU / barcode: substring is fine — these are structured codes
-    const codeRegex = new RegExp(escaped, 'i');
-
-    // Tags: exact token match — tags are stored as clean lowercase slugs so this
-    // is precise with no noise (e.g. tag "milk" won't match "buttermilk")
-    const tagRegex = new RegExp('^' + escaped + '$', 'i');
-
-    console.log('🔍 Search query:', searchTerm, 'for branch:', branchId);
+    const escaped    = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const nameRegex  = new RegExp('(^|\\b)' + escaped, 'i');
+    const codeRegex  = new RegExp(escaped, 'i');
+    const tagRegex   = new RegExp('^' + escaped + '$', 'i');
 
     const filter: any = {
       branchId: new ObjectId(branchId),
       active: true,
+      // ── KEY FIX: exclude linked variant children so only parent products
+      // (which carry the full variants array) appear in results.
+      // Without this, searching "playgirl" returns the parent AND all 3
+      // individual child docs as separate cards with no variant picker.
+      isLinkedVariant: { $ne: true },
       $or: [
         { name: nameRegex },
         { barcode: codeRegex },
         { tags: tagRegex },
+        // These still match the parent because variant sub-docs are embedded
+        // inside the parent's variants[] array — so a search for "Flirt" will
+        // still find the Temptation parent via variants.name, and the card
+        // will show all variants in the picker.
         { 'variants.name': nameRegex },
         { 'variants.barcode': codeRegex },
-        // NOTE: description intentionally excluded — it produces too many
-        // irrelevant matches on common words ("fresh", "premium", "pack" etc).
-        // Use product tags to surface items via alternate keywords instead.
       ],
     };
 
     const total = await db.collection('products').countDocuments(filter);
-    console.log('📊 Total matching products:', total);
 
     if (fetchAll === 'true') {
       const allProducts = await db
@@ -70,8 +65,6 @@ export async function GET(request: NextRequest) {
         .sort({ name: 1, _id: 1 })
         .limit(10000)
         .toArray();
-
-      console.log('✅ Fetched all products:', allProducts.length);
 
       return NextResponse.json({
         products: allProducts,
@@ -82,9 +75,9 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const pageNum = page ? parseInt(page) : 1;
+    const pageNum  = page  ? parseInt(page)  : 1;
     const limitNum = limit ? parseInt(limit) : 100;
-    const skip = (pageNum - 1) * limitNum;
+    const skip     = (pageNum - 1) * limitNum;
 
     const products = await db
       .collection('products')
@@ -93,10 +86,6 @@ export async function GET(request: NextRequest) {
       .skip(skip)
       .limit(limitNum)
       .toArray();
-
-    console.log(
-      '✅ Search found: ' + products.length + ' products (page ' + pageNum + ' of ' + Math.ceil(total / limitNum) + ')'
-    );
 
     return NextResponse.json({
       products,
@@ -110,10 +99,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('❌ Search error:', error);
     return NextResponse.json(
-      {
-        error: 'Search failed',
-        details: error instanceof Error ? error.message : 'Unknown error',
-      },
+      { error: 'Search failed', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     );
   }
