@@ -8,21 +8,21 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const category  = searchParams.get('category');
-    const special   = searchParams.get('special');
-    const featured  = searchParams.get('featured');
-    const slug      = searchParams.get('slug');
-    const limit     = searchParams.get('limit');
-    const page      = searchParams.get('page');
-    const sort      = searchParams.get('sort');
-    const all       = searchParams.get('all');
-    const barcode   = searchParams.get('barcode');
-    const branchId  = searchParams.get('branchId');
-    const search    = searchParams.get('search');
-    // NEW: excludeId lets the link modal hide the product being edited
-    const excludeId = searchParams.get('excludeId');
-    // NEW: excludeLinked=true hides products already flagged as linked variants
+    const category    = searchParams.get('category');
+    const special     = searchParams.get('special');
+    const featured    = searchParams.get('featured');
+    const slug        = searchParams.get('slug');
+    const limit       = searchParams.get('limit');
+    const page        = searchParams.get('page');
+    const sort        = searchParams.get('sort');
+    const all         = searchParams.get('all');
+    const barcode     = searchParams.get('barcode');
+    const branchId    = searchParams.get('branchId');
+    const search      = searchParams.get('search');
+    const excludeId   = searchParams.get('excludeId');
     const excludeLinked = searchParams.get('excludeLinked');
+    // For random pagination: comma-separated list of _id strings already shown
+    const excludeIds  = searchParams.get('excludeIds');
 
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
@@ -38,36 +38,37 @@ export async function GET(request: NextRequest) {
       if (branchId) query.branchId = new ObjectId(branchId);
     }
 
-    // ── FIX 3: Exclude the product currently being edited from link results
     if (excludeId) {
-      try {
-        query._id = { $ne: new ObjectId(excludeId) };
-      } catch {
-        // ignore malformed id
-      }
+      try { query._id = { $ne: new ObjectId(excludeId) }; } catch { /* ignore */ }
     }
 
-    // ── FIX 4: Optionally hide products that are already linked as variants
-    // of any parent (prevents picking them for a second parent simultaneously).
-    // The link modal passes excludeLinked=true so only free products appear.
     if (excludeLinked === 'true') {
       query.isLinkedVariant = { $ne: true };
+    }
+
+    // Exclude already-seen IDs (used for random pagination)
+    if (excludeIds) {
+      const ids = excludeIds
+        .split(',')
+        .filter(Boolean)
+        .map(id => { try { return new ObjectId(id); } catch { return null; } })
+        .filter(Boolean);
+      if (ids.length > 0) {
+        query._id = { ...(query._id || {}), $nin: ids };
+      }
     }
 
     if (search && search.trim().length >= 2) {
       const raw = search.trim();
       const escaped = raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const nameRegex = new RegExp('(^|\\b)' + escaped, 'i');
-      const codeRegex = new RegExp(escaped, 'i');
-      const tagRegex  = new RegExp('^' + escaped + '$', 'i');
       query.$or = [
-        { name: nameRegex },
-        { sku: codeRegex },
-        { barcode: codeRegex },
-        { tags: tagRegex },
-        { 'variants.name': nameRegex },
-        { 'variants.sku': codeRegex },
-        { 'variants.barcode': codeRegex },
+        { name: new RegExp('(^|\\b)' + escaped, 'i') },
+        { sku: new RegExp(escaped, 'i') },
+        { barcode: new RegExp(escaped, 'i') },
+        { tags: new RegExp('^' + escaped + '$', 'i') },
+        { 'variants.name': new RegExp('(^|\\b)' + escaped, 'i') },
+        { 'variants.sku': new RegExp(escaped, 'i') },
+        { 'variants.barcode': new RegExp(escaped, 'i') },
       ];
     }
 
@@ -84,18 +85,45 @@ export async function GET(request: NextRequest) {
 
     if (special  === 'true') query.onSpecial  = true;
     if (featured === 'true') query.featured   = true;
-    if (slug) query.slug = slug;
-    if (barcode) query.$or = [{ barcode }, { 'variants.barcode': barcode }];
+    if (slug)    query.slug    = slug;
+    if (barcode) query.$or     = [{ barcode }, { 'variants.barcode': barcode }];
 
+    const pageNum        = page  ? parseInt(page)  : 1;
+    const limitNum       = limit ? parseInt(limit) : 25;
+    const effectiveLimit = search ? Math.min(parseInt(limit || '200'), 500) : limitNum;
+
+    // ── Random sort: use $sample via aggregation pipeline ─────────────────
+    if (sort === 'random' && !search && !barcode) {
+      const total = await db.collection('products').countDocuments(query);
+
+      const pipeline: any[] = [
+        { $match: query },
+        { $sample: { size: effectiveLimit } },
+      ];
+
+      const products = await db.collection('products').aggregate(pipeline).toArray();
+
+      // hasMore is true if there are more un-seen products beyond what we just returned.
+      // total already excludes seen IDs (via $nin above), so:
+      const hasMore = total > products.length;
+
+      return NextResponse.json({
+        products,
+        total,            // total remaining (excluding already-seen)
+        page: pageNum,
+        limit: effectiveLimit,
+        totalPages: Math.ceil(total / limitNum),
+        hasMore,
+      });
+    }
+
+    // ── Standard sorts ─────────────────────────────────────────────────────
     let sortOption: any = { createdAt: -1, _id: -1 };
-    if (sort === 'name')        sortOption = { name:  1, _id: 1 };
-    else if (sort === 'price-asc')  sortOption = { price:  1, _id: 1 };
+    if      (sort === 'name')       sortOption = { name:  1, _id:  1 };
+    else if (sort === 'price-asc')  sortOption = { price: 1, _id:  1 };
     else if (sort === 'price-desc') sortOption = { price: -1, _id: 1 };
 
-    const pageNum       = page  ? parseInt(page)  : 1;
-    const limitNum      = limit ? parseInt(limit) : 25;
-    const skip          = search ? 0 : (pageNum - 1) * limitNum;
-    const effectiveLimit = search ? Math.min(parseInt(limit || '200'), 500) : limitNum;
+    const skip = search ? 0 : (pageNum - 1) * limitNum;
 
     const total    = await db.collection('products').countDocuments(query);
     const products = await db
@@ -218,7 +246,6 @@ export async function POST(request: NextRequest) {
     };
 
     const result = await db.collection('products').insertOne(product);
-    console.log('✅ Product created for branch:', auth.branchId.toString());
 
     if (product.hasVariants && variants.length > 0) {
       const linkedIds = variants

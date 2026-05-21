@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useBranch } from '@/lib/branch-context';
 import ProductCard from '@/components/ProductCard';
-import { Search, ChevronDown, X, Loader2 } from 'lucide-react';
+import { Search, ChevronDown, X, Loader2, Shuffle } from 'lucide-react';
 
 interface Product {
   _id: string;
@@ -47,17 +47,15 @@ export default function ShopPage() {
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [categorySearchQuery, setCategorySearchQuery]   = useState('');
-  const [sortBy, setSortBy]               = useState<'default' | 'newest' | 'name' | 'price-asc' | 'price-desc'>('default');
-  const [currentPage, setCurrentPage]     = useState(1);
+  const [sortBy, setSortBy] = useState<'default' | 'newest' | 'name' | 'price-asc' | 'price-desc'>('default');
   const [totalProducts, setTotalProducts] = useState(0);
   const [hasMore, setHasMore]             = useState(false);
   const [isSearchMode, setIsSearchMode]   = useState(false);
-  // Random seed: stable per session so pages of results stay consistent
-  const [randomSeed]                      = useState(() => Math.floor(Math.random() * 100000));
+
+  // For random pagination: track IDs already shown so backend can exclude them
+  const seenIdsRef = useRef<Set<string>>(new Set());
 
   const searchDebounceRef = useRef<NodeJS.Timeout>();
-  const sentinelRef       = useRef<HTMLDivElement>(null);
-  const observerRef       = useRef<IntersectionObserver | null>(null);
 
   // ── Init from URL ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -72,9 +70,9 @@ export default function ShopPage() {
   // ── Main product fetch (fresh load) ─────────────────────────────────────
   useEffect(() => {
     if (!branchLoading && branch && !isSearchMode) {
-      setCurrentPage(1);
+      seenIdsRef.current = new Set();
       setProducts([]);
-      fetchProducts(1, false);
+      fetchProducts(false);
     }
   }, [branchLoading, branch, selectedCategory, sortBy, isSearchMode]);
 
@@ -85,10 +83,7 @@ export default function ShopPage() {
     const trimmed = searchQuery.trim();
 
     if (!trimmed || trimmed.length < 2) {
-      if (isSearchMode) {
-        setIsSearchMode(false);
-        // fetchProducts will fire via the isSearchMode effect above
-      }
+      if (isSearchMode) setIsSearchMode(false);
       return;
     }
 
@@ -96,57 +91,55 @@ export default function ShopPage() {
     return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
   }, [searchQuery]);
 
-  // ── Infinite scroll observer ─────────────────────────────────────────────
-  useEffect(() => {
-    if (observerRef.current) observerRef.current.disconnect();
-
-    observerRef.current = new IntersectionObserver(
-      entries => {
-        if (entries[0].isIntersecting && hasMore && !loadingMore && !loading && !isSearchMode) {
-          loadMore();
-        }
-      },
-      { rootMargin: '200px' }
-    );
-
-    if (sentinelRef.current) observerRef.current.observe(sentinelRef.current);
-
-    return () => { if (observerRef.current) observerRef.current.disconnect(); };
-  }, [hasMore, loadingMore, loading, isSearchMode, currentPage]);
-
   // ── Fetch helpers ────────────────────────────────────────────────────────
 
-  const buildUrl = (page: number) => {
-    let url = `/api/products?branchId=${branch!.id}&page=${page}&limit=${ITEMS_PER_PAGE}`;
+  const buildUrl = () => {
+    let url = `/api/products?branchId=${branch!.id}&limit=${ITEMS_PER_PAGE}`;
     if (selectedCategory) url += `&category=${selectedCategory}`;
-    if (sortBy === 'default') url += `&sort=random&seed=${randomSeed}`;
-    else if (sortBy !== 'newest') url += `&sort=${sortBy}`;
+
+    if (sortBy === 'default') {
+      url += `&sort=random`;
+      // Pass already-seen IDs so backend excludes them → no duplicates across pages
+      const seen = Array.from(seenIdsRef.current);
+      if (seen.length > 0) url += `&excludeIds=${seen.join(',')}`;
+    } else if (sortBy === 'newest') {
+      // no extra sort param — API defaults to createdAt desc
+    } else {
+      url += `&sort=${sortBy}`;
+    }
+
     return url;
   };
 
-  const fetchProducts = async (page: number, append: boolean) => {
+  const fetchProducts = async (append: boolean) => {
     if (!branch) return;
     append ? setLoadingMore(true) : setLoading(true);
     try {
-      const res = await fetch(buildUrl(page));
+      const res = await fetch(buildUrl());
       if (res.ok) {
         const data = await res.json();
         const incoming: Product[] = data.products || [];
+
+        // Track seen IDs for random pagination deduplication
+        incoming.forEach(p => seenIdsRef.current.add(p._id));
+
         setProducts(prev => append ? [...prev, ...incoming] : incoming);
-        setTotalProducts(data.total || 0);
-        setHasMore(page < (data.totalPages || 1));
-        setCurrentPage(page);
+
+        if (sortBy === 'default') {
+          // For random mode, hasMore = there are still unseen products left
+          setHasMore(data.hasMore ?? false);
+          // total here = remaining products (excluding seen), so show grand total differently
+          setTotalProducts((data.total ?? 0) + seenIdsRef.current.size);
+        } else {
+          setTotalProducts(data.total || 0);
+          setHasMore(data.page < (data.totalPages || 1));
+        }
       }
     } catch (err) {
       console.error('Failed to fetch products:', err);
     } finally {
       append ? setLoadingMore(false) : setLoading(false);
     }
-  };
-
-  const loadMore = () => {
-    if (!hasMore || loadingMore) return;
-    fetchProducts(currentPage + 1, true);
   };
 
   const performSearch = async (query: string) => {
@@ -269,7 +262,7 @@ export default function ShopPage() {
                 type="text"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search products… (results appear as you type)"
+                placeholder="Search products…"
                 className="w-full pl-10 pr-10 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-orange focus:border-transparent transition-all"
               />
               {searchQuery && (
@@ -337,10 +330,14 @@ export default function ShopPage() {
             {/* Sort */}
             <select
               value={sortBy}
-              onChange={e => { setSortBy(e.target.value as any); setIsSearchMode(false); setSearchQuery(''); }}
+              onChange={e => {
+                setSortBy(e.target.value as any);
+                setIsSearchMode(false);
+                setSearchQuery('');
+              }}
               className="px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-orange bg-white text-sm"
             >
-              <option value="default">Sort: Default (Random)</option>
+              <option value="default">Sort: Default</option>
               <option value="newest">Sort: Newest First</option>
               <option value="name">Sort: A–Z</option>
               <option value="price-asc">Price: Low to High</option>
@@ -392,13 +389,18 @@ export default function ShopPage() {
 
         {/* Results count */}
         {!loading && (
-          <div className="mb-4">
+          <div className="mb-4 flex items-center gap-2">
             <p className="text-gray-600 text-sm">
               {isSearchMode
                 ? `${products.length} ${products.length === 1 ? 'product' : 'products'} found`
                 : `${totalProducts} ${totalProducts === 1 ? 'product' : 'products'} · showing ${products.length}`
               }
             </p>
+            {sortBy === 'default' && !isSearchMode && !loading && (
+              <span className="inline-flex items-center gap-1 text-xs text-gray-400">
+                <Shuffle className="w-3 h-3" /> randomised
+              </span>
+            )}
           </div>
         )}
 
@@ -426,19 +428,25 @@ export default function ShopPage() {
               ))}
             </div>
 
-            {/* Skeleton rows while loading more */}
-            {loadingMore && (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 mt-6">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} className="bg-white rounded-2xl h-80 animate-pulse" />
-                ))}
-              </div>
-            )}
-
-            {/* Infinite scroll sentinel */}
+            {/* Load More */}
             {!isSearchMode && (
-              <div ref={sentinelRef} className="h-10 flex items-center justify-center mt-4">
-                {!hasMore && products.length > 0 && (
+              <div className="mt-10 flex flex-col items-center gap-3">
+                {hasMore ? (
+                  <button
+                    onClick={() => fetchProducts(true)}
+                    disabled={loadingMore}
+                    className="px-8 py-3 bg-brand-orange text-white font-semibold rounded-xl hover:bg-orange-600 active:scale-95 transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {loadingMore ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Loading…
+                      </>
+                    ) : (
+                      'Load More'
+                    )}
+                  </button>
+                ) : (
                   <p className="text-sm text-gray-400">You&apos;ve seen all {totalProducts} products</p>
                 )}
               </div>
