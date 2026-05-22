@@ -6,6 +6,7 @@ import { verifyMobileToken } from '@/lib/verify-mobile-token';
 import {
   notifyBranchPickers,
   buildOrderConfirmationEmail,
+  buildInternalReceiptEmail,
   sendTransactionalEmail,
 } from '@/lib/sendPushNotification';
 
@@ -63,20 +64,49 @@ export async function POST(request: NextRequest) {
 
     const customerName    = body.customerName  || body.customerInfo?.name  || null;
     const customerEmail   = body.customerEmail || body.customerInfo?.email || null;
+    const customerPhone   = body.phone         || body.customerInfo?.phone || null;
     const deliveryAddress = body.deliveryAddress || body.shippingAddress?.address || null;
 
     const enrichedItems = await Promise.all(
       body.items.map(async (item: any) => {
         try {
-          const product = await db.collection('products').findOne({ _id: new ObjectId(item.productId), branchId: new ObjectId(body.branchId) });
-          if (!product) { console.warn(`⚠️ Product not found: ${item.productId}, using cart data`); return item; }
+          const product = await db.collection('products').findOne({
+            _id: new ObjectId(item.productId),
+            branchId: new ObjectId(body.branchId),
+          });
+          if (!product) {
+            console.warn(`⚠️ Product not found: ${item.productId}, using cart data`);
+            return item;
+          }
 
           if (item.variantId && product.variants?.length > 0) {
             const variant = product.variants.find((v: any) => v._id === item.variantId);
-            if (variant) return { productId: item.productId, variantId: item.variantId, name: product.name, variantName: variant.name, sku: variant.sku || item.sku, price: item.price, quantity: item.quantity, image: variant.images?.[0] || product.images?.[0] || item.image || '', barcode: variant.barcode || undefined, description: `${product.description || ''} - ${variant.name}`.trim() };
+            if (variant) {
+              return {
+                productId:   item.productId,
+                variantId:   item.variantId,
+                name:        product.name,
+                variantName: variant.name,
+                sku:         variant.sku || item.sku,
+                price:       item.price,
+                quantity:    item.quantity,
+                image:       variant.images?.[0] || product.images?.[0] || item.image || '',
+                barcode:     variant.barcode || undefined,
+                description: `${product.description || ''} - ${variant.name}`.trim(),
+              };
+            }
           }
 
-          return { productId: item.productId, name: product.name || item.name, sku: product.sku || item.sku, price: item.price, quantity: item.quantity, image: product.images?.[0] || item.image || '', barcode: product.barcode || undefined, description: product.description || undefined };
+          return {
+            productId:   item.productId,
+            name:        product.name || item.name,
+            sku:         product.sku  || item.sku,
+            price:       item.price,
+            quantity:    item.quantity,
+            image:       product.images?.[0] || item.image || '',
+            barcode:     product.barcode || undefined,
+            description: product.description || undefined,
+          };
         } catch (error) {
           console.error(`❌ Error enriching item ${item.productId}:`, error);
           return item;
@@ -84,19 +114,68 @@ export async function POST(request: NextRequest) {
       })
     );
 
+    // Resolve branch name for the internal receipt (best-effort)
+    let branchName: string | undefined;
+    try {
+      const branchDoc = await db.collection('branches').findOne(
+        { _id: new ObjectId(body.branchId) },
+        { projection: { displayName: 1, name: 1 } }
+      );
+      branchName = branchDoc?.displayName || branchDoc?.name || undefined;
+    } catch { /* non-critical */ }
+
     const orderNumber = `ORD-${Date.now()}`;
-    const order = { ...body, items: enrichedItems, branchId: new ObjectId(body.branchId), orderNumber, status: body.status ?? 'pending', createdAt: new Date(), updatedAt: new Date(), customerName, customerEmail, deliveryAddress };
+    const order = {
+      ...body,
+      items:         enrichedItems,
+      branchId:      new ObjectId(body.branchId),
+      orderNumber,
+      status:        body.status ?? 'pending',
+      createdAt:     new Date(),
+      updatedAt:     new Date(),
+      customerName,
+      customerEmail,
+      phone:         customerPhone,
+      deliveryAddress,
+    };
 
     const result  = await db.collection('orders').insertOne(order);
     const orderId = result.insertedId.toString();
     console.log('✅ Order created:', orderId, '| customer:', customerEmail ?? 'guest');
 
-    notifyBranchPickers(body.branchId, { title: '🛒 New Order', body: `Order ${orderNumber} is ready to pick — ${enrichedItems.length} item(s)`, data: { type: 'new_order', orderId, orderNumber } }).catch(() => {});
+    // ── Notify branch pickers (staff app only) ────────────────────────────
+    notifyBranchPickers(body.branchId, {
+      title: '🛒 New Order',
+      body:  `Order ${orderNumber} is ready to pick — ${enrichedItems.length} item(s)`,
+      data:  { type: 'new_order', orderId, orderNumber },
+    }).catch(() => {});
 
+    // ── Customer confirmation email ───────────────────────────────────────
     if (customerEmail) {
-      const emailPayload = buildOrderConfirmationEmail({ orderNumber, customerName: customerName ?? 'Customer', customerEmail, items: enrichedItems, total: body.total ?? 0, deliveryAddress: deliveryAddress ?? undefined });
-      sendTransactionalEmail(emailPayload).catch(() => {});
+      const customerEmailPayload = buildOrderConfirmationEmail({
+        orderNumber,
+        customerName:    customerName ?? 'Customer',
+        customerEmail,
+        items:           enrichedItems,
+        total:           body.total ?? 0,
+        deliveryAddress: deliveryAddress ?? undefined,
+      });
+      sendTransactionalEmail(customerEmailPayload).catch(() => {});
     }
+
+    // ── Internal POS receipt — always sent regardless of customer email ───
+    // Allows staff to ring the order up on the POS system.
+    const internalReceiptPayload = buildInternalReceiptEmail({
+      orderNumber,
+      customerName:    customerName  ?? 'Unknown Customer',
+      customerEmail:   customerEmail ?? '(no email provided)',
+      phone:           customerPhone  ?? undefined,
+      items:           enrichedItems,
+      total:           body.total ?? 0,
+      deliveryAddress: deliveryAddress ?? undefined,
+      branchName,
+    });
+    sendTransactionalEmail(internalReceiptPayload).catch(() => {});
 
     return NextResponse.json({ success: true, orderId, orderNumber }, { status: 201 });
   } catch (error) {

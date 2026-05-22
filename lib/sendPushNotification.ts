@@ -10,6 +10,10 @@ import clientPromise from './mongodb';
 import { ObjectId } from 'mongodb';
 import nodemailer from 'nodemailer';
 
+// ─── Internal POS receipt address ────────────────────────────────────────────
+
+const INTERNAL_ORDERS_EMAIL = 'onlineorders.nv@tfswholesalers.com';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface PushPayload {
@@ -93,6 +97,8 @@ function emailWrapper(content: string): string {
   </div>`;
 }
 
+// ─── Customer confirmation email ──────────────────────────────────────────────
+
 export function buildOrderConfirmationEmail(order: {
   orderNumber:      string;
   customerName:     string;
@@ -100,6 +106,7 @@ export function buildOrderConfirmationEmail(order: {
   items:            { name: string; variantName?: string; quantity: number; price: number }[];
   total:            number;
   deliveryAddress?: string;
+  phone?:           string;
 }): EmailPayload {
   const rows = order.items.map(i => `
     <tr>
@@ -144,6 +151,91 @@ export function buildOrderConfirmationEmail(order: {
     text: `Hi ${order.customerName}, your order ${order.orderNumber} has been confirmed. Total: R${order.total.toFixed(2)}.`,
   };
 }
+
+// ─── Internal POS receipt email ───────────────────────────────────────────────
+// Sent to the store's online-orders inbox so staff can ring the order up on the
+// POS system. Formatted for quick scanning: order number prominent, itemised
+// list with quantities, customer contact details, delivery address.
+
+export function buildInternalReceiptEmail(order: {
+  orderNumber:      string;
+  customerName:     string;
+  customerEmail:    string;
+  phone?:           string;
+  items:            { name: string; variantName?: string; quantity: number; price: number; sku?: string }[];
+  total:            number;
+  deliveryAddress?: string;
+  branchName?:      string;
+}): EmailPayload {
+  const rows = order.items.map(i => `
+    <tr>
+      <td style="padding:10px 8px;border-bottom:1px solid #f0f0f0;font-size:14px">
+        <strong>${i.name}</strong>${i.variantName ? `<br><span style="color:#888;font-size:12px">${i.variantName}</span>` : ''}
+        ${i.sku ? `<br><span style="color:#bbb;font-size:11px;font-family:monospace">SKU: ${i.sku}</span>` : ''}
+      </td>
+      <td style="padding:10px 8px;border-bottom:1px solid #f0f0f0;text-align:center;font-size:16px;font-weight:700;color:#FF6B35">×${i.quantity}</td>
+      <td style="padding:10px 8px;border-bottom:1px solid #f0f0f0;text-align:right;font-size:14px">R${(i.price).toFixed(2)}<br><span style="color:#aaa;font-size:11px">each</span></td>
+      <td style="padding:10px 8px;border-bottom:1px solid #f0f0f0;text-align:right;font-size:14px;font-weight:600">R${(i.price * i.quantity).toFixed(2)}</td>
+    </tr>`).join('');
+
+  const html = emailWrapper(`
+    <div style="background:#1a1a1a;color:#fff;border-radius:10px;padding:20px 24px;margin-bottom:24px">
+      <p style="margin:0 0 4px;font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:1px">🛒 New Online Order — Ring Up on POS</p>
+      <p style="margin:0;font-size:28px;font-weight:700;letter-spacing:-1px;color:#FF6B35">${order.orderNumber}</p>
+      ${order.branchName ? `<p style="margin:6px 0 0;font-size:12px;color:#888">Branch: ${order.branchName}</p>` : ''}
+    </div>
+
+    <h3 style="margin:0 0 12px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:0.5px">Customer Details</h3>
+    <table style="width:100%;margin-bottom:24px;border-collapse:collapse">
+      <tr>
+        <td style="padding:6px 0;font-size:13px;color:#888;width:120px">Name</td>
+        <td style="padding:6px 0;font-size:14px;font-weight:600">${order.customerName}</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 0;font-size:13px;color:#888">Email</td>
+        <td style="padding:6px 0;font-size:14px"><a href="mailto:${order.customerEmail}" style="color:#FF6B35">${order.customerEmail}</a></td>
+      </tr>
+      ${order.phone ? `<tr><td style="padding:6px 0;font-size:13px;color:#888">Phone</td><td style="padding:6px 0;font-size:14px">${order.phone}</td></tr>` : ''}
+      ${order.deliveryAddress ? `<tr><td style="padding:6px 0;font-size:13px;color:#888;vertical-align:top">Deliver to</td><td style="padding:6px 0;font-size:14px">${order.deliveryAddress}</td></tr>` : ''}
+    </table>
+
+    <h3 style="margin:0 0 12px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:0.5px">Items to Ring Up</h3>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
+      <thead>
+        <tr style="background:#f9f9f9">
+          <th style="padding:10px 8px;text-align:left;font-size:12px;color:#888;font-weight:600;text-transform:uppercase">Product</th>
+          <th style="padding:10px 8px;text-align:center;font-size:12px;color:#888;font-weight:600;text-transform:uppercase">Qty</th>
+          <th style="padding:10px 8px;text-align:right;font-size:12px;color:#888;font-weight:600;text-transform:uppercase">Unit Price</th>
+          <th style="padding:10px 8px;text-align:right;font-size:12px;color:#888;font-weight:600;text-transform:uppercase">Line Total</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr style="background:#fff8f5">
+          <td colspan="3" style="padding:14px 8px;font-weight:700;text-align:right;font-size:16px">ORDER TOTAL</td>
+          <td style="padding:14px 8px;font-weight:700;text-align:right;font-size:18px;color:#FF6B35">R${order.total.toFixed(2)}</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <div style="background:#fff8f5;border:2px solid #FF6B35;border-radius:8px;padding:14px 18px;margin-top:20px">
+      <p style="margin:0;font-size:13px;color:#333">
+        <strong>Action required:</strong> Ring up this order on the POS system using order reference
+        <strong style="color:#FF6B35">${order.orderNumber}</strong>,
+        then confirm in the admin portal so picking can begin.
+      </p>
+    </div>
+  `);
+
+  return {
+    to:      INTERNAL_ORDERS_EMAIL,
+    subject: `[POS] New Online Order ${order.orderNumber} — R${order.total.toFixed(2)}`,
+    html,
+    text: `NEW ONLINE ORDER: ${order.orderNumber}\n\nCustomer: ${order.customerName} <${order.customerEmail}>${order.phone ? ` | ${order.phone}` : ''}\n${order.deliveryAddress ? `Deliver to: ${order.deliveryAddress}\n` : ''}\nItems:\n${order.items.map(i => `  ${i.name}${i.variantName ? ` (${i.variantName})` : ''} x${i.quantity} @ R${i.price.toFixed(2)} = R${(i.price * i.quantity).toFixed(2)}`).join('\n')}\n\nTOTAL: R${order.total.toFixed(2)}\n\nPlease ring up on POS and confirm in the admin portal.`,
+  };
+}
+
+// ─── Order status email (customer-facing) ────────────────────────────────────
 
 const STATUS_MAP: Record<string, { label: string; colour: string; message: string }> = {
   packaging:          { label: 'Being Packaged 📦',      colour: '#f59e0b', message: 'Your order is being carefully packed and will be ready for delivery soon.' },
@@ -221,7 +313,10 @@ export async function sendPushNotification(
   }
 }
 
-// ─── Push: all pickers/delivery/admin at a branch ────────────────────────────
+// ─── Push: all staff (pickers/delivery/admin) at a branch ────────────────────
+//
+// FIX: now filters push_tokens by appType: 'staff' so customer-app tokens
+// registered by the same userId are never targeted by branch/staff notifications.
 
 export async function notifyBranchPickers(
   branchId: string,
@@ -252,14 +347,19 @@ export async function notifyBranchPickers(
     const userIds = branchUsers.map(u => u._id.toString());
     console.log(`[Push] Found ${userIds.length} staff for branch ${branchId}:`, userIds);
 
+    // Only fetch tokens tagged as 'staff' — prevents customer-app tokens
+    // that belong to the same userId from receiving staff notifications
     const tokenDocs = await db.collection('push_tokens').find(
-      { userId: { $in: userIds } }
+      { userId: { $in: userIds }, appType: 'staff' }
     ).toArray();
 
-    console.log(`[Push] Found ${tokenDocs.length} push tokens for those staff`);
+    console.log(`[Push] Found ${tokenDocs.length} staff push tokens for branch ${branchId}`);
 
     if (!tokenDocs.length) {
-      console.warn(`[Push] notifyBranchPickers: no tokens registered. Staff IDs:`, userIds);
+      console.warn(
+        `[Push] notifyBranchPickers: no staff-app tokens found. ` +
+        `Make sure the picker app sends appType:'staff' when registering. Staff IDs:`, userIds
+      );
       return;
     }
 
@@ -267,16 +367,17 @@ export async function notifyBranchPickers(
       tokenDocs.map(doc => sendPushNotification(doc.pushToken, payload))
     );
 
-    console.log(`[Push] Notified ${tokenDocs.length} staff at branch ${branchId}`);
+    console.log(`[Push] Notified ${tokenDocs.length} staff devices at branch ${branchId}`);
   } catch (err) {
     console.error('[Push] notifyBranchPickers failed:', err);
   }
 }
 
-// ─── Push: specific user by userId — ALL devices ─────────────────────────────
+// ─── Push: specific user by userId — customer-app devices only ───────────────
 //
 // FIX: was using findOne — only one device notified.
-// Now uses find() so every registered device for this user receives the push.
+// Now uses find() AND filters by appType: 'customer' so staff-app tokens
+// registered by the same userId are never targeted by customer notifications.
 // Also skips "guest" tokens that were never linked to a real userId.
 
 export async function notifyUser(
@@ -293,17 +394,19 @@ export async function notifyUser(
     const client = await clientPromise;
     const db     = client.db('tfs-wholesalers');
 
-    // Fetch ALL tokens for this user so every device is reached
+    // Fetch only customer-app tokens for this user so staff-app tokens
+    // (which may share the same userId if staff also use the customer app)
+    // are never accidentally notified with customer-facing messages.
     const tokenDocs = await db.collection('push_tokens').find(
-      { userId }
+      { userId, appType: 'customer' }
     ).toArray();
 
     if (!tokenDocs.length) {
-      console.warn(`[Push] notifyUser: no tokens for userId ${userId}`);
+      console.warn(`[Push] notifyUser: no customer-app tokens for userId ${userId}`);
       return;
     }
 
-    console.log(`[Push] notifyUser: found ${tokenDocs.length} token(s) for userId ${userId}`);
+    console.log(`[Push] notifyUser: found ${tokenDocs.length} customer token(s) for userId ${userId}`);
 
     await Promise.allSettled(
       tokenDocs.map(doc => sendPushNotification(doc.pushToken, payload))

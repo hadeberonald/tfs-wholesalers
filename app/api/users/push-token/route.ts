@@ -12,7 +12,7 @@ const CORS = {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { pushToken, platform, userId: bodyUserId } = body;
+    const { pushToken, platform, userId: bodyUserId, appType: bodyAppType } = body;
 
     if (!pushToken || typeof pushToken !== 'string' || !pushToken.startsWith('ExponentPushToken')) {
       return NextResponse.json(
@@ -20,6 +20,11 @@ export async function POST(request: NextRequest) {
         { status: 400, headers: CORS }
       );
     }
+
+    // appType must be 'staff' or 'customer' — default to 'customer' if not supplied
+    // The staff picker app should send appType: 'staff' when registering its token
+    const appType: 'staff' | 'customer' =
+      bodyAppType === 'staff' ? 'staff' : 'customer';
 
     // Resolve userId: Bearer token wins (verified identity), then body userId, then null (guest)
     let resolvedUserId: string | null = bodyUserId ?? null;
@@ -37,11 +42,9 @@ export async function POST(request: NextRequest) {
 
     if (resolvedUserId) {
       // ── Authenticated path ─────────────────────────────────────────────────
-      // Always write userId into $set so:
-      //   (a) A newly inserted token gets the userId immediately.
+      // Always write userId + appType into $set so:
+      //   (a) A newly inserted token gets both fields immediately.
       //   (b) A previously-guest token gets re-linked to the real user.
-      // We also delete any OTHER guest-tagged document for this same token
-      // to avoid duplicates from pre-login registration.
       await db.collection('push_tokens').updateOne(
         { pushToken },
         {
@@ -49,6 +52,7 @@ export async function POST(request: NextRequest) {
             pushToken,
             userId:    resolvedUserId,
             platform:  platform ?? 'unknown',
+            appType,                         // ← 'staff' | 'customer'
             updatedAt: new Date(),
           },
           $setOnInsert: {
@@ -59,23 +63,26 @@ export async function POST(request: NextRequest) {
       );
 
       console.log(
-        `[PushToken] Saved (authenticated) — userId: ${resolvedUserId} | platform: ${platform} | token: …${pushToken.slice(-8)}`
+        `[PushToken] Saved (authenticated) — userId: ${resolvedUserId} | appType: ${appType} | platform: ${platform} | token: …${pushToken.slice(-8)}`
       );
     } else {
       // ── Guest path ─────────────────────────────────────────────────────────
       // Store the token but only set userId on first insert (setOnInsert).
       // If the document already exists (i.e. the user previously registered
       // while authenticated), do NOT overwrite the real userId with null.
+      // We DO always update appType — a guest who opens the staff app should
+      // still be tagged correctly.
       await db.collection('push_tokens').updateOne(
         { pushToken },
         {
           $set: {
             platform:  platform ?? 'unknown',
+            appType,                         // ← always update
             updatedAt: new Date(),
           },
           $setOnInsert: {
             pushToken,
-            userId:    null,           // only written on first-ever insert
+            userId:    null,                 // only written on first-ever insert
             createdAt: new Date(),
           },
         },
@@ -83,7 +90,7 @@ export async function POST(request: NextRequest) {
       );
 
       console.log(
-        `[PushToken] Saved (guest) — platform: ${platform} | token: …${pushToken.slice(-8)}`
+        `[PushToken] Saved (guest) — appType: ${appType} | platform: ${platform} | token: …${pushToken.slice(-8)}`
       );
     }
 
