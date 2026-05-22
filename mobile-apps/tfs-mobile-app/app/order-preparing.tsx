@@ -23,13 +23,14 @@ interface OrderItem {
   price: number;
   image?: string;
   autoAdded?: boolean;
-  scanned?: boolean;  // ← set by server when picker scans
+  scanned?: boolean;
 }
 
 interface Order {
   _id: string;
   orderNumber: string;
   orderStatus: string;
+  status?: string;
   items: OrderItem[];
   subtotal: number;
   deliveryFee: number;
@@ -95,7 +96,6 @@ function ActiveDot() {
   return <Animated.View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#FF6B35', transform: [{ scale: sc }] }} />;
 }
 
-// ── Tick animation for a just-scanned item ────────────────────────────────────
 function ItemPickedTick() {
   const scale = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -108,6 +108,56 @@ function ItemPickedTick() {
   );
 }
 
+// ── Status helpers ────────────────────────────────────────────────────────────
+type StatusKey = 'confirmed' | 'picking' | 'packaging' | 'collecting' | 'packed' | 'driver_assigned' | 'out_for_delivery' | 'delivered' | string;
+
+function getStatusMeta(status: StatusKey): { title: string; sub: string } {
+  switch (status) {
+    case 'confirmed':
+      return { title: 'Order Confirmed', sub: 'Your order is confirmed and queued for picking' };
+    case 'picking':
+      return { title: 'Being Picked', sub: 'Our picker is carefully selecting your items right now' };
+    case 'packaging':
+    case 'collecting':
+      return { title: 'Packing Your Order', sub: 'Your items are being packed and prepared for the driver' };
+    case 'packed':
+      return { title: 'Packed & Ready', sub: 'Your order is packed and waiting for a driver to be assigned' };
+    case 'driver_assigned':
+      return { title: 'Driver Assigned', sub: 'A driver has been assigned and will collect your order shortly' };
+    default:
+      return { title: 'Processing', sub: 'Your order is being processed' };
+  }
+}
+
+// Steps ordered — each carries an explicit list of statuses that mark it as "done" or "active"
+const STEP_STATUSES: { label: string; doneAt: StatusKey[]; activeAt: StatusKey[] }[] = [
+  {
+    label: 'Order Confirmed',
+    doneAt: ['picking', 'packaging', 'collecting', 'packed', 'driver_assigned', 'out_for_delivery', 'delivered'],
+    activeAt: ['confirmed'],
+  },
+  {
+    label: 'Being Picked',
+    doneAt: ['packaging', 'collecting', 'packed', 'driver_assigned', 'out_for_delivery', 'delivered'],
+    activeAt: ['picking'],
+  },
+  {
+    label: 'Packed & Ready',
+    doneAt: ['driver_assigned', 'out_for_delivery', 'delivered'],
+    activeAt: ['packaging', 'collecting', 'packed'],
+  },
+  {
+    label: 'Driver Assigned',
+    doneAt: ['out_for_delivery', 'delivered'],
+    activeAt: ['driver_assigned'],
+  },
+  {
+    label: 'Out for Delivery',
+    doneAt: ['delivered'],
+    activeAt: ['out_for_delivery'],
+  },
+];
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function OrderPreparingScreen() {
   const router = useRouter();
@@ -115,7 +165,6 @@ export default function OrderPreparingScreen() {
 
   const [order, setOrder]     = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
-  // Track which items are scanned locally so we can animate them immediately
   const [scannedIds, setScannedIds] = useState<Set<string>>(new Set());
 
   const heroOp = useRef(new Animated.Value(0)).current;
@@ -123,8 +172,6 @@ export default function OrderPreparingScreen() {
   const cardOp = useRef(new Animated.Value(0)).current;
 
   // ── Navigation gate ───────────────────────────────────────────────────────
-  // DB documents use `status`; some legacy code uses `orderStatus`.
-  // Always resolve whichever field is present.
   const navigate = useCallback((status: string | undefined) => {
     if (!status) return false;
     if (['packaging', 'collecting'].includes(status)) {
@@ -136,14 +183,12 @@ export default function OrderPreparingScreen() {
   }, [orderId, router]);
 
   // ── Socket: order status changes ─────────────────────────────────────────
-  const handleOrderUpdate = useCallback((o: any) => {
-    // Normalise — DB field is `status`, customer app Order type calls it `orderStatus`
+  const handleOrderUpdate = useCallback((o: Order) => {
     const status = o.status ?? o.orderStatus;
     if (navigate(status)) return;
-    setOrder({ ...o, status, orderStatus: status });  // normalise both field names
+    setOrder({ ...o, status, orderStatus: status });
     setLoading(false);
-    // Re-sync scanned state from server
-    setScannedIds(new Set(o.items.filter(i => i.scanned).map(i => i.productId)));
+    setScannedIds(new Set(o.items.filter((item: OrderItem) => item.scanned).map((item: OrderItem) => item.productId)));
     Animated.parallel([
       Animated.spring(heroOp, { toValue: 1, friction: 7, tension: 50, useNativeDriver: true }),
       Animated.timing(cardOp, { toValue: 1, duration: 500, useNativeDriver: true }),
@@ -151,7 +196,7 @@ export default function OrderPreparingScreen() {
   }, [navigate]);
 
   // ── Socket: per-item scan ─────────────────────────────────────────────────
-  const handleItemScanned = useCallback((payload: any) => {
+  const handleItemScanned = useCallback((payload: { productId: string; order?: Order }) => {
     setScannedIds(prev => new Set([...prev, payload.productId]));
     if (payload.order) {
       const s = payload.order.status ?? payload.order.orderStatus;
@@ -187,20 +232,20 @@ export default function OrderPreparingScreen() {
     <View style={s.bg}><View style={s.centered}><Package color="#d1d5db" size={52} /><Text style={s.mutedText}>Order not found</Text></View></View>
   );
 
-  const currentStatus = (order as any).status ?? order.orderStatus;
+  const currentStatus: StatusKey = (order as Order).status ?? order.orderStatus;
   const isPicking    = currentStatus === 'picking';
-  const regularItems = order.items.filter(i => !i.autoAdded);
-  const freeItems    = order.items.filter(i => i.autoAdded);
-  const scannedCount = order.items.filter(i => i.scanned || scannedIds.has(i.productId)).length;
+  const regularItems = order.items.filter((i: OrderItem) => !i.autoAdded);
+  const freeItems    = order.items.filter((i: OrderItem) => i.autoAdded);
+  const scannedCount = order.items.filter((i: OrderItem) => i.scanned || scannedIds.has(i.productId)).length;
   const totalCount   = order.items.length;
 
-  const steps = [
-    { label: 'Order Confirmed',  done: true,      active: false },
-    { label: 'Being Picked',     done: isPicking,  active: isPicking },
-    { label: 'Packed & Ready',   done: false,      active: false },
-    { label: 'Driver Assigned',  done: false,      active: false },
-    { label: 'Out for Delivery', done: false,      active: false },
-  ];
+  const { title: heroTitle, sub: heroSub } = getStatusMeta(currentStatus);
+
+  const steps = STEP_STATUSES.map(step => ({
+    label:  step.label,
+    done:   step.doneAt.includes(currentStatus),
+    active: step.activeAt.includes(currentStatus),
+  }));
 
   return (
     <View style={s.bg}>
@@ -224,21 +269,17 @@ export default function OrderPreparingScreen() {
               <PulseRings size={130} />
               <View style={s.heroInner}><ShoppingBag color="#FF6B35" size={40} /></View>
             </View>
-            <Text style={s.heroTitle}>{isPicking ? 'Being Picked' : 'Order Confirmed'}</Text>
-            <Text style={s.heroSub}>
-              {isPicking
-                ? 'Our picker is carefully selecting your items right now'
-                : 'Your order is confirmed and queued for picking'}
-            </Text>
+            <Text style={s.heroTitleText}>{heroTitle}</Text>
+            <Text style={s.heroSubText}>{heroSub}</Text>
             <View style={{ marginTop: 20 }}><BounceDots /></View>
           </Animated.View>
 
           <Animated.View style={{ opacity: cardOp }}>
-            {/* Live status */}
+            {/* Live status card */}
             <View style={[s.card, { borderLeftWidth: 4, borderLeftColor: '#FF6B35' }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                 <ActiveDot />
-                <Text style={s.cardMainText}>{isPicking ? 'Picker Active' : 'Awaiting Picker'}</Text>
+                <Text style={s.cardMainText}>{isPicking ? 'Picker Active' : heroTitle}</Text>
                 <View style={s.liveBadge}><Text style={s.liveBadgeText}>LIVE</Text></View>
               </View>
               {order.estimatedMinutes
@@ -253,7 +294,7 @@ export default function OrderPreparingScreen() {
               )}
             </View>
 
-            {/* ── Real-time picking progress ── */}
+            {/* Real-time picking progress */}
             {isPicking && (
               <View style={[s.card, { borderColor: '#fed7aa', borderWidth: 1.5 }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
@@ -263,16 +304,14 @@ export default function OrderPreparingScreen() {
                   </View>
                 </View>
 
-                {/* Progress bar */}
                 <View style={s.pickBar}>
-                  <Animated.View style={[s.pickBarFill, { width: `${totalCount > 0 ? (scannedCount / totalCount) * 100 : 0}%` }]} />
+                  <View style={[s.pickBarFill, { width: `${totalCount > 0 ? (scannedCount / totalCount) * 100 : 0}%` }]} />
                 </View>
 
-                {/* Item list */}
-                {[...regularItems, ...freeItems].map((item, i) => {
+                {[...regularItems, ...freeItems].map((item: OrderItem, idx: number) => {
                   const isItemScanned = item.scanned || scannedIds.has(item.productId);
                   return (
-                    <View key={`${item.productId}-${i}`} style={[s.pickItemRow, isItemScanned && s.pickItemRowDone]}>
+                    <View key={`${item.productId}-${idx}`} style={[s.pickItemRow, isItemScanned && s.pickItemRowDone]}>
                       {item.image
                         ? <Image source={{ uri: item.image }} style={s.pickItemImg} />
                         : <View style={[s.pickItemImg, { backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center' }]}><Package color="#d1d5db" size={14} /></View>
@@ -306,16 +345,25 @@ export default function OrderPreparingScreen() {
             {/* Steps */}
             <View style={s.card}>
               <Text style={s.cardLabel}>ORDER PROGRESS</Text>
-              {steps.map((step, i) => (
-                <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+              {steps.map((step, idx: number) => (
+                <View key={idx} style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
                   <View style={{ alignItems: 'center', width: 32 }}>
-                    <View style={[s.stepDot, step.active && s.stepDotActive, step.done && !step.active && s.stepDotDone, !step.done && !step.active && s.stepDotPending]}>
+                    <View style={[
+                      s.stepDot,
+                      step.active && s.stepDotActive,
+                      step.done && !step.active && s.stepDotDone,
+                      !step.done && !step.active && s.stepDotPending,
+                    ]}>
                       {step.done && !step.active && <CheckCircle color="#fff" size={13} />}
                       {step.active && <Zap color="#FF6B35" size={12} />}
                     </View>
-                    {i < steps.length - 1 && <View style={[s.stepLine, step.done && { backgroundColor: '#10b981' }]} />}
+                    {idx < steps.length - 1 && <View style={[s.stepLine, step.done && { backgroundColor: '#10b981' }]} />}
                   </View>
-                  <Text style={[s.stepLabel, step.done && !step.active && s.stepLabelDone, step.active && s.stepLabelActive]}>{step.label}</Text>
+                  <Text style={[
+                    s.stepLabel,
+                    step.done && !step.active && s.stepLabelDone,
+                    step.active && s.stepLabelActive,
+                  ]}>{step.label}</Text>
                 </View>
               ))}
             </View>
@@ -353,8 +401,8 @@ const s = StyleSheet.create({
   liveText: { color: '#FF6B35', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
   heroSection: { alignItems: 'center', paddingVertical: 24 },
   heroInner: { width: 92, height: 92, borderRadius: 46, backgroundColor: 'rgba(255,107,53,0.08)', borderWidth: 2, borderColor: 'rgba(255,107,53,0.2)', alignItems: 'center', justifyContent: 'center' },
-  heroTitle: { fontSize: 26, fontWeight: '800', color: '#1f2937', letterSpacing: -0.5, marginBottom: 8 },
-  heroSub: { fontSize: 14, color: '#6b7280', textAlign: 'center', lineHeight: 21, maxWidth: 270 },
+  heroTitleText: { fontSize: 26, fontWeight: '800', color: '#1f2937', letterSpacing: -0.5, marginBottom: 8 },
+  heroSubText: { fontSize: 14, color: '#6b7280', textAlign: 'center', lineHeight: 21, maxWidth: 270 },
   card: CARD,
   cardLabel: { color: '#9ca3af', fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 14 },
   cardMainText: { flex: 1, fontSize: 16, fontWeight: '700', color: '#1f2937' },
@@ -364,8 +412,6 @@ const s = StyleSheet.create({
   pickerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#f3f4f6' },
   pickerAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(255,107,53,0.1)', alignItems: 'center', justifyContent: 'center' },
   pickerNameText: { color: '#4b5563', fontSize: 13, fontWeight: '500' },
-
-  // Real-time picking card
   pickProgressPill: { backgroundColor: '#fff7ed', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, borderWidth: 1, borderColor: '#fed7aa' },
   pickProgressText: { color: '#FF6B35', fontSize: 12, fontWeight: '700' },
   pickBar: { height: 6, backgroundColor: '#f3f4f6', borderRadius: 3, overflow: 'hidden', marginBottom: 14 },
@@ -379,7 +425,6 @@ const s = StyleSheet.create({
   pickItemPending: { width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, borderColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center' },
   allPickedBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f0fdf4', borderRadius: 10, padding: 12, marginTop: 12 },
   allPickedText: { color: '#15803d', fontSize: 13, fontWeight: '700' },
-
   stepDot: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5 },
   stepDotActive: { borderColor: '#FF6B35', backgroundColor: 'rgba(255,107,53,0.08)' },
   stepDotDone: { backgroundColor: '#10b981', borderColor: '#10b981' },

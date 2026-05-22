@@ -13,6 +13,7 @@ interface Special {
   slug: string;
   description: string;
   type: string;
+  source?: string;
   badgeText?: string;
   images?: string[];
   conditions: any;
@@ -31,6 +32,7 @@ interface Product {
   images: string[];
   stockLevel: number;
   sku: string;
+  description?: string;
 }
 
 interface SpecialCardProps {
@@ -91,6 +93,15 @@ export default function SpecialCard({ special }: SpecialCardProps) {
 
     return () => { cancelled = true; };
   }, [special._id]);
+
+  // For POS specials the description is always blank — fall back to the product's own description.
+  const isPosSpecial = special.source === 'pos_ftp_sync';
+  const displayDescription =
+    special.description?.trim()
+      ? special.description
+      : isPosSpecial
+        ? (product?.description?.trim() || '')
+        : special.description;
 
   const getSpecialBadge = () => {
     if (special.badgeText) return special.badgeText;
@@ -290,7 +301,7 @@ export default function SpecialCard({ special }: SpecialCardProps) {
             {special.name}
           </h3>
           <p className="text-[11px] text-gray-500 line-clamp-2 mb-2 min-h-[1.75rem]">
-            {special.description}
+            {displayDescription}
           </p>
         </Link>
 

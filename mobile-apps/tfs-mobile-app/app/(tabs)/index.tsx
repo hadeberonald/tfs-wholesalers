@@ -5,12 +5,12 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ShoppingBag, Package, Tag, ArrowRight } from 'lucide-react-native';
+import { ShoppingBag, Package, Tag, ArrowRight, Star } from 'lucide-react-native';
 import { useStore } from '@/lib/store';
 import ProductCard from '@/components/ProductCard';
 import SpecialCard from '@/components/SpecialCard';
 import ComboCard from '@/components/ComboCard';
-import ListedCategoriesStrip from '@/components/ListedCategoriesStrip'; // ← NEW (mobile component)
+import ListedCategoriesStrip from '@/components/ListedCategoriesStrip';
 import api from '@/lib/api';
 import type { Category, Product, Special } from '@/lib/types';
 
@@ -26,18 +26,19 @@ interface Combo {
 
 type FeedItem =
   | { kind: 'special'; data: Special }
-  | { kind: 'combo';   data: Combo   };
+  | { kind: 'combo';   data: Combo };
 
 export default function HomeScreen() {
   const router = useRouter();
   const branch = useStore((state) => state.branch);
 
-  const [featuredCategories, setFeaturedCategories] = useState<Category[]>([]);
-  const [categoryProducts,   setCategoryProducts]   = useState<Record<string, Product[]>>({});
-  const [featuredSpecials,   setFeaturedSpecials]   = useState<Special[]>([]);
-  const [featuredCombos,     setFeaturedCombos]     = useState<Combo[]>([]);
-  const [loading,     setLoading]     = useState(true);
-  const [activeSlide, setActiveSlide] = useState(0);
+  const [featuredCategories,  setFeaturedCategories]  = useState<Category[]>([]);
+  const [categoryProducts,    setCategoryProducts]    = useState<Record<string, Product[]>>({});
+  const [featuredProducts,    setFeaturedProducts]    = useState<Product[]>([]);
+  const [featuredSpecials,    setFeaturedSpecials]    = useState<Special[]>([]);
+  const [featuredCombos,      setFeaturedCombos]      = useState<Combo[]>([]);
+  const [loading,             setLoading]             = useState(true);
+  const [activeSlide,         setActiveSlide]         = useState(0);
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => { if (branch) loadData(); }, [branch]);
@@ -45,14 +46,17 @@ export default function HomeScreen() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [categoriesRes, specialsRes, combosRes] = await Promise.all([
+      const [categoriesRes, specialsRes, combosRes, featuredRes] = await Promise.all([
         api.get(`/api/categories?branchId=${branch?._id}&featured=true`),
         api.get(`/api/specials?branchId=${branch?._id}&active=true&featured=true`),
         api.get(`/api/combos?branchId=${branch?._id}&active=true`),
+        api.get(`/api/products?branchId=${branch?._id}&featured=true&limit=8`),
       ]);
 
       const categories = categoriesRes.data.categories || [];
       setFeaturedCategories(categories);
+
+      setFeaturedProducts(featuredRes.data.products || []);
 
       const now = new Date();
       setFeaturedSpecials(
@@ -112,7 +116,7 @@ export default function HomeScreen() {
   return (
     <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
 
-      {/* ── Featured category hero carousel ───────────────────────────────── */}
+      {/* ── Featured category hero carousel ─────────────────────────────── */}
       {featuredCategories.length > 0 && (
         <View style={styles.carouselContainer}>
           <ScrollView
@@ -145,36 +149,23 @@ export default function HomeScreen() {
                   </View>
                 )}
                 <LinearGradient
-  colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.75)']}
-  style={styles.carouselOverlay}
-  locations={[0, 0.45, 1]}
->
-  <View style={styles.carouselContentInner}>
-    <Text style={styles.carouselTitle}>
-      {category.name}
-    </Text>
-
-    {category.description && (
-      <Text
-        style={styles.carouselDescription}
-        numberOfLines={2}
-      >
-        {category.description}
-      </Text>
-    )}
-
-    <View style={styles.shopNowButton}>
-      <Text style={styles.shopNowText}>
-        Shop Now
-      </Text>
-
-      <ArrowRight
-        color="#fff"
-        size={16}
-      />
-    </View>
-  </View>
-</LinearGradient>
+                  colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.75)']}
+                  style={styles.carouselOverlay}
+                  locations={[0, 0.45, 1]}
+                >
+                  <View style={styles.carouselContentInner}>
+                    <Text style={styles.carouselTitle}>{category.name}</Text>
+                    {category.description && (
+                      <Text style={styles.carouselDescription} numberOfLines={2}>
+                        {category.description}
+                      </Text>
+                    )}
+                    <View style={styles.shopNowButton}>
+                      <Text style={styles.shopNowText}>Shop Now</Text>
+                      <ArrowRight color="#fff" size={16} />
+                    </View>
+                  </View>
+                </LinearGradient>
               </TouchableOpacity>
             ))}
           </ScrollView>
@@ -186,14 +177,14 @@ export default function HomeScreen() {
         </View>
       )}
 
-      {/* ── Listed categories strip — no heading, directly after hero ──────── */}
+      {/* ── Listed categories strip ──────────────────────────────────────── */}
       {!!branch._id && (
         <View style={styles.stripSection}>
           <ListedCategoriesStrip branchId={branch._id} />
         </View>
       )}
 
-      {/* ── Deals & Specials ───────────────────────────────────────────────── */}
+      {/* ── Deals & Specials ─────────────────────────────────────────────── */}
       {dealsFeed.length > 0 && (
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -218,7 +209,7 @@ export default function HomeScreen() {
         </View>
       )}
 
-      {/* ── Category product grids ─────────────────────────────────────────── */}
+      {/* ── Per-category product grids ───────────────────────────────────── */}
       {featuredCategories.map(category => {
         const products = categoryProducts[category._id] || [];
         if (!products.length) return null;
@@ -242,8 +233,31 @@ export default function HomeScreen() {
         );
       })}
 
-      {/* ── Empty state ────────────────────────────────────────────────────── */}
-      {featuredCategories.length === 0 && dealsFeed.length === 0 && (
+      {/* ── Featured Products ────────────────────────────────────────────── */}
+      {featuredProducts.length > 0 && (
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionTitleContainer}>
+              <Star color="#FF6B35" size={22} />
+              <Text style={styles.sectionTitle}>Featured Products</Text>
+            </View>
+            <TouchableOpacity onPress={() => router.push('/(tabs)/shop')}>
+              <View style={styles.viewAllButton}>
+                <Text style={styles.viewAllText}>View All</Text>
+                <ArrowRight color="#FF6B35" size={16} />
+              </View>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.productGrid}>
+            {featuredProducts.map(product => (
+              <ProductCard key={product._id} product={product} />
+            ))}
+          </View>
+        </View>
+      )}
+
+      {/* ── Empty state ──────────────────────────────────────────────────── */}
+      {featuredCategories.length === 0 && dealsFeed.length === 0 && featuredProducts.length === 0 && (
         <View style={styles.emptyState}>
           <Package color="#9ca3af" size={60} />
           <Text style={styles.emptyText}>No featured items yet</Text>
@@ -252,65 +266,48 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
       )}
+
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  scrollView:      { flex: 1, backgroundColor: '#f9fafb' },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  scrollView:       { flex: 1, backgroundColor: '#f9fafb' },
+  centerContainer:  { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
-  carouselContainer:   { marginBottom: 0, marginTop: 16 },
-  carouselContent:     { gap: 16 },
-  carouselSlide:       { width: CAROUSEL_WIDTH, height: 200, borderRadius: 16, overflow: 'hidden' },
-  carouselImage:       { width: '100%', height: '100%' },
-  carouselPlaceholder: { backgroundColor: '#fef3e9', alignItems: 'center', justifyContent: 'center' },
-  carouselOverlay:     { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, justifyContent: 'flex-end' },
-  carouselTitle:       { fontSize: 20, fontWeight: 'bold', color: '#fff', marginBottom: 4 },
-  carouselDescription: { fontSize: 14, color: '#fff', opacity: 0.95 },
-  indicators:          { flexDirection: 'row', justifyContent: 'center', gap: 8, paddingVertical: 10 },
-  indicator:           { width: 8, height: 8, borderRadius: 4, backgroundColor: '#d1d5db' },
-  indicatorActive:     { width: 24, backgroundColor: '#FF6B35' },
-  carouselContentInner: {
-  transform: [{ translateY: 0 }],
-},
+  carouselContainer:    { marginBottom: 0, marginTop: 16 },
+  carouselContent:      { gap: 16 },
+  carouselSlide:        { width: CAROUSEL_WIDTH, height: 200, borderRadius: 16, overflow: 'hidden' },
+  carouselImage:        { width: '100%', height: '100%' },
+  carouselPlaceholder:  { backgroundColor: '#fef3e9', alignItems: 'center', justifyContent: 'center' },
+  carouselOverlay:      { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, justifyContent: 'flex-end' },
+  carouselContentInner: { transform: [{ translateY: 0 }] },
+  carouselTitle:        { fontSize: 20, fontWeight: 'bold', color: '#fff', marginBottom: 4 },
+  carouselDescription:  { fontSize: 14, color: '#fff', opacity: 0.95 },
+  indicators:           { flexDirection: 'row', justifyContent: 'center', gap: 8, paddingVertical: 10 },
+  indicator:            { width: 8, height: 8, borderRadius: 4, backgroundColor: '#d1d5db' },
+  indicatorActive:      { width: 24, backgroundColor: '#FF6B35' },
 
-shopNowButton: {
-  marginTop: 14,
-  alignSelf: 'flex-start',
-  flexDirection: 'row',
-  alignItems: 'center',
-  gap: 6,
+  shopNowButton: {
+    marginTop: 14, alignSelf: 'flex-start',
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#FF6B35', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 999,
+  },
+  shopNowText: { color: '#fff', fontSize: 14, fontWeight: '700' },
 
-  backgroundColor: '#FF6B35',
-
-  paddingHorizontal: 16,
-  paddingVertical: 10,
-
-  borderRadius: 999,
-},
-
-shopNowText: {
-  color: '#fff',
-  fontSize: 14,
-  fontWeight: '700',
-},
-
-  // Strip sits flush under the carousel with its own white background + border
   stripSection: {
     backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomWidth: 1, borderBottomColor: '#f3f4f6',
     marginBottom: 8,
   },
 
-  section:              { marginBottom: 24, paddingHorizontal: 16 },
-  sectionHeader:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  sectionTitleContainer:{ flexDirection: 'row', alignItems: 'center', gap: 8 },
-  sectionTitle:         { fontSize: 20, fontWeight: 'bold', color: '#1f2937' },
-  viewAllButton:        { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  viewAllText:          { fontSize: 14, color: '#FF6B35', fontWeight: '600' },
-  productGrid:          { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  section:               { marginBottom: 24, paddingHorizontal: 16 },
+  sectionHeader:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  sectionTitleContainer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  sectionTitle:          { fontSize: 20, fontWeight: 'bold', color: '#1f2937' },
+  viewAllButton:         { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  viewAllText:           { fontSize: 14, color: '#FF6B35', fontWeight: '600' },
+  productGrid:           { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
 
   emptyState:     { alignItems: 'center', paddingVertical: 60 },
   emptyText:      { fontSize: 16, color: '#6b7280', marginTop: 16, marginBottom: 24 },

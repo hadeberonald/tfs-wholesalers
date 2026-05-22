@@ -89,6 +89,7 @@ export interface WishlistItem {
 interface StoreState {
   user: User | null;
   setUser: (user: User | null) => void;
+  isAuthenticated: boolean;
   branch: Branch | null;
   setBranch: (branch: Branch | null) => void;
   items: CartItem[];
@@ -102,6 +103,7 @@ interface StoreState {
   wishlist: WishlistItem[];
   addToWishlist: (item: WishlistItem) => void;
   removeFromWishlist: (id: string, variantId?: string) => void;
+  clearWishlist: () => void;
   isInWishlist: (id: string, variantId?: string) => boolean;
   pendingDeliveryAddress: DeliveryAddress | null;
   setPendingDeliveryAddress: (address: DeliveryAddress | null) => void;
@@ -112,7 +114,9 @@ export const useStore = create<StoreState>()(
   persist(
     (set, get) => ({
       user:   null,
-      setUser: (user) => set({ user }),
+      setUser: (user) => set({ user, isAuthenticated: user !== null }),
+
+      isAuthenticated: false,
 
       branch:    null,
       setBranch: (branch) => set({ branch }),
@@ -196,6 +200,8 @@ export const useStore = create<StoreState>()(
         }));
       },
 
+      clearWishlist: () => set({ wishlist: [] }),
+
       isInWishlist: (id, variantId) =>
         get().wishlist.some((w) =>
           variantId
@@ -206,21 +212,21 @@ export const useStore = create<StoreState>()(
       pendingDeliveryAddress: null,
       setPendingDeliveryAddress: (address) => set({ pendingDeliveryAddress: address }),
 
-      // ── Logout — unregister push token then clear everything ───────────────
       logout: async () => {
         await unregisterPushNotifications().catch(() => {});
         await AsyncStorage.multiRemove(['user', 'selectedBranch', 'auth_token', 'push_token']);
-        set({ user: null, branch: null, items: [], wishlist: [], pendingDeliveryAddress: null });
+        set({ user: null, isAuthenticated: false, branch: null, items: [], wishlist: [], pendingDeliveryAddress: null });
       },
     }),
     {
       name:    'tfs-customer-store',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
-        user:     state.user,
-        branch:   state.branch,
-        items:    state.items,
-        wishlist: state.wishlist,
+        user:            state.user,
+        isAuthenticated: state.isAuthenticated,
+        branch:          state.branch,
+        items:           state.items,
+        wishlist:        state.wishlist,
       }),
     }
   )

@@ -18,7 +18,8 @@ export default function WishlistScreen() {
   const removeFromWishlist = useStore((state) => state.removeFromWishlist);
   const clearWishlist = useStore((state) => state.clearWishlist);
   const addToCart = useStore((state) => state.addToCart);
-  const isAuthenticated = useStore((state) => state.isAuthenticated);
+  const user = useStore((state) => state.user);
+  const isAuthenticated = user !== null;
 
   if (!isAuthenticated) {
     return (
