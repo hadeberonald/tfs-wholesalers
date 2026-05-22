@@ -398,7 +398,7 @@ export default function ShopPage() {
             </p>
             {sortBy === 'default' && !isSearchMode && !loading && (
               <span className="inline-flex items-center gap-1 text-xs text-gray-400">
-                <Shuffle className="w-3 h-3" /> randomised
+                <Shuffle className="w-3 h-3" /> 
               </span>
             )}
           </div>

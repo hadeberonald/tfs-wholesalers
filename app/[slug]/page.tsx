@@ -1,8 +1,7 @@
 import { notFound } from 'next/navigation';
 import clientPromise from '@/lib/mongodb';
-import { ObjectId } from 'mongodb';
 import FeaturedCategoriesCarousel from '@/components/FeaturedCategoriesCarousel';
-import ListedCategoriesStrip from '@/components/ListedCategoriesStrip'; // ← NEW
+import FeaturedCategoriesWithProducts from '@/components/home/FeaturedCategoriesWithProducts';
 import SpecialsSection from '@/components/home/SpecialsSection';
 import FeaturedProducts from '@/components/home/FeaturedProducts';
 import HeroSection from '@/components/home/HeroSection';
@@ -24,21 +23,6 @@ async function getBranchData(branchSlug: string) {
 
   if (!branch) return null;
 
-  const [categories, specials, products] = await Promise.all([
-    db.collection('categories')
-      .find({ branchId: branch._id, active: true, featured: true })
-      .limit(10)
-      .toArray(),
-    db.collection('specials')
-      .find({ branchId: branch._id, active: true })
-      .limit(10)
-      .toArray(),
-    db.collection('products')
-      .find({ branchId: branch._id, active: true, featured: true })
-      .limit(12)
-      .toArray(),
-  ]);
-
   return {
     branch: {
       id: branch._id.toString(),
@@ -46,9 +30,6 @@ async function getBranchData(branchSlug: string) {
       slug: branch.slug,
       displayName: branch.displayName,
     },
-    categories,
-    specials,
-    products,
   };
 }
 
@@ -60,12 +41,19 @@ export default async function BranchHomePage({ params }: BranchHomePageProps) {
 
   return (
     <div>
+      {/* Hero banner */}
       <HeroSection branchId={data.branch.id} />
 
-      
-
-      <SpecialsSection />
+      {/* Featured category carousel + listed categories strip */}
       <FeaturedCategoriesCarousel />
+
+      {/* Specials / deals row */}
+      <SpecialsSection />
+
+      {/* Per-category product rows (4 products each, View All button) */}
+      <FeaturedCategoriesWithProducts />
+
+      {/* Featured products section */}
       <FeaturedProducts />
     </div>
   );
