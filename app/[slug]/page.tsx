@@ -43,16 +43,12 @@ export default async function BranchHomePage({ params }: BranchHomePageProps) {
     <div>
       {/* Hero banner */}
       <HeroSection branchId={data.branch.id} />
-
-      {/* Featured category carousel + listed categories strip */}
-      <FeaturedCategoriesCarousel />
-
       {/* Specials / deals row */}
       <SpecialsSection />
-
+      {/* Featured category carousel + listed categories strip */}
+      <FeaturedCategoriesCarousel />
       {/* Per-category product rows (4 products each, View All button) */}
       <FeaturedCategoriesWithProducts />
-
       {/* Featured products section */}
       <FeaturedProducts />
     </div>

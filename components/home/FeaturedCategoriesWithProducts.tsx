@@ -124,15 +124,6 @@ export default function FeaturedCategoriesWithProducts() {
               {/* Row header */}
               <div className="flex items-center justify-between mb-5">
                 <div className="flex items-center gap-3">
-                  {(category.image || category.banner) && (
-                    <div className="w-9 h-9 rounded-full overflow-hidden border-2 border-orange-200 flex-shrink-0 hidden sm:block">
-                      <img
-                        src={(category.image || category.banner)!}
-                        alt={category.name}
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                  )}
                   <div>
                     <h2 className="text-xl md:text-2xl font-bold text-brand-black">
                       {category.name}
