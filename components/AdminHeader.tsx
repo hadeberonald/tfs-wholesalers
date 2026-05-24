@@ -33,8 +33,8 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
     try {
       // Use the user's own id to PATCH their password.
       // The endpoint already handles password hashing when password is in the body.
-      const res = await fetch(`/api/admin/users/${user.id}`, {
-        method: 'PUT',
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentPassword: current, password: next }),
       });
