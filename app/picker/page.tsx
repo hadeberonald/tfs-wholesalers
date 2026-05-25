@@ -1,24 +1,22 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { Download, Lock, AlertCircle, LogIn } from 'lucide-react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 
+const DEFAULT_SLUG = 'vryheid';
+
 export default function PickerDownloadPage() {
   const { user, loading } = useAuth();
-  const router = useRouter();
   const [accessChecked, setAccessChecked] = useState(false);
 
   const ALLOWED_ROLES = ['admin', 'picker'];
   const hasAccess = user && ALLOWED_ROLES.includes(user.role);
 
   useEffect(() => {
-    if (!loading) {
-      setAccessChecked(true);
-    }
+    if (!loading) setAccessChecked(true);
   }, [loading]);
 
   // --- Loading state ---
@@ -46,7 +44,7 @@ export default function PickerDownloadPage() {
             You need to sign in to access the Picker App download.
           </p>
           <Link
-            href={`/login?redirect=picker`}
+            href={`/${DEFAULT_SLUG}/login?redirect=picker`}
             className="inline-flex items-center justify-center gap-2 bg-brand-orange hover:bg-orange-600 text-white font-semibold px-6 py-4 rounded-2xl transition-colors w-full"
           >
             <LogIn className="w-5 h-5" />
@@ -68,8 +66,7 @@ export default function PickerDownloadPage() {
           <h1 className="text-2xl font-bold text-gray-900 mb-3">Access Denied</h1>
           <p className="text-gray-500 mb-8">
             The Picker App is only available to <span className="font-semibold text-gray-700">admins</span> and{' '}
-            <span className="font-semibold text-gray-700">pickers</span>. Your account doesn&apos;t have the required
-            permissions.
+            <span className="font-semibold text-gray-700">pickers</span>. Your account doesn&apos;t have the required permissions.
           </p>
           <Link
             href="/"
@@ -85,62 +82,76 @@ export default function PickerDownloadPage() {
   // --- Authorised: show the download page ---
   return (
     <main className="min-h-screen bg-gray-50 pt-20">
-      <div className="max-w-3xl mx-auto px-4 py-12">
+      <div className="max-w-5xl mx-auto px-4 py-12">
         {/* Header */}
         <div className="text-center mb-12">
           <div className="w-20 h-20 bg-orange-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
             <Download className="w-10 h-10 text-orange-600" />
           </div>
 
-          <h1 className="text-5xl font-bold text-gray-900 mb-4">Picker App</h1>
+          <h1 className="text-5xl font-bold text-gray-900 mb-4">
+            Download Picker App
+          </h1>
 
-          <p className="text-lg text-gray-600 max-w-xl mx-auto">
-            The TFS Wholesalers Picker App — built for warehouse pickers and admins to manage and fulfil orders on the go.
+          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+            Access the TFS Wholesalers Picker App on Android and iOS.
           </p>
         </div>
 
-        {/* Download Card */}
-        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-10">
-          <div className="flex flex-col items-center text-center">
-            <div className="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center mb-6">
-              <Download className="w-8 h-8 text-orange-600" />
+        {/* Download Options */}
+        <div className="grid md:grid-cols-2 gap-6">
+          {/* Android */}
+          <a
+            href="/apk/picker.apk"
+            download
+            className="bg-white rounded-3xl shadow-sm border border-gray-100 p-10 hover:shadow-md transition-all"
+          >
+            <div className="flex flex-col items-center text-center">
+              <div className="relative w-[220px] h-[70px] mb-8">
+                <Image
+                  src="/download/google-play.png"
+                  alt="Google Play"
+                  fill
+                  className="object-contain"
+                />
+              </div>
+
+              <h2 className="text-2xl font-bold text-gray-900 mb-3">
+                Android
+              </h2>
+
+              <p className="text-gray-500 leading-relaxed">
+                Download and install the Android APK.
+              </p>
             </div>
+          </a>
 
-            <h2 className="text-2xl font-bold text-gray-900 mb-3">Android APK</h2>
+          {/* Apple */}
+          <a
+            href="https://apps.apple.com/za/app/tfs-picker-delivery/id6761440872"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-white rounded-3xl shadow-sm border border-gray-100 p-10 hover:shadow-md transition-all"
+          >
+            <div className="flex flex-col items-center text-center">
+              <div className="relative w-[220px] h-[70px] mb-8">
+                <Image
+                  src="/download/app-store.png"
+                  alt="App Store"
+                  fill
+                  className="object-contain"
+                />
+              </div>
 
-            <p className="text-gray-500 leading-relaxed mb-8 max-w-sm">
-              Download and install the Picker App directly on your Android device. Make sure to allow installation from
-              unknown sources in your device settings.
-            </p>
+              <h2 className="text-2xl font-bold text-gray-900 mb-3">
+                iPhone &amp; iPad
+              </h2>
 
-            <a
-              href="/apk/picker.apk"
-              download
-              className="inline-flex items-center justify-center gap-2 bg-brand-orange hover:bg-orange-600 text-white font-semibold px-8 py-4 rounded-2xl transition-colors text-lg w-full max-w-xs"
-            >
-              <Download className="w-5 h-5" />
-              Download APK
-            </a>
-
-            <p className="text-xs text-gray-400 mt-4">
-              Signed in as <span className="font-medium text-gray-600">{user.email}</span> &middot;{' '}
-              <span className="capitalize">{user.role}</span>
-            </p>
-          </div>
-        </div>
-
-        {/* Install instructions */}
-        <div className="mt-8 bg-orange-50 border border-orange-100 rounded-2xl p-6">
-          <h3 className="font-semibold text-gray-800 mb-3">Installation Instructions</h3>
-          <ol className="list-decimal list-inside space-y-2 text-sm text-gray-600">
-            <li>Tap <strong>Download APK</strong> above and save the file.</li>
-            <li>
-              On your Android device, go to <strong>Settings → Security</strong> and enable{' '}
-              <strong>Install from Unknown Sources</strong> (or <strong>Install Unknown Apps</strong>).
-            </li>
-            <li>Open the downloaded <code className="bg-orange-100 px-1 rounded">picker.apk</code> file and tap <strong>Install</strong>.</li>
-            <li>Once installed, open the app and sign in with your TFS credentials.</li>
-          </ol>
+              <p className="text-gray-500 leading-relaxed">
+                Download directly from the Apple App Store.
+              </p>
+            </div>
+          </a>
         </div>
       </div>
     </main>
