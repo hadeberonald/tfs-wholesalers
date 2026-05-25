@@ -4,8 +4,8 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import {
   DollarSign, TrendingUp, TrendingDown, Clock, CheckCircle, XCircle,
-  Send, RefreshCw, AlertCircle, Building, CreditCard, ChevronDown,
-  ChevronUp, ShoppingBag, Package, AlertTriangle, FileText, ClipboardCheck, X,
+  Send, RefreshCw, Building, CreditCard, ChevronDown, ChevronUp,
+  ShoppingBag, Package, AlertTriangle, ClipboardCheck, X, AlertCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useBranch } from '@/lib/branch-context';
@@ -15,32 +15,16 @@ import { useBranch } from '@/lib/branch-context';
 interface Stats {
   totalOrders: number;
   totalRevenue: number;
-  totalProducts: number;
-  totalCustomers: number;
   pendingOrders: number;
   completedOrders: number;
   cancelledOrders: number;
-  outForDelivery: number;
   revenueGrowth: number;
-  ordersGrowth: number;
-  purchaseOrders?: {
-    total: number;
-    pendingApproval: number;
-    confirmed: number;
-    sent: number;
-    awaitingReceiving: number;
-    totalValue: number;
-    recentActivity: number;
-  };
   inventory?: {
     lowStockCount: number;
-    pendingStockTakes: number;
     overdueStockTakes: number;
-    completedStockTakes: number;
   };
   resolutions?: {
     open: number;
-    highPriority: number;
   };
 }
 
@@ -55,18 +39,17 @@ interface WithdrawalRequest {
     bankCode: string;
   };
   notes?: string;
-  adminNotes?: string;
   paystackReference?: string;
   requestedAt: string;
   processedAt?: string;
 }
 
 const STATUS_CONFIG = {
-  pending:    { label: 'Pending Review', color: 'bg-yellow-100 text-yellow-700', icon: Clock },
-  approved:   { label: 'Approved',       color: 'bg-blue-100 text-blue-700',    icon: CheckCircle },
-  processing: { label: 'Processing',     color: 'bg-purple-100 text-purple-700', icon: RefreshCw },
-  completed:  { label: 'Completed',      color: 'bg-green-100 text-green-700',  icon: CheckCircle },
-  rejected:   { label: 'Rejected',       color: 'bg-red-100 text-red-700',      icon: XCircle },
+  pending:    { label: 'Pending',    color: 'bg-yellow-100 text-yellow-700', icon: Clock },
+  approved:   { label: 'Approved',   color: 'bg-blue-100 text-blue-700',    icon: CheckCircle },
+  processing: { label: 'Processing', color: 'bg-purple-100 text-purple-700', icon: RefreshCw },
+  completed:  { label: 'Completed',  color: 'bg-green-100 text-green-700',  icon: CheckCircle },
+  rejected:   { label: 'Rejected',   color: 'bg-red-100 text-red-700',      icon: XCircle },
 };
 
 const SA_BANKS = [
@@ -81,9 +64,12 @@ const SA_BANKS = [
   { name: 'TymeBank',       code: '250655' },
 ];
 
-// ── Confirm Withdrawal Modal ──────────────────────────────────────────────────
+// ── Confirm Modal ─────────────────────────────────────────────────────────────
 
-interface ConfirmModalProps {
+function ConfirmWithdrawalModal({
+  amount, accountName, bankName, accountNumber,
+  onConfirm, onCancel, submitting,
+}: {
   amount: number;
   accountName: string;
   bankName: string;
@@ -91,11 +77,7 @@ interface ConfirmModalProps {
   onConfirm: () => void;
   onCancel: () => void;
   submitting: boolean;
-}
-
-function ConfirmWithdrawalModal({
-  amount, accountName, bankName, accountNumber, onConfirm, onCancel, submitting,
-}: ConfirmModalProps) {
+}) {
   const fmt = (n: number) =>
     new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR' }).format(n);
 
@@ -105,7 +87,6 @@ function ConfirmWithdrawalModal({
       onClick={e => { if (e.target === e.currentTarget) onCancel(); }}
     >
       <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden">
-        {/* Header */}
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-9 h-9 bg-orange-100 rounded-xl flex items-center justify-center">
@@ -119,13 +100,11 @@ function ConfirmWithdrawalModal({
         </div>
 
         <div className="p-6 space-y-4">
-          {/* Amount */}
           <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
             <p className="text-xs text-green-600 mb-1">Withdrawal Amount</p>
             <p className="text-3xl font-bold text-green-700">{fmt(amount)}</p>
           </div>
 
-          {/* Bank details */}
           <div className="bg-gray-50 rounded-xl p-4 space-y-2">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Paying to</p>
             <div className="flex items-center gap-2">
@@ -138,12 +117,6 @@ function ConfirmWithdrawalModal({
             </div>
           </div>
 
-          <p className="text-xs text-gray-500 flex items-start gap-1.5">
-            <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-gray-400" />
-            This request will be reviewed by a super admin before any payment is processed.
-          </p>
-
-          {/* Actions */}
           <div className="flex gap-3 pt-1">
             <button
               onClick={onCancel}
@@ -158,8 +131,8 @@ function ConfirmWithdrawalModal({
               className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white font-semibold rounded-xl transition-colors text-sm shadow-sm"
             >
               {submitting
-                ? <><RefreshCw className="w-4 h-4 animate-spin" /> Submitting…</>
-                : <><Send className="w-4 h-4" /> Confirm</>}
+                ? <><RefreshCw className="w-4 h-4 animate-spin" />Submitting…</>
+                : <><Send className="w-4 h-4" />Confirm</>}
             </button>
           </div>
         </div>
@@ -168,21 +141,20 @@ function ConfirmWithdrawalModal({
   );
 }
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function RevenuePage() {
   const params = useParams();
-  const slug   = params.slug as string;
   const { branch, loading: branchLoading } = useBranch();
 
   const [stats, setStats]             = useState<Stats | null>(null);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
   const [loading, setLoading]         = useState(true);
   const [showForm, setShowForm]       = useState(false);
-  const [submitting, setSubmitting]   = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [submitting, setSubmitting]   = useState(false);
 
-  // Form state
+  // form fields
   const [amount, setAmount]   = useState('');
   const [accName, setAccName] = useState('');
   const [accNum, setAccNum]   = useState('');
@@ -209,32 +181,32 @@ export default function RevenuePage() {
     }
   };
 
-  // Derived money maths
+  // Derived balances
   const totalRevenue = stats?.totalRevenue ?? 0;
-  const poSpend      = stats?.purchaseOrders?.totalValue ?? 0;
-  const grossProfit  = totalRevenue - poSpend;
 
   const withdrawn = withdrawals
     .filter(w => w.status === 'completed')
     .reduce((s, w) => s + w.amount, 0);
-  const pendingW  = withdrawals
+
+  const pendingTotal = withdrawals
     .filter(w => ['pending', 'approved', 'processing'].includes(w.status))
     .reduce((s, w) => s + w.amount, 0);
-  const available = Math.max(totalRevenue - withdrawn - pendingW, 0);
 
-  // Validate form before opening confirm modal
+  const available = Math.max(totalRevenue - withdrawn - pendingTotal, 0);
+
+  // Step 1 — validate form, open confirm modal
   const handleRequestClick = () => {
     const a = parseFloat(amount);
-    if (!a || a <= 0)               { toast.error('Enter a valid amount');      return; }
-    if (!accName || !accNum || !bank) { toast.error('Fill in all bank details'); return; }
-    if (a > available)              { toast.error('Exceeds available balance'); return; }
+    if (!a || a <= 0)                 { toast.error('Enter a valid amount');      return; }
+    if (!accName || !accNum || !bank) { toast.error('Fill in all bank details');  return; }
+    if (a > available)                { toast.error('Exceeds available balance'); return; }
     setShowConfirm(true);
   };
 
-  // Actually submit after confirmation
+  // Step 2 — confirmed, submit directly (no super admin routing)
   const handleConfirmedSubmit = async () => {
-    const a       = parseFloat(amount);
-    const chosen  = SA_BANKS.find(b => b.code === bank);
+    const a      = parseFloat(amount);
+    const chosen = SA_BANKS.find(b => b.code === bank);
     setSubmitting(true);
     try {
       const res = await fetch('/api/revenue/withdrawals', {
@@ -243,16 +215,16 @@ export default function RevenuePage() {
         body: JSON.stringify({
           amount: a,
           bankDetails: {
-            accountName: accName,
+            accountName:   accName,
             accountNumber: accNum,
-            bankName: chosen?.name ?? bank,
-            bankCode: bank,
+            bankName:      chosen?.name ?? bank,
+            bankCode:      bank,
           },
           notes,
         }),
       });
       if (res.ok) {
-        toast.success('Withdrawal request submitted!');
+        toast.success('Withdrawal submitted!');
         setShowConfirm(false);
         setShowForm(false);
         setAmount(''); setAccName(''); setAccNum(''); setBank(''); setNotes('');
@@ -297,7 +269,7 @@ export default function RevenuePage() {
       <div className="min-h-screen bg-gray-50 pt-32 md:pt-28">
         <div className="max-w-5xl mx-auto px-4 py-8">
 
-          {/* Page header */}
+          {/* Header */}
           <div className="flex items-center justify-between mb-8">
             <div>
               <h1 className="text-3xl font-bold text-brand-black mb-1">Revenue</h1>
@@ -310,17 +282,17 @@ export default function RevenuePage() {
             </button>
           </div>
 
-          {/* Top money cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-            <div className="col-span-2 lg:col-span-1 bg-gradient-to-br from-green-500 to-green-600 rounded-2xl p-5 text-white">
+          {/* Balance cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+            <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-2xl p-5 text-white">
               <div className="flex items-center justify-between mb-3">
                 <ShoppingBag className="w-5 h-5 opacity-70" />
-                {stats?.revenueGrowth !== 0 && (
-                  <span className="text-xs font-bold flex items-center space-x-1 bg-white/20 px-2 py-0.5 rounded-full">
+                {(stats?.revenueGrowth ?? 0) !== 0 && (
+                  <span className="text-xs font-bold flex items-center gap-1 bg-white/20 px-2 py-0.5 rounded-full">
                     {(stats?.revenueGrowth ?? 0) > 0
                       ? <TrendingUp className="w-3 h-3" />
                       : <TrendingDown className="w-3 h-3" />}
-                    <span>{stats?.revenueGrowth}%</span>
+                    {stats?.revenueGrowth}%
                   </span>
                 )}
               </div>
@@ -334,43 +306,25 @@ export default function RevenuePage() {
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
               <p className="text-gray-500 text-xs mb-1">Available to Withdraw</p>
               <p className="text-2xl font-bold text-green-600">{fmt(available)}</p>
-              <p className="text-xs text-gray-400 mt-1">Revenue − withdrawals</p>
+              <p className="text-xs text-gray-400 mt-1">Revenue minus withdrawals</p>
             </div>
 
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
               <p className="text-gray-500 text-xs mb-1">Total Withdrawn</p>
               <p className="text-2xl font-bold text-brand-black">{fmt(withdrawn)}</p>
-              {pendingW > 0 && (
-                <p className="text-xs text-yellow-600 mt-1">{fmt(pendingW)} pending</p>
+              {pendingTotal > 0 && (
+                <p className="text-xs text-yellow-600 mt-1">{fmt(pendingTotal)} in progress</p>
               )}
             </div>
-
-            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-              <p className="text-gray-500 text-xs mb-1">PO Spend (All Time)</p>
-              <p className="text-2xl font-bold text-brand-black">{fmt(poSpend)}</p>
-              <p className="text-xs text-gray-400 mt-1">{stats?.purchaseOrders?.total ?? 0} purchase orders</p>
-            </div>
           </div>
 
-          {/* Gross profit banner */}
-          <div className={`rounded-xl px-5 py-3 mb-6 flex items-center justify-between text-sm font-medium ${
-            grossProfit >= 0
-              ? 'bg-green-50 border border-green-200 text-green-800'
-              : 'bg-red-50 border border-red-200 text-red-800'
-          }`}>
-            <span>Estimated Gross Profit (Revenue − PO Spend)</span>
-            <span className="text-base font-bold">{fmt(grossProfit)}</span>
-          </div>
-
-          {/* Secondary operational stats */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
+          {/* Operational stats */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
             {[
-              { label: 'Pending Orders',      value: stats?.pendingOrders    ?? 0, icon: Clock,          color: 'text-yellow-600' },
-              { label: 'Delivered',           value: stats?.completedOrders  ?? 0, icon: CheckCircle,    color: 'text-green-600'  },
-              { label: 'Cancelled',           value: stats?.cancelledOrders  ?? 0, icon: XCircle,        color: 'text-red-500'    },
-              { label: 'Open Resolutions',    value: stats?.resolutions?.open         ?? 0, icon: AlertTriangle,  color: 'text-red-600'    },
-              { label: 'Low Stock',           value: stats?.inventory?.lowStockCount  ?? 0, icon: Package,        color: 'text-orange-600' },
-              { label: 'Overdue Stock Takes', value: stats?.inventory?.overdueStockTakes ?? 0, icon: ClipboardCheck, color: 'text-yellow-600' },
+              { label: 'Pending Orders',      value: stats?.pendingOrders  ?? 0, icon: Clock,          color: 'text-yellow-600' },
+              { label: 'Delivered',           value: stats?.completedOrders ?? 0, icon: CheckCircle,   color: 'text-green-600'  },
+              { label: 'Cancelled',           value: stats?.cancelledOrders ?? 0, icon: XCircle,       color: 'text-red-500'    },
+              { label: 'Open Resolutions',    value: stats?.resolutions?.open ?? 0, icon: AlertTriangle, color: 'text-red-600'  },
             ].map(c => (
               <div key={c.label} className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 text-center">
                 <c.icon className={`w-4 h-4 ${c.color} mx-auto mb-1`} />
@@ -380,42 +334,21 @@ export default function RevenuePage() {
             ))}
           </div>
 
-          {/* Purchase order breakdown */}
-          {stats?.purchaseOrders && (
-            <div className="bg-white rounded-2xl shadow-sm p-5 mb-8">
-              <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-4 flex items-center space-x-2">
-                <FileText className="w-4 h-4" /><span>Purchase Order Breakdown</span>
-              </h2>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                {[
-                  { label: 'Total POs',          value: stats.purchaseOrders.total },
-                  { label: 'Pending Approval',   value: stats.purchaseOrders.pendingApproval },
-                  { label: 'Awaiting Receiving', value: stats.purchaseOrders.awaitingReceiving },
-                  { label: 'Recent (7 days)',    value: stats.purchaseOrders.recentActivity },
-                ].map(c => (
-                  <div key={c.label} className="text-center">
-                    <p className="text-2xl font-bold text-brand-black">{c.value}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">{c.label}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Withdrawal request form */}
+          {/* Withdrawal form */}
           {showForm && (
             <div className="bg-white rounded-2xl shadow-sm p-6 mb-8 border-2 border-brand-orange/30">
-              <h2 className="text-xl font-bold text-brand-black mb-1 flex items-center space-x-2">
-                <Send className="w-5 h-5 text-brand-orange" /><span>New Withdrawal Request</span>
+              <h2 className="text-xl font-bold text-brand-black mb-1 flex items-center gap-2">
+                <Send className="w-5 h-5 text-brand-orange" />
+                New Withdrawal
               </h2>
               <p className="text-sm text-gray-500 mb-5">
-                Fill in the details below, then confirm to submit. Super admin reviews before processing.
+                Fill in your bank details and confirm to process the withdrawal.
               </p>
 
               <div className="space-y-4">
                 {/* Amount */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Amount to Withdraw *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Amount *</label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium text-sm">R</span>
                     <input
@@ -434,48 +367,39 @@ export default function RevenuePage() {
                 </div>
 
                 {/* Bank details */}
-                <div className="border-t pt-4">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center space-x-2">
-                    <Building className="w-4 h-4" /><span>Your Bank Details</span>
+                <div className="border-t pt-4 space-y-3">
+                  <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <Building className="w-4 h-4" />Bank Details
                   </h3>
-                  <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Account Holder Name *</label>
+                    <input type="text" className="input-field" placeholder="e.g. TFS Vryheid (Pty) Ltd"
+                      value={accName} onChange={e => setAccName(e.target.value)} />
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">Account Holder Name *</label>
-                      <input type="text" className="input-field" placeholder="e.g. TFS Vryheid (Pty) Ltd"
-                        value={accName} onChange={e => setAccName(e.target.value)} />
-                    </div>
-                    <div className="grid md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Account Number *</label>
-                        <input type="text" className="input-field" placeholder="e.g. 1234567890"
-                          value={accNum} onChange={e => setAccNum(e.target.value)} />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Bank *</label>
-                        <select className="input-field" value={bank} onChange={e => setBank(e.target.value)}>
-                          <option value="">Select bank…</option>
-                          {SA_BANKS.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
-                        </select>
-                      </div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">Account Number *</label>
+                      <input type="text" className="input-field" placeholder="e.g. 1234567890"
+                        value={accNum} onChange={e => setAccNum(e.target.value)} />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">Notes (optional)</label>
-                      <textarea rows={2} className="input-field" placeholder="Any notes…"
-                        value={notes} onChange={e => setNotes(e.target.value)} />
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">Bank *</label>
+                      <select className="input-field" value={bank} onChange={e => setBank(e.target.value)}>
+                        <option value="">Select bank…</option>
+                        {SA_BANKS.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
+                      </select>
                     </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Notes (optional)</label>
+                    <textarea rows={2} className="input-field" placeholder="Any notes…"
+                      value={notes} onChange={e => setNotes(e.target.value)} />
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between pt-2 border-t">
-                  <p className="text-xs text-gray-400 flex items-center space-x-1">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span>You'll confirm on the next step</span>
-                  </p>
-                  <button
-                    onClick={handleRequestClick}
-                    className="btn-primary flex items-center space-x-2"
-                  >
-                    <Send className="w-4 h-4" /><span>Review & Confirm</span>
+                <div className="flex items-center justify-end pt-2 border-t">
+                  <button onClick={handleRequestClick} className="btn-primary flex items-center gap-2">
+                    <Send className="w-4 h-4" />Review &amp; Confirm
                   </button>
                 </div>
               </div>
@@ -492,7 +416,7 @@ export default function RevenuePage() {
             {withdrawals.length === 0 ? (
               <div className="p-12 text-center">
                 <DollarSign className="w-14 h-14 text-gray-200 mx-auto mb-3" />
-                <p className="text-gray-500">No withdrawal requests yet</p>
+                <p className="text-gray-500">No withdrawals yet</p>
               </div>
             ) : (
               <div className="divide-y divide-gray-100">
@@ -505,17 +429,16 @@ export default function RevenuePage() {
                         <div className="flex-1 min-w-0">
                           <div className="flex flex-wrap items-center gap-2 mb-1">
                             <p className="font-bold text-gray-900 text-lg">{fmt(w.amount)}</p>
-                            <span className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${conf.color}`}>
-                              <SIcon className="w-3 h-3" /><span>{conf.label}</span>
+                            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${conf.color}`}>
+                              <SIcon className="w-3 h-3" />{conf.label}
                             </span>
                           </div>
-                          <div className="flex items-center space-x-2 text-sm text-gray-600">
+                          <div className="flex items-center gap-2 text-sm text-gray-600">
                             <CreditCard className="w-3.5 h-3.5" />
                             <span>{w.bankDetails.accountName} · {w.bankDetails.bankName}</span>
                             <span className="text-gray-400">****{w.bankDetails.accountNumber.slice(-4)}</span>
                           </div>
-                          {w.notes      && <p className="text-xs text-gray-500 mt-1">{w.notes}</p>}
-                          {w.adminNotes && <p className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded mt-1">Admin: {w.adminNotes}</p>}
+                          {w.notes && <p className="text-xs text-gray-500 mt-1">{w.notes}</p>}
                           {w.paystackReference && <p className="text-xs text-gray-400 font-mono mt-1">Ref: {w.paystackReference}</p>}
                         </div>
                         <div className="text-right text-xs text-gray-400 flex-shrink-0">

@@ -44,6 +44,7 @@ import {
   Image,
   BarChart2,
   ShieldCheck,
+  Receipt,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -161,6 +162,13 @@ export const ROUTE_MANIFEST: RouteManifestEntry[] = [
     icon: DollarSign,
     href: '/admin/revenue',
     writeEnabled: false,
+  },
+  {
+    key: 'refunds',
+    label: 'Refunds',
+    group: 'Finance',
+    icon: Receipt,
+    href: '/admin/refunds',
   },
 
   // ── Marketing ─────────────────────────────────────────────────────────────

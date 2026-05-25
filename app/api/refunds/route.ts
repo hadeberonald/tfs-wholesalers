@@ -1,34 +1,25 @@
-// app/api/orders/[orderId]/item-oos/route.ts
-// Save this file to: app/api/orders/[orderId]/item-oos/route.ts
-// (Same content as item-oos-route.ts output — rename on copy)
+// app/api/refunds/route.ts
 
-// app/api/refunds/route.ts  ← NEW admin endpoint to list pending refunds
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
-import { getAdminBranch } from '@/lib/get-admin-branch';
+import { requirePermission } from '@/lib/with-permission';
 
 export async function GET(request: NextRequest) {
   try {
-    const adminInfo = await getAdminBranch();
-    if ('error' in adminInfo) {
-      return NextResponse.json({ error: adminInfo.error }, { status: adminInfo.status });
+    const auth = await requirePermission('refunds:read');
+    if ('error' in auth) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
     }
 
     const client = await clientPromise;
     const db     = client.db('tfs-wholesalers');
 
     const query: any = {};
-    if (!adminInfo.isSuperAdmin && adminInfo.branchId) {
-      // Filter by branch via the order — join not possible in Mongo easily,
-      // so we store branchId on the refund record too (done in issueRefund helper).
-      // For now filter by orders in this branch:
-      const branchOrders = await db
-        .collection('orders')
-        .find({ branchId: adminInfo.branchId }, { projection: { _id: 1 } })
-        .toArray();
-      const orderIds = branchOrders.map(o => o._id.toString());
-      query.orderId = { $in: orderIds };
+
+    // Branch-scope non-superadmins by branchId stored directly on the refund
+    if (!auth.isSuperAdmin && auth.branchId) {
+      query.branchId = auth.branchId.toString();
     }
 
     const status = request.nextUrl.searchParams.get('status');
@@ -51,29 +42,52 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const adminInfo = await getAdminBranch();
-    if ('error' in adminInfo) {
-      return NextResponse.json({ error: adminInfo.error }, { status: adminInfo.status });
+    const auth = await requirePermission('refunds:write');
+    if ('error' in auth) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
     }
 
     const { refundId, status, note } = await request.json();
-    if (!refundId) return NextResponse.json({ error: 'refundId required' }, { status: 400 });
+    if (!refundId) {
+      return NextResponse.json({ error: 'refundId required' }, { status: 400 });
+    }
+
+    const allowedStatuses = ['approved', 'rejected', 'processed'];
+    if (!allowedStatuses.includes(status)) {
+      return NextResponse.json(
+        { error: `status must be one of: ${allowedStatuses.join(', ')}` },
+        { status: 400 }
+      );
+    }
 
     const client = await clientPromise;
     const db     = client.db('tfs-wholesalers');
 
-    await db.collection('refunds').updateOne(
-      { _id: new ObjectId(refundId) },
+    // If branch-scoped, verify the refund belongs to this branch before updating
+    const refundFilter: any = { _id: new ObjectId(refundId) };
+    if (!auth.isSuperAdmin && auth.branchId) {
+      refundFilter.branchId = auth.branchId.toString();
+    }
+
+    const result = await db.collection('refunds').updateOne(
+      refundFilter,
       {
         $set: {
           status,
-          note:        note || undefined,
-          resolvedBy:  adminInfo.userId,
-          resolvedAt:  new Date(),
-          updatedAt:   new Date(),
+          ...(note ? { note } : {}),
+          resolvedBy: auth.userId,
+          resolvedAt: new Date(),
+          updatedAt:  new Date(),
         },
       }
     );
+
+    if (result.matchedCount === 0) {
+      return NextResponse.json(
+        { error: 'Refund not found or not accessible' },
+        { status: 404 }
+      );
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {
