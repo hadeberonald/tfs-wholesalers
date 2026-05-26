@@ -1,36 +1,30 @@
 import { useState } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Image,
+  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
+  ScrollView, Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useStore } from '@/lib/store';
 import api from '@/lib/api';
 import { linkPushTokenAfterLogin } from '@/lib/notificationService';
+import PasswordResetModal from '@/components/PasswordResetModal';
 
 export default function LoginScreen() {
   const router  = useRouter();
   const setUser = useStore((state) => state.setUser);
-  const [email,    setEmail]    = useState('');
-  const [password, setPassword] = useState('');
-  const [loading,  setLoading]  = useState(false);
+
+  const [email,      setEmail]      = useState('');
+  const [password,   setPassword]   = useState('');
+  const [loading,    setLoading]    = useState(false);
+  const [showReset,  setShowReset]  = useState(false);
 
   const handleLogin = async () => {
     if (!email || !password) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
-
     setLoading(true);
     try {
       const response = await api.post('/api/auth/login', {
@@ -41,13 +35,10 @@ export default function LoginScreen() {
       if (response.data.user && response.data.token) {
         await AsyncStorage.setItem('user',       JSON.stringify(response.data.user));
         await AsyncStorage.setItem('auth_token', response.data.token);
-
         setUser(response.data.user);
-
         if (response.data.user?.id) {
           linkPushTokenAfterLogin(response.data.user.id).catch(() => {});
         }
-
         Alert.alert('Success', 'Welcome back!');
         router.back();
       } else {
@@ -55,11 +46,18 @@ export default function LoginScreen() {
       }
     } catch (error: any) {
       console.error('Login error:', error);
-      const message = error.response?.data?.error || 'Login failed. Please try again.';
-      Alert.alert('Login Failed', message);
+      Alert.alert('Login Failed', error.response?.data?.error || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleForgotPassword = () => {
+    if (!email.trim()) {
+      Alert.alert('Enter your email first', 'Type your email address above, then tap Forgot Password.');
+      return;
+    }
+    setShowReset(true);
   };
 
   return (
@@ -121,17 +119,13 @@ export default function LoginScreen() {
             onPress={handleLogin}
             disabled={loading}
           >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.loginButtonText}>Sign In</Text>
-            )}
+            {loading
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={styles.loginButtonText}>Sign In</Text>
+            }
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.forgotButton}
-            onPress={() => Alert.alert('Forgot Password', 'Contact support to reset your password')}
-          >
+          <TouchableOpacity style={styles.forgotButton} onPress={handleForgotPassword}>
             <Text style={styles.forgotButtonText}>Forgot Password?</Text>
           </TouchableOpacity>
         </View>
@@ -143,6 +137,12 @@ export default function LoginScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      <PasswordResetModal
+        visible={showReset}
+        onClose={() => setShowReset(false)}
+        userEmail={email.toLowerCase().trim()}
+      />
     </KeyboardAvoidingView>
   );
 }
