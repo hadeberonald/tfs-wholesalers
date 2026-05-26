@@ -251,48 +251,7 @@ export default function AccountPage() {
             </div>
 
             {/* Quick Actions */}
-            <div className="grid md:grid-cols-2 gap-6">
-              {/* Account Settings Card */}
-              <Link href="/account/settings" className="bg-white rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow group">
-                <div className="flex items-center space-x-4 mb-4">
-                  <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center group-hover:bg-brand-orange transition-colors">
-                    <User className="w-6 h-6 text-blue-600 group-hover:text-white" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-brand-black">Account Settings</h3>
-                    <p className="text-sm text-gray-600">Manage your profile</p>
-                  </div>
-                </div>
-                <p className="text-sm text-gray-600 mb-3">
-                  Update your name, email, password and notification preferences
-                </p>
-                <div className="flex items-center text-brand-orange group-hover:text-orange-600 text-sm font-semibold">
-                  <span>Manage Settings</span>
-                  <ChevronRight className="w-4 h-4 ml-1" />
-                </div>
-              </Link>
-
-              {/* Payment Methods Card */}
-              <Link href="/account/payment-methods" className="bg-white rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow group">
-                <div className="flex items-center space-x-4 mb-4">
-                  <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center group-hover:bg-brand-orange transition-colors">
-                    <CreditCard className="w-6 h-6 text-green-600 group-hover:text-white" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-brand-black">Payment Methods</h3>
-                    <p className="text-sm text-gray-600">Saved cards</p>
-                  </div>
-                </div>
-                <p className="text-sm text-gray-600 mb-3">
-                  Save your payment methods for faster checkout
-                </p>
-                <div className="flex items-center text-brand-orange group-hover:text-orange-600 text-sm font-semibold">
-                  <span>Manage Cards</span>
-                  <ChevronRight className="w-4 h-4 ml-1" />
-                </div>
-              </Link>
-            </div>
-
+           
             {/* Support Section */}
             <div className="bg-gradient-to-br from-brand-orange to-orange-600 rounded-2xl p-8 text-white">
               <h3 className="text-2xl font-bold mb-2">Need Help?</h3>
