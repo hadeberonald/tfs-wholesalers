@@ -168,17 +168,7 @@ export default function AccountPage() {
                   <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-brand-orange" />
                 </Link>
 
-                <Link
-                  href="/account/addresses"
-                  className="flex items-center justify-between p-3 rounded-xl hover:bg-gray-50 transition-colors group"
-                >
-                  <div className="flex items-center space-x-3">
-                    <MapPin className="w-5 h-5 text-gray-600 group-hover:text-brand-orange" />
-                    <span className="font-medium text-gray-900">Addresses</span>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-brand-orange" />
-                </Link>
-
+               
                 
                 <button
                   onClick={() => logout()}
