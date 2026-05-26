@@ -113,6 +113,14 @@ export default function Header() {
     router.push(destination);
   };
 
+  const getAccountHref = () => {
+    if (user?.role === 'admin' && currentBranch) return `/${currentBranch.slug}/admin`;
+    if (user?.role === 'super-admin') return '/super-admin';
+    if (currentBranch) return `/${currentBranch.slug}/account`;
+    if (slugFromUrl) return `/${slugFromUrl}/account`;
+    return '/select-branch';
+  };
+
   const hideBranchSelector = pathname.startsWith('/super-admin') || 
                              pathname.startsWith('/select-branch') ||
                              pathname === '/login' || 
@@ -218,7 +226,7 @@ export default function Header() {
             {user ? (
               <>
                 <Link 
-                  href={user.role === 'admin' && currentBranch ? `/${currentBranch.slug}/admin` : user.role === 'super-admin' ? '/super-admin' : '/account'} 
+                  href={getAccountHref()}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors hidden sm:flex items-center space-x-2"
                   aria-label="Account"
                 >
@@ -358,7 +366,7 @@ export default function Header() {
               {user ? (
                 <>
                   <Link 
-                    href={user.role === 'admin' && currentBranch ? `/${currentBranch.slug}/admin` : user.role === 'super-admin' ? '/super-admin' : '/account'} 
+                    href={getAccountHref()}
                     className="flex items-center space-x-2 py-2 text-brand-black hover:text-brand-orange transition-colors font-medium text-sm"
                     onClick={() => setIsMenuOpen(false)}
                   >
