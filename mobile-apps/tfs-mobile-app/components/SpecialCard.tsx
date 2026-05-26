@@ -21,6 +21,17 @@ export default function SpecialCard({ special }: SpecialCardProps) {
 
   const [bundleQty, setBundleQty] = useState(1);
 
+  // ── Description — mirrors web SpecialCard:
+  //   POS specials often have blank special.description; fall back to the
+  //   embedded product's own description in that case.
+  const isPosSpecial = (special as any).source === 'pos_ftp_sync';
+  const displayDescription =
+    special.description?.trim()
+      ? special.description
+      : isPosSpecial
+        ? (product?.description?.trim() || '')
+        : special.description;
+
   // ── Price helpers ─────────────────────────────────────────────────────────
   const getDisplayPrice = (): number => {
     if (!product) return 0;
@@ -143,14 +154,14 @@ export default function SpecialCard({ special }: SpecialCardProps) {
     e.stopPropagation();
     if (!product) return;
     addToCart({
-      id:              product._id,
-      name:            product.name,
-      price:           getCartUnitPrice(),
-      image:           displayImage || '',
-      quantity:        actualQty,
-      sku:             product.sku || '',
+      id:               product._id,
+      name:             product.name,
+      price:            getCartUnitPrice(),
+      image:            displayImage || '',
+      quantity:         actualQty,
+      sku:              product.sku || '',
       appliedSpecialId: special._id,
-      originalPrice:   product.price,
+      originalPrice:    product.price,
     });
     Alert.alert(
       'Added to Cart',
@@ -207,8 +218,9 @@ export default function SpecialCard({ special }: SpecialCardProps) {
       <View style={shared.content}>
         <Text style={shared.name} numberOfLines={2}>{special.name}</Text>
 
+        {/* Description — falls back to product description for POS specials */}
         <Text style={shared.description} numberOfLines={bannerText ? 2 : 3}>
-          {special.description || ''}
+          {displayDescription}
         </Text>
 
         {bannerText && (

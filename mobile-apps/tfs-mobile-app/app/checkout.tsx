@@ -1,12 +1,9 @@
-// app/checkout.tsx  (Expo Router — customer app)
-// Free delivery threshold removed entirely.
-// Delivery fee always comes from address-picker which reads live branch settings.
-
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Alert, Platform, Image,
+  ActivityIndicator, Alert, Image,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
   MapPin, ChevronLeft, ChevronRight, Package, ShoppingBag,
@@ -48,7 +45,6 @@ export default function CheckoutScreen() {
   const [deliveryAddress, setDeliveryAddress] = useState<DeliveryAddress | null>(null);
   const [placingOrder, setPlacingOrder] = useState(false);
 
-  // Consume address set by address-picker screen
   useFocusEffect(
     useCallback(() => {
       if (pendingDeliveryAddress) {
@@ -58,21 +54,18 @@ export default function CheckoutScreen() {
     }, [pendingDeliveryAddress])
   );
 
-  // ── Financials ────────────────────────────────────────────────────────────
   const subtotal    = getTotal();
-  const deliveryFee = deliveryAddress?.deliveryFee ?? 0; // from address-picker, no overrides
+  const deliveryFee = deliveryAddress?.deliveryFee ?? 0;
   const total       = subtotal + deliveryFee;
 
   const totalSavings = items.reduce(
     (s, i) => s + ((i.specialDiscount || 0) * i.quantity), 0,
   );
 
-  // ── Item groups ───────────────────────────────────────────────────────────
   const regularItems = items.filter(i => !i.isBonusItem && !i.isFreeItem && !i.isMultibuyBonus && !i.isComboItem);
   const bonusItems   = items.filter(i => i.isBonusItem || i.isFreeItem || i.isMultibuyBonus);
   const comboItems   = items.filter(i => i.isComboItem);
 
-  // ── Place order ───────────────────────────────────────────────────────────
   const placeOrder = async () => {
     if (!deliveryAddress) {
       Alert.alert('Delivery Address Required', 'Please select a delivery address before continuing.');
@@ -174,7 +167,6 @@ export default function CheckoutScreen() {
     }
   };
 
-  // ── Render item ───────────────────────────────────────────────────────────
   const renderItem = (item: typeof items[0], index: number) => {
     const isBonus   = item.isBonusItem || item.isFreeItem || item.isMultibuyBonus;
     const isCombo   = item.isComboItem;
@@ -221,25 +213,22 @@ export default function CheckoutScreen() {
     );
   };
 
-  // ── Empty cart ────────────────────────────────────────────────────────────
   if (items.length === 0) {
     return (
-      <View style={styles.emptyContainer}>
+      <SafeAreaView style={styles.emptyContainer} edges={['top']}>
         <ShoppingBag color="#d1d5db" size={72} />
         <Text style={styles.emptyTitle}>Your cart is empty</Text>
         <TouchableOpacity style={styles.shopBtn} onPress={() => router.push('/(tabs)')}>
           <Text style={styles.shopBtnText}>Go Shopping</Text>
         </TouchableOpacity>
-      </View>
+      </SafeAreaView>
     );
   }
 
   const canCheckout = !!deliveryAddress && !deliveryAddress.outsideZone && !placingOrder;
 
   return (
-    <View style={styles.container}>
-
-      {/* Header */}
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <ChevronLeft color="#1f2937" size={24} />
@@ -249,11 +238,8 @@ export default function CheckoutScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-
-        {/* ── Delivery address ── */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Delivery Address</Text>
-
           {deliveryAddress ? (
             <TouchableOpacity
               style={[styles.addressSelected, deliveryAddress.outsideZone && styles.addressSelectedError]}
@@ -290,7 +276,6 @@ export default function CheckoutScreen() {
           )}
         </View>
 
-        {/* ── Items ── */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Your Items ({items.length})</Text>
           {regularItems.map((item, i) => renderItem(item, i))}
@@ -312,7 +297,6 @@ export default function CheckoutScreen() {
           )}
         </View>
 
-        {/* ── Savings ── */}
         {totalSavings > 0 && (
           <View style={styles.savingsCard}>
             <CheckCircle color="#10b981" size={18} />
@@ -331,22 +315,18 @@ export default function CheckoutScreen() {
           </View>
         )}
 
-        {/* ── Order summary ── */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Order Summary</Text>
-
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Subtotal</Text>
             <Text style={styles.summaryValue}>R{subtotal.toFixed(2)}</Text>
           </View>
-
           {totalSavings > 0 && (
             <View style={styles.summaryRow}>
               <Text style={[styles.summaryLabel, { color: '#10b981' }]}>Specials Savings</Text>
               <Text style={[styles.summaryValue, { color: '#10b981' }]}>-R{totalSavings.toFixed(2)}</Text>
             </View>
           )}
-
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Delivery</Text>
             <Text style={styles.summaryValue}>
@@ -355,7 +335,6 @@ export default function CheckoutScreen() {
                 : `R${deliveryFee.toFixed(2)}`}
             </Text>
           </View>
-
           <View style={[styles.summaryRow, styles.summaryTotal]}>
             <Text style={styles.summaryTotalLabel}>Total</Text>
             <Text style={styles.summaryTotalValue}>R{total.toFixed(2)}</Text>
@@ -370,7 +349,6 @@ export default function CheckoutScreen() {
         <View style={{ height: 140 }} />
       </ScrollView>
 
-      {/* Footer CTA */}
       <View style={styles.footer}>
         {!deliveryAddress && (
           <View style={styles.footerWarning}>
@@ -386,7 +364,6 @@ export default function CheckoutScreen() {
             </Text>
           </View>
         )}
-
         <TouchableOpacity
           style={[styles.placeOrderBtn, !canCheckout && styles.placeOrderBtnDisabled]}
           onPress={placeOrder}
@@ -402,7 +379,7 @@ export default function CheckoutScreen() {
           )}
         </TouchableOpacity>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -416,8 +393,7 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
-    paddingTop: Platform.OS === 'ios' ? 56 : 20,
-    paddingBottom: 16, paddingHorizontal: 16,
+    paddingTop: 12, paddingBottom: 16, paddingHorizontal: 16,
     borderBottomWidth: 1, borderBottomColor: '#f3f4f6', gap: 12,
   },
   backBtn:     { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
@@ -508,12 +484,10 @@ const styles = StyleSheet.create({
   footer: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: '#fff', padding: 16,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 16,
+    paddingBottom: 16,
     borderTopWidth: 1, borderTopColor: '#f3f4f6',
   },
-  footerWarning: {
-    flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10,
-  },
+  footerWarning: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
   footerWarningText: { fontSize: 12, color: '#f59e0b', fontWeight: '600' },
   placeOrderBtn: {
     backgroundColor: '#FF6B35', borderRadius: 16, height: 56,

@@ -515,9 +515,7 @@ export default function RefundsInnerPage() {
             <p className="font-semibold mb-0.5">About manual refunds</p>
             <p className="text-amber-700 text-xs leading-relaxed">
               These refunds were auto-created when a picker marked an item as out of stock.
-              Cash orders and failed Paystack calls require a staff member to action the
-              refund and update the record here. Approved refunds are visible to the customer
-              on their order tracking screen.
+            
             </p>
           </div>
         </div>

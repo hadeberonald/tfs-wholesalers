@@ -25,7 +25,6 @@ export default function SpecialDetailScreen() {
   const insets = useSafeAreaInsets();
   const branch    = useStore((state) => state.branch);
   const addToCart = useStore((state) => state.addToCart);
-  // ✅ addToCart is now an alias in the store — no other store fixes needed here
 
   const [special, setSpecial] = useState<Special | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
@@ -145,7 +144,8 @@ export default function SpecialDetailScreen() {
 
   const currentPrice  = selectedProduct ? getSpecialPrice(selectedProduct) : 0;
   const savings       = selectedProduct && special.type !== 'buy_x_get_y' ? selectedProduct.price - currentPrice : 0;
-  const isInStock     = selectedProduct ? selectedProduct.stockLevel > 0 : false;
+  const isInStock     = (selectedProduct?.stockLevel ?? 0) > 0;
+  const isLowStock    = (selectedProduct?.stockLevel ?? 0) > 0 && (selectedProduct?.stockLevel ?? 0) <= 10;
   const maxQuantity   = selectedProduct ? Math.min(selectedProduct.stockLevel, 99) : 0;
   const displayImages = special.images?.length ? special.images : (selectedProduct?.images || []);
 
@@ -261,12 +261,17 @@ export default function SpecialDetailScreen() {
             </View>
           )}
 
+          {/* Stock status — matches web: no count when in stock, "Only X left" when ≤10 */}
           {selectedProduct && (
             <View style={styles.stockSection}>
               {isInStock ? (
                 <View style={styles.inStockRow}>
                   <View style={styles.stockDot} />
-                  <Text style={styles.inStockText}>In Stock ({selectedProduct.stockLevel} available)</Text>
+                  <Text style={styles.inStockText}>
+                    {isLowStock
+                      ? `Only ${selectedProduct.stockLevel} left`
+                      : 'In Stock'}
+                  </Text>
                 </View>
               ) : (
                 <View style={styles.outOfStockRow}>
