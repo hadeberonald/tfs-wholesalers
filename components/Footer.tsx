@@ -1,7 +1,26 @@
+'use client';
+
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useMemo } from 'react';
 import { Mail, Phone, MapPin } from 'lucide-react';
 
 export default function Footer() {
+  const pathname = usePathname();
+
+  const slugFromUrl = useMemo(() => {
+    const pathParts = pathname.split('/').filter(Boolean);
+    if (pathParts.length > 0) {
+      const firstPart = pathParts[0];
+      if (!['admin', 'login', 'register', 'super-admin', 'select-branch'].includes(firstPart)) {
+        return firstPart;
+      }
+    }
+    return null;
+  }, [pathname]);
+
+  const b = (path: string) => slugFromUrl ? `/${slugFromUrl}${path}` : '/select-branch';
+
   return (
     <footer className="bg-brand-black text-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12">
@@ -9,11 +28,11 @@ export default function Footer() {
           {/* Company Info */}
           <div>
             <div className="flex items-center space-x-3 mb-4">
-              <Link href="/" className="flex items-center space-x-3 group">
-  <div className="w-12 h-12 flex items-center justify-center transform group-hover:scale-105 transition-transform">
-    <img src="/logo.png" alt="TFS Logo" className="w-full h-full object-contain" />
-  </div>
-</Link>
+              <Link href={b('')} className="flex items-center space-x-3 group">
+                <div className="w-12 h-12 flex items-center justify-center transform group-hover:scale-105 transition-transform">
+                  <img src="/logo.png" alt="TFS Logo" className="w-full h-full object-contain" />
+                </div>
+              </Link>
             </div>
             <p className="text-gray-400 text-sm leading-relaxed">
               Your trusted wholesale supplier for quality products at competitive prices. Serving businesses and bulk buyers across the region.
@@ -25,29 +44,27 @@ export default function Footer() {
             <h3 className="font-semibold text-lg mb-4">Quick Links</h3>
             <ul className="space-y-2">
               <li>
-                <Link href="/products" className="text-gray-400 hover:text-brand-orange transition-colors">
+                <Link href={b('/shop')} className="text-gray-400 hover:text-brand-orange transition-colors">
                   All Products
                 </Link>
               </li>
               <li>
-                <Link href="/specials" className="text-gray-400 hover:text-brand-orange transition-colors">
+                <Link href={b('/specials')} className="text-gray-400 hover:text-brand-orange transition-colors">
                   Special Offers
                 </Link>
               </li>
               <li>
-                <Link href="/account/orders" className="text-gray-400 hover:text-brand-orange transition-colors">
+                <Link href={b('/account/orders')} className="text-gray-400 hover:text-brand-orange transition-colors">
                   Track Order
                 </Link>
               </li>
               <li>
-                <Link href="/account" className="text-gray-400 hover:text-brand-orange transition-colors">
+                <Link href={b('/account')} className="text-gray-400 hover:text-brand-orange transition-colors">
                   My Account
                 </Link>
               </li>
             </ul>
           </div>
-
-         
 
           {/* Contact Info */}
           <div>
