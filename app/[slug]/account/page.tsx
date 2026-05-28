@@ -157,16 +157,7 @@ export default function AccountPage() {
 
               {/* Navigation */}
               <nav className="space-y-2">
-                <Link
-                  href="/account/orders"
-                  className="flex items-center justify-between p-3 rounded-xl hover:bg-gray-50 transition-colors group"
-                >
-                  <div className="flex items-center space-x-3">
-                    <Package className="w-5 h-5 text-gray-600 group-hover:text-brand-orange" />
-                    <span className="font-medium text-gray-900">My Orders</span>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-brand-orange" />
-                </Link>
+                
 
                
                 
