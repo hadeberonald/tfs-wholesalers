@@ -4,6 +4,7 @@ import {
   ActivityIndicator, Alert, Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Shield, XCircle, ChevronLeft, Lock, Package, RefreshCw, Zap,
 } from 'lucide-react-native';
@@ -75,15 +76,16 @@ function StatusBadge({ status }: { status: PaymentStatus }) {
 
 export default function PaymentScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ orderId: string; amount: string; orderNumber: string }>();
 
   const user      = useStore((s) => s.user);
   const clearCart = useStore((s) => s.clearCart);
 
-  const [status, setStatus]           = useState<PaymentStatus>('idle');
+  const [status, setStatus]             = useState<PaymentStatus>('idle');
   const [paystackHtml, setPaystackHtml] = useState<string | null>(null);
-  const [reference, setReference]     = useState('');
-  const [orderItems, setOrderItems]   = useState<OrderSummaryItem[]>([]);
+  const [reference, setReference]       = useState('');
+  const [orderItems, setOrderItems]     = useState<OrderSummaryItem[]>([]);
   const [errorMessage, setErrorMessage] = useState('');
   const [pulseAnim] = useState(new Animated.Value(1));
 
@@ -157,8 +159,8 @@ export default function PaymentScreen() {
       const res = await api.post('/api/payment/verify', { reference: ref });
       if (!res.data.verified) throw new Error(res.data.error || 'Verification failed');
 
-      const stockChecks  = await checkStock();
-      const outOfStock   = stockChecks.filter((i) => !i.inStock);
+      const stockChecks = await checkStock();
+      const outOfStock  = stockChecks.filter((i) => !i.inStock);
 
       if (outOfStock.length > 0) {
         const refundTotal = outOfStock.reduce((s, i) => s + i.price * i.quantity, 0);
@@ -325,8 +327,9 @@ export default function PaymentScreen() {
         )}
       </ScrollView>
 
+      {/* NOTE: paddingBottom uses insets.bottom so it clears the Android nav bar on all devices */}
       {!isProcessing && (
-        <View style={styles.footer}>
+        <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
           <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
             <TouchableOpacity style={styles.payBtn} onPress={initPayment}>
               <Zap color="#fff" size={22} fill="#fff" />
@@ -352,11 +355,11 @@ const styles = StyleSheet.create({
   backBtn:     { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { flex: 1, fontSize: 20, fontWeight: '700', color: '#1f2937' },
 
-  badge:    { flexDirection: 'row', alignItems: 'center', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, gap: 6 },
-  badgeDot: { width: 7, height: 7, borderRadius: 4 },
+  badge:     { flexDirection: 'row', alignItems: 'center', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, gap: 6 },
+  badgeDot:  { width: 7, height: 7, borderRadius: 4 },
   badgeText: { fontSize: 11, fontWeight: '700' },
 
-  scroll: { padding: 16, paddingBottom: 120 },
+  scroll: { padding: 16, paddingBottom: 140 },
 
   card: {
     backgroundColor: '#fff', borderRadius: 18, padding: 18, marginBottom: 14,
@@ -398,9 +401,10 @@ const styles = StyleSheet.create({
   processingTitle: { fontSize: 18, fontWeight: '700', color: '#1f2937', textAlign: 'center' },
   processingText:  { fontSize: 13, color: '#6b7280', textAlign: 'center', lineHeight: 20 },
 
+  // NOTE: paddingBottom is applied inline using insets.bottom + 16
   footer: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: '#fff', padding: 20, paddingBottom: 20,
+    backgroundColor: '#fff', padding: 20,
     borderTopWidth: 1, borderTopColor: '#f3f4f6',
   },
   payBtn: {

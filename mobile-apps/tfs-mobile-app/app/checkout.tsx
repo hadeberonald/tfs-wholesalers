@@ -4,6 +4,7 @@ import {
   ActivityIndicator, Alert, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
   MapPin, ChevronLeft, ChevronRight, Package, ShoppingBag,
@@ -37,6 +38,7 @@ function specialTypeBadge(type?: string) {
 
 export default function CheckoutScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const {
     items, user, branch, getTotal,
     pendingDeliveryAddress, setPendingDeliveryAddress,
@@ -227,6 +229,9 @@ export default function CheckoutScreen() {
 
   const canCheckout = !!deliveryAddress && !deliveryAddress.outsideZone && !placingOrder;
 
+  // Footer height estimate for scroll spacer: base (warnings + button) + inset
+  const footerHeight = 80 + insets.bottom;
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -346,10 +351,12 @@ export default function CheckoutScreen() {
           <Text style={styles.deliveryInfoText}>Delivered by TFS Wholesalers.</Text>
         </View>
 
-        <View style={{ height: 140 }} />
+        {/* Dynamic spacer that matches the footer's actual rendered height */}
+        <View style={{ height: footerHeight + 40 }} />
       </ScrollView>
 
-      <View style={styles.footer}>
+      {/* NOTE: paddingBottom uses insets.bottom so it clears the Android nav bar on all devices */}
+      <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
         {!deliveryAddress && (
           <View style={styles.footerWarning}>
             <AlertCircle color="#f59e0b" size={14} />
@@ -481,13 +488,13 @@ const styles = StyleSheet.create({
   },
   deliveryInfoText: { flex: 1, fontSize: 12, color: '#9ca3af', lineHeight: 18 },
 
+  // NOTE: paddingBottom is applied inline using insets.bottom + 16
   footer: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: '#fff', padding: 16,
-    paddingBottom: 16,
     borderTopWidth: 1, borderTopColor: '#f3f4f6',
   },
-  footerWarning: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  footerWarning:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
   footerWarningText: { fontSize: 12, color: '#f59e0b', fontWeight: '600' },
   placeOrderBtn: {
     backgroundColor: '#FF6B35', borderRadius: 16, height: 56,

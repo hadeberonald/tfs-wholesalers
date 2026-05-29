@@ -1,12 +1,5 @@
 // app/(tabs)/shop.tsx
-// Changes vs previous version:
-//   1. Products tab uses FlatList with infinite scroll (onEndReached) instead of
-//      page-prev/next pagination buttons — much smoother UX on mobile.
-//   2. Search mode still fetches all results at once (fetchAll=true), same as web.
-//   3. Specials/Combos tab is unchanged (already a flat list; no pagination needed).
-//   4. "Load more" footer spinner shown while fetching the next page.
-
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
 import {
   View,
   Text,
@@ -30,9 +23,9 @@ import api from '@/lib/api';
 import type { Product, Category, Special } from '@/lib/types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CARD_GAP    = 8;
+const CARD_GAP     = 8;
 const COLUMN_COUNT = 2;
-const CARD_WIDTH  = (SCREEN_WIDTH - 32 - CARD_GAP) / COLUMN_COUNT; // 16px padding each side
+const CARD_WIDTH   = (SCREEN_WIDTH - 32 - CARD_GAP) / COLUMN_COUNT;
 
 interface Combo {
   _id: string;
@@ -80,7 +73,6 @@ const SORT_LABELS: Record<SortOption, string> = {
   'price-desc': 'Price: High → Low',
 };
 
-// ─── Pair products into rows of 2 for the 2-column grid ──────────────────────
 function pairProducts(products: Product[]): Array<[Product, Product | null]> {
   const pairs: Array<[Product, Product | null]> = [];
   for (let i = 0; i < products.length; i += 2) {
@@ -89,6 +81,89 @@ function pairProducts(products: Product[]): Array<[Product, Product | null]> {
   return pairs;
 }
 
+// ─── ProductListHeader — defined OUTSIDE ShopScreen so it never remounts ─────
+const ProductListHeader = memo(({
+  searchQuery,
+  isSearchMode,
+  committedQuery,
+  totalProducts,
+  productsLength,
+  selectedCategoryName,
+  sortBy,
+  onSearchChange,
+  onSearchSubmit,
+  onClearSearch,
+  onOpenCategory,
+  onOpenSort,
+}: {
+  searchQuery: string;
+  isSearchMode: boolean;
+  committedQuery: string;
+  totalProducts: number;
+  productsLength: number;
+  selectedCategoryName: string;
+  sortBy: SortOption;
+  onSearchChange: (text: string) => void;
+  onSearchSubmit: () => void;
+  onClearSearch: () => void;
+  onOpenCategory: () => void;
+  onOpenSort: () => void;
+}) => (
+  <View style={styles.filtersContainer}>
+    {/* Search bar */}
+    <View style={styles.searchContainer}>
+      <Search color="#6b7280" size={20} />
+      <TextInput
+        style={styles.searchInput}
+        placeholder="Search products… (min. 2 chars)"
+        placeholderTextColor="#9ca3af"
+        value={searchQuery}
+        onChangeText={onSearchChange}
+        onSubmitEditing={onSearchSubmit}
+        returnKeyType="search"
+      />
+      {searchQuery.length > 0 && (
+        <TouchableOpacity onPress={onClearSearch}>
+          <X color="#6b7280" size={20} />
+        </TouchableOpacity>
+      )}
+    </View>
+
+    {/* Category (browse mode only) */}
+    {!isSearchMode && (
+      <TouchableOpacity style={styles.filterButton} onPress={onOpenCategory}>
+        <Text style={styles.filterButtonText} numberOfLines={1}>
+          {selectedCategoryName}
+        </Text>
+        <ChevronDown color="#fff" size={16} />
+      </TouchableOpacity>
+    )}
+
+    {/* Sort */}
+    <TouchableOpacity style={styles.sortButton} onPress={onOpenSort}>
+      <Text style={styles.sortButtonText}>Sort: {SORT_LABELS[sortBy]}</Text>
+      <ChevronDown color="#6b7280" size={16} />
+    </TouchableOpacity>
+
+    {/* Results info */}
+    <View style={styles.resultsInfo}>
+      <Text style={styles.resultsText}>
+        {isSearchMode
+          ? `Search: "${committedQuery}" — ${totalProducts} result${totalProducts !== 1 ? 's' : ''}`
+          : `Showing ${productsLength} of ${totalProducts} products`}
+      </Text>
+      {isSearchMode && (
+        <TouchableOpacity onPress={onClearSearch} style={styles.clearSearchBtn}>
+          <X color="#FF6B35" size={14} />
+          <Text style={styles.clearSearchText}>Clear search</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  </View>
+));
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function ShopScreen() {
   const params = useLocalSearchParams();
   const branch = useStore((state) => state.branch);
@@ -96,13 +171,13 @@ export default function ShopScreen() {
   const initialTab = params.tab === 'specials' ? 'specials' : 'products';
   const [activeTab, setActiveTab] = useState<'products' | 'specials'>(initialTab);
 
-  const [products, setProducts]         = useState<Product[]>([]);
-  const [specials, setSpecials]         = useState<Special[]>([]);
-  const [combos, setCombos]             = useState<Combo[]>([]);
-  const [categories, setCategories]     = useState<Category[]>([]);
-  const [initialLoading, setInitialLoading] = useState(true); // first-page spinner
-  const [loadingMore, setLoadingMore]   = useState(false);    // subsequent pages
-  const [searchQuery, setSearchQuery]   = useState('');
+  const [products, setProducts]             = useState<Product[]>([]);
+  const [specials, setSpecials]             = useState<Special[]>([]);
+  const [combos, setCombos]                 = useState<Combo[]>([]);
+  const [categories, setCategories]         = useState<Category[]>([]);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [loadingMore, setLoadingMore]       = useState(false);
+  const [searchQuery, setSearchQuery]       = useState('');
   const [committedQuery, setCommittedQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(
     (params.categoryId as string) || null,
@@ -111,15 +186,13 @@ export default function ShopScreen() {
   const [showSortModal, setShowSortModal]         = useState(false);
   const [sortBy, setSortBy]                       = useState<SortOption>('newest');
 
-  // Infinite-scroll state
-  const [currentPage, setCurrentPage]   = useState(1);
-  const [totalPages, setTotalPages]     = useState(1);
+  const [currentPage, setCurrentPage]     = useState(1);
+  const [totalPages, setTotalPages]       = useState(1);
   const [totalProducts, setTotalProducts] = useState(0);
-  const PAGE_SIZE = 20; // sensible page size for infinite scroll
+  const PAGE_SIZE = 20;
 
   const [isSearchMode, setIsSearchMode] = useState(false);
 
-  // Track whether a fetch is already in flight to prevent double-fires
   const fetchingRef = useRef(false);
 
   // ── Tab param sync ────────────────────────────────────────────────────────
@@ -134,7 +207,6 @@ export default function ShopScreen() {
 
     if (activeTab === 'products') {
       if (!isSearchMode) {
-        // Full reset — start from page 1 with a cleared list
         setProducts([]);
         setCurrentPage(1);
         setTotalPages(1);
@@ -158,11 +230,6 @@ export default function ShopScreen() {
     }
   };
 
-  /**
-   * fetchPage — loads a single page and APPENDS to the product list.
-   * @param page        1-based page number to fetch
-   * @param isFirstPage pass true to replace the list (reset) rather than append
-   */
   const fetchPage = useCallback(
     async (page: number, isFirstPage = false) => {
       if (!branch) return;
@@ -195,11 +262,10 @@ export default function ShopScreen() {
     [branch, selectedCategory, sortBy],
   );
 
-  /** Called by FlatList when the user scrolls close to the bottom */
   const handleLoadMore = () => {
-    if (isSearchMode) return;          // no pagination in search mode
+    if (isSearchMode) return;
     if (loadingMore || initialLoading) return;
-    if (currentPage >= totalPages)     return;
+    if (currentPage >= totalPages) return;
     fetchPage(currentPage + 1);
   };
 
@@ -231,7 +297,7 @@ export default function ShopScreen() {
   };
 
   // ── Search ────────────────────────────────────────────────────────────────
-  const handleSearch = async () => {
+  const handleSearch = useCallback(async () => {
     const trimmed = searchQuery.trim();
     if (!trimmed || trimmed.length < 2) {
       handleClearSearch();
@@ -255,9 +321,10 @@ export default function ShopScreen() {
     } finally {
       setInitialLoading(false);
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, branch, sortBy]);
 
-  const handleClearSearch = () => {
+  const handleClearSearch = useCallback(() => {
     setSearchQuery('');
     setCommittedQuery('');
     setIsSearchMode(false);
@@ -265,16 +332,19 @@ export default function ShopScreen() {
     setCurrentPage(1);
     setTotalPages(1);
     fetchPage(1, true);
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchPage]);
+
+  const handleSearchChange = useCallback((text: string) => {
+    setSearchQuery(text);
+  }, []);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const selectedCategoryName = selectedCategory
-    ? categories.find((c) => c._id === selectedCategory)?.name
+    ? (categories.find((c) => c._id === selectedCategory)?.name ?? 'All Products')
     : 'All Products';
 
   // ── FlatList render helpers ───────────────────────────────────────────────
-
-  /** Each FlatList item is a row of 2 product cards */
   const productRows = pairProducts(products);
 
   const renderProductRow = ({ item }: { item: [Product, Product | null] }) => (
@@ -283,13 +353,11 @@ export default function ShopScreen() {
       {item[1] ? (
         <ProductCard product={item[1]} />
       ) : (
-        // Empty placeholder so the first card keeps its width
         <View style={{ width: CARD_WIDTH }} />
       )}
     </View>
   );
 
-  /** Footer: spinner while loading more, or "end" message */
   const renderProductFooter = () => {
     if (isSearchMode) return null;
     if (loadingMore) {
@@ -309,62 +377,6 @@ export default function ShopScreen() {
     }
     return null;
   };
-
-  const renderProductHeader = () => (
-    <View style={styles.filtersContainer}>
-      {/* Search bar */}
-      <View style={styles.searchContainer}>
-        <Search color="#6b7280" size={20} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search products… (min. 2 chars)"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          onSubmitEditing={handleSearch}
-          returnKeyType="search"
-        />
-        {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={handleClearSearch}>
-            <X color="#6b7280" size={20} />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Category (browse mode only) */}
-      {!isSearchMode && (
-        <TouchableOpacity
-          style={styles.filterButton}
-          onPress={() => setShowCategoryModal(true)}
-        >
-          <Text style={styles.filterButtonText} numberOfLines={1}>
-            {selectedCategoryName}
-          </Text>
-          <ChevronDown color="#fff" size={16} />
-        </TouchableOpacity>
-      )}
-
-      {/* Sort */}
-      <TouchableOpacity style={styles.sortButton} onPress={() => setShowSortModal(true)}>
-        <Text style={styles.sortButtonText}>Sort: {SORT_LABELS[sortBy]}</Text>
-        <ChevronDown color="#6b7280" size={16} />
-      </TouchableOpacity>
-
-      {/* Results info */}
-      <View style={styles.resultsInfo}>
-        <Text style={styles.resultsText}>
-          {isSearchMode
-            ? `Search: "${committedQuery}" — ${totalProducts} result${totalProducts !== 1 ? 's' : ''}`
-            : `Showing ${products.length} of ${totalProducts} products`}
-        </Text>
-        {isSearchMode && (
-          <TouchableOpacity onPress={handleClearSearch} style={styles.clearSearchBtn}>
-            <X color="#FF6B35" size={14} />
-            <Text style={styles.clearSearchText}>Clear search</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    </View>
-  );
 
   const renderEmpty = () =>
     initialLoading ? null : (
@@ -415,7 +427,6 @@ export default function ShopScreen() {
       {activeTab === 'products' && (
         <>
           {initialLoading && products.length === 0 ? (
-            // First load — show full-screen spinner so the FlatList doesn't flash empty
             <View style={styles.centerContainer}>
               <ActivityIndicator size="large" color="#FF6B35" />
             </View>
@@ -424,14 +435,29 @@ export default function ShopScreen() {
               data={productRows}
               keyExtractor={(_, index) => `row-${index}`}
               renderItem={renderProductRow}
-              ListHeaderComponent={renderProductHeader}
+              ListHeaderComponent={
+                <ProductListHeader
+                  searchQuery={searchQuery}
+                  isSearchMode={isSearchMode}
+                  committedQuery={committedQuery}
+                  totalProducts={totalProducts}
+                  productsLength={products.length}
+                  selectedCategoryName={selectedCategoryName}
+                  sortBy={sortBy}
+                  onSearchChange={handleSearchChange}
+                  onSearchSubmit={handleSearch}
+                  onClearSearch={handleClearSearch}
+                  onOpenCategory={() => setShowCategoryModal(true)}
+                  onOpenSort={() => setShowSortModal(true)}
+                />
+              }
               ListFooterComponent={renderProductFooter}
               ListEmptyComponent={renderEmpty}
               onEndReached={handleLoadMore}
-              onEndReachedThreshold={0.4}   // start fetching when 40% from the bottom
+              onEndReachedThreshold={0.4}
               contentContainerStyle={styles.flatListContent}
               showsVerticalScrollIndicator={false}
-              removeClippedSubviews            // free memory for off-screen cards
+              removeClippedSubviews
             />
           )}
         </>
@@ -587,13 +613,13 @@ const styles = StyleSheet.create({
   scrollView:      { flex: 1 },
 
   // ── Tabs ──────────────────────────────────────────────────────────────────
-  tabs:         { flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
-  tab:          { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, gap: 8, borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  tabActive:    { borderBottomColor: '#FF6B35' },
-  tabText:      { fontSize: 14, fontWeight: '600', color: '#6b7280' },
-  tabTextActive:{ color: '#FF6B35' },
+  tabs:          { flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  tab:           { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, gap: 8, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tabActive:     { borderBottomColor: '#FF6B35' },
+  tabText:       { fontSize: 14, fontWeight: '600', color: '#6b7280' },
+  tabTextActive: { color: '#FF6B35' },
 
-  // ── Filters header (rendered as FlatList ListHeaderComponent) ─────────────
+  // ── Filters header ────────────────────────────────────────────────────────
   filtersContainer: { backgroundColor: '#fff', padding: 16, gap: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb', marginBottom: 16 },
   searchContainer:  { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f3f4f6', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, gap: 12 },
   searchInput:      { flex: 1, fontSize: 16, color: '#1f2937' },
@@ -620,24 +646,24 @@ const styles = StyleSheet.create({
   emptyText:  { fontSize: 16, color: '#6b7280', marginTop: 16, textAlign: 'center' },
   errorText:  { fontSize: 16, color: '#9ca3af', marginTop: 12 },
 
-  // ── Specials / combos (ScrollView) ────────────────────────────────────────
-  content:      { padding: 16, paddingTop: 0 },
-  section:      { marginBottom: 24 },
-  sectionHeader:{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
-  sectionTitle: { fontSize: 20, fontWeight: 'bold', color: '#1f2937' },
-  badge:        { backgroundColor: '#FF6B35', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
-  badgeText:    { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-  productGrid:  { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  // ── Specials / combos ─────────────────────────────────────────────────────
+  content:       { padding: 16, paddingTop: 0 },
+  section:       { marginBottom: 24 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  sectionTitle:  { fontSize: 20, fontWeight: 'bold', color: '#1f2937' },
+  badge:         { backgroundColor: '#FF6B35', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
+  badgeText:     { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+  productGrid:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
 
   // ── Modals ────────────────────────────────────────────────────────────────
-  dropdownOverlay:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-start', paddingTop: 220, paddingHorizontal: 16 },
-  dropdownMenu:      { backgroundColor: '#fff', borderRadius: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 8, maxHeight: 400, paddingBottom: 8 },
-  dropdownMenuSmall: { maxHeight: 260 },
-  dropdownHeader:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
-  dropdownTitle:     { fontSize: 16, fontWeight: '600', color: '#1f2937' },
-  dropdownClose:     { padding: 4 },
-  dropdownScroll:    { paddingVertical: 4 },
-  dropdownItem:      { paddingVertical: 14, paddingHorizontal: 16, marginHorizontal: 8, marginVertical: 2, borderRadius: 8 },
-  dropdownItemActive:{ backgroundColor: '#fef3e9' },
-  dropdownItemText:  { fontSize: 16, color: '#1f2937', fontWeight: '500' },
+  dropdownOverlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-start', paddingTop: 220, paddingHorizontal: 16 },
+  dropdownMenu:       { backgroundColor: '#fff', borderRadius: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 8, maxHeight: 400, paddingBottom: 8 },
+  dropdownMenuSmall:  { maxHeight: 260 },
+  dropdownHeader:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  dropdownTitle:      { fontSize: 16, fontWeight: '600', color: '#1f2937' },
+  dropdownClose:      { padding: 4 },
+  dropdownScroll:     { paddingVertical: 4 },
+  dropdownItem:       { paddingVertical: 14, paddingHorizontal: 16, marginHorizontal: 8, marginVertical: 2, borderRadius: 8 },
+  dropdownItemActive: { backgroundColor: '#fef3e9' },
+  dropdownItemText:   { fontSize: 16, color: '#1f2937', fontWeight: '500' },
 });

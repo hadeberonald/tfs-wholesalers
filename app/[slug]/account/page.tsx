@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
+import { useMemo } from 'react';
 import Link from 'next/link';
 import { 
   User, 
@@ -29,6 +30,7 @@ interface Order {
 export default function AccountPage() {
   const { user, logout, loading: authLoading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
@@ -37,9 +39,22 @@ export default function AccountPage() {
     totalSpent: 0,
   });
 
+  const slugFromUrl = useMemo(() => {
+    const pathParts = pathname.split('/').filter(Boolean);
+    if (pathParts.length > 0) {
+      const firstPart = pathParts[0];
+      if (!['admin', 'login', 'register', 'super-admin', 'select-branch'].includes(firstPart)) {
+        return firstPart;
+      }
+    }
+    return null;
+  }, [pathname]);
+
+  const b = (path: string) => slugFromUrl ? `/${slugFromUrl}${path}` : '/select-branch';
+
   useEffect(() => {
     if (!authLoading && !user) {
-      router.push('/login?redirect=/account');
+      router.push(b('/login?redirect=/account'));
     } else if (user) {
       fetchAccountData();
     }
@@ -52,10 +67,8 @@ export default function AccountPage() {
         const data = await res.json();
         const orders = data.orders || [];
         
-        // Get recent 3 orders
         setRecentOrders(orders.slice(0, 3));
         
-        // Calculate stats
         setStats({
           totalOrders: orders.length,
           pendingOrders: orders.filter((o: Order) => o.status === 'pending' || o.status === 'processing').length,
@@ -157,10 +170,6 @@ export default function AccountPage() {
 
               {/* Navigation */}
               <nav className="space-y-2">
-                
-
-               
-                
                 <button
                   onClick={() => logout()}
                   className="w-full flex items-center justify-between p-3 rounded-xl hover:bg-red-50 transition-colors group text-left"
@@ -180,7 +189,7 @@ export default function AccountPage() {
             <div className="bg-white rounded-2xl p-6 shadow-sm">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold text-brand-black">Recent Orders</h2>
-                <Link href="/account/orders" className="text-brand-orange hover:text-orange-600 font-semibold text-sm flex items-center space-x-1">
+                <Link href={b('/account/orders')} className="text-brand-orange hover:text-orange-600 font-semibold text-sm flex items-center space-x-1">
                   <span>View All</span>
                   <ChevronRight className="w-4 h-4" />
                 </Link>
@@ -191,7 +200,7 @@ export default function AccountPage() {
                   <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                   <h3 className="text-lg font-semibold text-gray-900 mb-2">No orders yet</h3>
                   <p className="text-gray-600 mb-6">Start shopping to see your orders here</p>
-                  <Link href="/products" className="btn-primary inline-block">
+                  <Link href={b('/shop')} className="btn-primary inline-block">
                     Browse Products
                   </Link>
                 </div>
@@ -231,8 +240,6 @@ export default function AccountPage() {
               )}
             </div>
 
-            {/* Quick Actions */}
-           
             {/* Support Section */}
             <div className="bg-gradient-to-br from-brand-orange to-orange-600 rounded-2xl p-8 text-white">
               <h3 className="text-2xl font-bold mb-2">Need Help?</h3>
@@ -240,11 +247,11 @@ export default function AccountPage() {
                 Our customer support team is here to assist you with any questions or concerns.
               </p>
               <div className="flex flex-col sm:flex-row gap-4">
-                <a href="mailto:support@tfswholesalers.co.za" className="bg-white text-brand-orange px-6 py-3 rounded-xl font-semibold hover:bg-gray-100 transition-colors text-center">
+                <a href="mailto:support@tfswholesalers.com" className="bg-white text-brand-orange px-6 py-3 rounded-xl font-semibold hover:bg-gray-100 transition-colors text-center">
                   Email Support
                 </a>
-                <a href="tel:+27123456789" className="bg-white/20 backdrop-blur-sm text-white px-6 py-3 rounded-xl font-semibold hover:bg-white/30 transition-colors text-center">
-                  Call Us
+                <a href="tel:0349813210" className="bg-white/20 backdrop-blur-sm text-white px-6 py-3 rounded-xl font-semibold hover:bg-white/30 transition-colors text-center">
+                  034 981 3210
                 </a>
               </div>
             </div>

@@ -1,13 +1,7 @@
 // app/(tabs)/cart.tsx
-//
-// ─── Fix summary ─────────────────────────────────────────────────────────────
-// • subtotal  = sum of item.price * quantity (discounted price, excl. autoAdded)
-// • savings   = sum of (originalPrice - price) * quantity for all items
-// • autoAdded bonus rows are excluded from the subtotal (they're free / handled separately)
-
 import {
   View, Text, ScrollView, TouchableOpacity, Image,
-  StyleSheet, Alert, ActivityIndicator,
+  StyleSheet, Alert, ActivityIndicator, Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
@@ -16,10 +10,12 @@ import {
 } from 'lucide-react-native';
 import { useStore } from '@/lib/store';
 import { useEffect, useState } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '@/lib/api';
 
 export default function CartScreen() {
   const router          = useRouter();
+  const insets          = useSafeAreaInsets();
   const items           = useStore((s) => s.items);
   const removeItem      = useStore((s) => s.removeItem);
   const updateQuantity  = useStore((s) => s.updateQuantity);
@@ -47,20 +43,17 @@ export default function CartScreen() {
   };
 
   // ── Summary calculations ───────────────────────────────────────────────────
-  // subtotal: discounted price × qty, only for real (non-auto-added) items
   const subtotal = items.reduce((sum, item) => {
     if (item.autoAdded) return sum;
     return sum + (item.price || 0) * item.quantity;
   }, 0);
 
-  // savings: difference between original and discounted price for all items
   const totalSavings = items.reduce((sum, item) => {
     if (!item.originalPrice) return sum;
     const saving = (item.originalPrice - (item.price || 0)) * item.quantity;
     return sum + (saving > 0 ? saving : 0);
   }, 0);
 
-  // freeItemSavings: full value of autoAdded free items (they cost R0 in cart)
   const freeItemSavings = items.reduce((sum, item) => {
     if (!item.autoAdded || !item.originalPrice) return sum;
     return sum + item.originalPrice * item.quantity;
@@ -183,7 +176,6 @@ export default function CartScreen() {
                   {item.variantName && <Text style={styles.variantName}> — {item.variantName}</Text>}
                 </Text>
 
-                {/* Price row */}
                 {hasSpecial ? (
                   <View style={styles.priceRow}>
                     <Text style={styles.itemPriceSpecial}>R{itemTotal.toFixed(2)}</Text>
@@ -200,7 +192,6 @@ export default function CartScreen() {
                   {item.quantity} × R{itemPrice.toFixed(2)} each
                 </Text>
 
-                {/* Special badges */}
                 {hasSpecial && (
                   <View style={styles.specialBadge}>
                     <Tag color="#10b981" size={12} />
@@ -214,7 +205,6 @@ export default function CartScreen() {
                   </View>
                 )}
 
-                {/* Quantity control */}
                 <View style={styles.quantityControl}>
                   <TouchableOpacity
                     style={styles.quantityButton}
@@ -492,15 +482,12 @@ export default function CartScreen() {
       </ScrollView>
 
       {/* ── Cart Summary ──────────────────────────────────────────────────────── */}
-      <View style={styles.summary}>
-
-        {/* Subtotal row — shows discounted price */}
+      <View style={[styles.summary, { paddingBottom: insets.bottom + 16 }]}>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Subtotal</Text>
           <Text style={styles.summaryValue}>R{subtotal.toFixed(2)}</Text>
         </View>
 
-        {/* Savings row — only shown when there are actual savings */}
         {totalDisplaySavings > 0 && (
           <View style={styles.savingsRow}>
             <View style={styles.savingsLabel}>
@@ -511,19 +498,16 @@ export default function CartScreen() {
           </View>
         )}
 
-        {/* Delivery */}
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Delivery Fee</Text>
           <Text style={styles.summaryValue}>R{deliveryFee.toFixed(2)}</Text>
         </View>
 
-        {/* Total */}
         <View style={[styles.summaryRow, styles.totalRow]}>
           <Text style={styles.totalLabel}>Total</Text>
           <Text style={styles.totalValue}>R{total.toFixed(2)}</Text>
         </View>
 
-        {/* Celebration banner */}
         {totalDisplaySavings > 0 && (
           <View style={styles.celebrationBadge}>
             <Text style={styles.celebrationText}>
@@ -594,24 +578,24 @@ const styles = StyleSheet.create({
   removeButton: { justifyContent: 'center', alignItems: 'center', padding: 8, marginLeft: 4 },
 
   // Combo
-  comboSection: { marginTop: 16 },
-  comboHeader:  { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
-  comboTitle:   { fontSize: 20, fontWeight: 'bold', color: '#1f2937' },
-  comboCount:   { backgroundColor: '#7c3aed', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  comboSection:   { marginTop: 16 },
+  comboHeader:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  comboTitle:     { fontSize: 20, fontWeight: 'bold', color: '#1f2937' },
+  comboCount:     { backgroundColor: '#7c3aed', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   comboCountText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
   comboItem: {
     flexDirection: 'row', backgroundColor: '#faf5ff', borderRadius: 12,
     padding: 12, marginBottom: 12, borderWidth: 2, borderColor: '#ddd6fe',
   },
-  imageContainer: { position: 'relative' },
-  bonusItemImage: { width: 80, height: 80, borderRadius: 8, backgroundColor: '#fff', borderWidth: 2, borderColor: '#ddd6fe' },
-  comboBadge: { position: 'absolute', top: 4, right: 4, backgroundColor: '#7c3aed', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
-  comboBadgeText: { color: '#fff', fontSize: 9, fontWeight: 'bold' },
+  imageContainer:     { position: 'relative' },
+  bonusItemImage:     { width: 80, height: 80, borderRadius: 8, backgroundColor: '#fff', borderWidth: 2, borderColor: '#ddd6fe' },
+  comboBadge:         { position: 'absolute', top: 4, right: 4, backgroundColor: '#7c3aed', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
+  comboBadgeText:     { color: '#fff', fontSize: 9, fontWeight: 'bold' },
   comboAutoAddedText: { fontSize: 10, color: '#7c3aed', fontWeight: 'bold', textTransform: 'uppercase' },
   comboItemCountBadge: { backgroundColor: '#ede9fe', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
-  comboItemCountText: { fontSize: 10, color: '#6d28d9', fontWeight: '600' },
+  comboItemCountText:  { fontSize: 10, color: '#6d28d9', fontWeight: '600' },
   discountBadgeInline: { backgroundColor: '#ef4444', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
-  discountBadgeText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
+  discountBadgeText:   { color: '#fff', fontSize: 10, fontWeight: 'bold' },
   comboBannerBox: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 4,
     backgroundColor: 'rgba(255,255,255,0.6)', paddingHorizontal: 8, paddingVertical: 6,
@@ -620,38 +604,38 @@ const styles = StyleSheet.create({
   comboBannerText: { fontSize: 11, color: '#5b21b6', fontWeight: '600', flex: 1 },
 
   // Bundle
-  bundleSection: { marginTop: 16 },
-  bundleHeader:  { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
-  bundleTitle:   { fontSize: 20, fontWeight: 'bold', color: '#1f2937' },
-  bundleCount:   { backgroundColor: '#7c3aed', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  bundleSection:   { marginTop: 16 },
+  bundleHeader:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  bundleTitle:     { fontSize: 20, fontWeight: 'bold', color: '#1f2937' },
+  bundleCount:     { backgroundColor: '#7c3aed', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   bundleCountText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
   bundleItem: {
     flexDirection: 'row', backgroundColor: '#faf5ff', borderRadius: 12,
     padding: 12, marginBottom: 12, borderWidth: 2, borderColor: '#ddd6fe',
   },
-  dealBadge:    { position: 'absolute', top: 4, right: 4, backgroundColor: '#7c3aed', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
-  dealBadgeText: { color: '#fff', fontSize: 9, fontWeight: 'bold' },
+  dealBadge:              { position: 'absolute', top: 4, right: 4, backgroundColor: '#7c3aed', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
+  dealBadgeText:          { color: '#fff', fontSize: 9, fontWeight: 'bold' },
   bundleDescription: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 4,
     backgroundColor: 'rgba(255,255,255,0.6)', paddingHorizontal: 8, paddingVertical: 6,
     borderRadius: 6, marginBottom: 8, borderWidth: 1, borderColor: '#ddd6fe',
   },
-  bundleDescriptionText:  { fontSize: 11, color: '#5b21b6', fontWeight: '600', flex: 1 },
-  bundleAutoAddedText:    { fontSize: 10, color: '#7c3aed', fontWeight: 'bold', textTransform: 'uppercase' },
-  bundlePricingNote:      { fontSize: 11, color: '#7c3aed', fontWeight: '500', marginTop: 2 },
+  bundleDescriptionText: { fontSize: 11, color: '#5b21b6', fontWeight: '600', flex: 1 },
+  bundleAutoAddedText:   { fontSize: 10, color: '#7c3aed', fontWeight: 'bold', textTransform: 'uppercase' },
+  bundlePricingNote:     { fontSize: 11, color: '#7c3aed', fontWeight: '500', marginTop: 2 },
 
   // Bonus / free items
-  bonusSection: { marginTop: 16 },
-  bonusHeader:  { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
-  bonusTitle:   { fontSize: 20, fontWeight: 'bold', color: '#1f2937' },
-  bonusCount:   { backgroundColor: '#10b981', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  bonusSection:   { marginTop: 16 },
+  bonusHeader:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  bonusTitle:     { fontSize: 20, fontWeight: 'bold', color: '#1f2937' },
+  bonusCount:     { backgroundColor: '#10b981', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   bonusCountText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
   bonusItem: {
     flexDirection: 'row', backgroundColor: '#ecfdf5', borderRadius: 12,
     padding: 12, marginBottom: 12, borderWidth: 2, borderColor: '#a7f3d0',
   },
-  freeBadge:     { position: 'absolute', top: 4, right: 4, backgroundColor: '#10b981', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  freeBadgeText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
+  freeBadge:        { position: 'absolute', top: 4, right: 4, backgroundColor: '#10b981', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  freeBadgeText:    { color: '#fff', fontSize: 10, fontWeight: 'bold' },
   autoAddedHeader:  { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
   autoAddedText:    { fontSize: 10, color: '#059669', fontWeight: 'bold', textTransform: 'uppercase' },
   bonusDescription: {
@@ -674,7 +658,13 @@ const styles = StyleSheet.create({
   infoText:             { flex: 1, fontSize: 12, color: '#1e40af', lineHeight: 16 },
 
   // ── Summary ──────────────────────────────────────────────────────────────
-  summary: { backgroundColor: '#fff', padding: 16, borderTopWidth: 1, borderTopColor: '#e5e7eb' },
+  // NOTE: paddingBottom is applied inline using insets.bottom + 16
+  summary: {
+    backgroundColor: '#fff',
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+  },
 
   summaryRow:   { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   summaryLabel: { fontSize: 14, color: '#6b7280' },
