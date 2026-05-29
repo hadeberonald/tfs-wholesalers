@@ -14,8 +14,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify webhook signature
+    const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
+    if (!paystackSecret) {
+      console.error('[Webhook] PAYSTACK_SECRET_KEY is not set');
+      return NextResponse.json({ error: 'Webhook not configured' }, { status: 500 });
+    }
     const hash = crypto
-      .createHmac('sha512', process.env.PAYSTACK_SECRET_KEY || '')
+      .createHmac('sha512', paystackSecret)
       .update(body)
       .digest('hex');
 

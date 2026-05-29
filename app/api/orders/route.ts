@@ -9,6 +9,8 @@ import {
   buildInternalReceiptEmail,
   sendTransactionalEmail,
 } from '@/lib/sendPushNotification';
+import { cookies } from 'next/headers';
+import jwt from 'jsonwebtoken';
 
 export async function GET(request: NextRequest) {
   try {
@@ -43,6 +45,21 @@ export async function GET(request: NextRequest) {
       if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
       if (!auth.isSuperAdmin && auth.branchId) query.branchId = auth.branchId;
     } else if (userId) {
+      // SECURITY: verify the caller is authenticated and owns this userId,
+      // or has admin-level orders:read permission.
+      const cookieStore = await cookies();
+      const token = cookieStore.get('auth-token')?.value;
+      if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      try {
+        const decoded = jwt.verify(token, process.env.NEXTAUTH_SECRET!) as any;
+        if (decoded.userId !== userId) {
+          // Not their own orders — require admin permission
+          const auth = await requirePermission('orders:read');
+          if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+        }
+      } catch {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
       query.userId = userId;
     }
 
