@@ -24,8 +24,8 @@ interface Special {
   productId?: string;
   productIds?: string[];
   categoryId?: string;
-  variantId?:      string;
-  variantSku?:     string;
+  variantId?: string;
+  variantSku?: string;
   variantBarcode?: string;
   product?: any | null;
 }
@@ -55,8 +55,8 @@ type FeedItem =
 export default function SpecialsSection() {
   const { branch } = useBranch();
   const [specials, setSpecials] = useState<Special[]>([]);
-  const [combos, setCombos]     = useState<Combo[]>([]);
-  const [loading, setLoading]   = useState(true);
+  const [combos,   setCombos]   = useState<Combo[]>([]);
+  const [loading,  setLoading]  = useState(true);
 
   useEffect(() => {
     if (branch) fetchAll();
@@ -79,8 +79,8 @@ export default function SpecialsSection() {
             if (s.endDate   && new Date(s.endDate)   < now) return false;
             return s.active;
           })
-          // If the API resolved a linked variant child to its parent, normalise
-          // productId to the parent's _id so SpecialCard fetches the right doc.
+          // Normalise productId to the resolved parent's _id so SpecialCard's
+          // fallback fetch (when special.product is absent) also hits the right doc.
           .map((s: Special) => {
             if (s.product?._id && s.product._id.toString() !== s.productId?.toString()) {
               return { ...s, productId: s.product._id.toString() };
@@ -93,10 +93,9 @@ export default function SpecialsSection() {
 
       if (combosRes.ok) {
         const data = await combosRes.json();
-        const active = (data.combos || [])
-          .filter((c: Combo) => c.stockLevel > 0)
-          .slice(0, 4);
-        setCombos(active);
+        setCombos(
+          (data.combos || []).filter((c: Combo) => c.stockLevel > 0).slice(0, 4)
+        );
       }
     } catch (error) {
       console.error('Failed to fetch specials/combos:', error);
@@ -117,9 +116,7 @@ export default function SpecialsSection() {
       <div className="max-w-7xl mx-auto px-4">
         <div className="text-center mb-12">
           <h2 className="text-4xl font-bold text-brand-black mb-4">Special Offers</h2>
-          <p className="text-xl text-gray-600">
-            Don't miss out on our amazing deals and promotions
-          </p>
+          <p className="text-xl text-gray-600">Don't miss out on our amazing deals and promotions</p>
         </div>
 
         {loading ? (

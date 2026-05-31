@@ -10,8 +10,6 @@ import {
 import { useCartStore } from '@/lib/store';
 import { useBranch } from '@/lib/branch-context';
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 interface ProductVariant {
   _id?: string;
   name: string;
@@ -57,18 +55,16 @@ interface Special {
   productId?: string;
   productIds?: string[];
   categoryId?: string;
-  variantId?:      string;
-  variantSku?:     string;
+  variantId?: string;
+  variantSku?: string;
   variantBarcode?: string;
-  // Enriched by the specials API — already resolved to the parent product
+  // Pre-resolved by the specials list API
   product?: Product | null;
 }
 
 interface SpecialCardProps {
   special: Special;
 }
-
-// ── VariantPicker ─────────────────────────────────────────────────────────────
 
 interface VariantOption {
   value: string;
@@ -97,7 +93,6 @@ function VariantPicker({
     const spaceBelow = window.innerHeight - rect.bottom;
     const spaceAbove = rect.top;
     const dropdownH  = Math.min(280, options.length * 52);
-
     if (spaceBelow < dropdownH && spaceAbove > spaceBelow) {
       setDropdownStyle({
         position: 'fixed', left: rect.left, width: rect.width,
@@ -161,12 +156,9 @@ function VariantPicker({
             className={`
               w-full flex items-center justify-between gap-2
               px-3 py-2.5 text-left text-xs transition-colors border-b border-gray-50 last:border-0
-              ${isSel
-                ? 'bg-orange-50 text-orange-700'
-                : opt.outOfStock
-                  ? 'text-gray-300 cursor-not-allowed bg-white'
-                  : 'text-gray-700 hover:bg-orange-50/60 bg-white'
-              }
+              ${isSel ? 'bg-orange-50 text-orange-700'
+                : opt.outOfStock ? 'text-gray-300 cursor-not-allowed bg-white'
+                : 'text-gray-700 hover:bg-orange-50/60 bg-white'}
             `}
           >
             <div className="flex flex-col min-w-0">
@@ -203,8 +195,7 @@ function VariantPicker({
         onClick={handleOpen}
         className={`
           w-full flex items-center justify-between gap-1.5
-          px-2.5 py-1.5 rounded-lg border text-left text-xs
-          bg-white transition-all duration-150
+          px-2.5 py-1.5 rounded-lg border text-left text-xs bg-white transition-all duration-150
           ${open ? 'border-orange-400 ring-1 ring-orange-200' : 'border-gray-200 hover:border-orange-300'}
         `}
       >
@@ -213,14 +204,10 @@ function VariantPicker({
         </span>
         <ChevronDown className={`w-3 h-3 flex-shrink-0 text-gray-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
       </button>
-      {typeof document !== 'undefined' && dropdown
-        ? createPortal(dropdown, document.body)
-        : null}
+      {typeof document !== 'undefined' && dropdown ? createPortal(dropdown, document.body) : null}
     </>
   );
 }
-
-// ── SpecialCard ───────────────────────────────────────────────────────────────
 
 export default function SpecialCard({ special }: SpecialCardProps) {
   const { branch }  = useBranch();
@@ -228,7 +215,8 @@ export default function SpecialCard({ special }: SpecialCardProps) {
 
   const [product,         setProduct]        = useState<Product | null>(null);
   const [addonProduct,    setAddonProduct]   = useState<Product | null>(null);
-  const [loading,         setLoading]        = useState(true);
+  // Start loading=false if we already have the product from the API
+  const [loading,         setLoading]        = useState(!special.product);
   const [imgError,        setImgError]       = useState(false);
   const [justAdded,       setJustAdded]      = useState(false);
   const [showAddonModal,  setShowAddonModal] = useState(false);
@@ -236,100 +224,89 @@ export default function SpecialCard({ special }: SpecialCardProps) {
   const [quantity,        setQuantity]       = useState(1);
   const [bundleQty,       setBundleQty]      = useState(1);
 
-  // ── Initialise from enriched product passed by the API ───────────────────
-  // The specials list API already fetches and resolves the product (including
-  // walking child → parent for linked variants). If that data is present we
-  // use it directly and skip the network fetch entirely, which also prevents
-  // the card from flashing then disappearing when the fetch returns a product
-  // that fails the active/isLinkedVariant checks.
   useEffect(() => {
     if (!special._id) return;
     let cancelled = false;
 
     const init = async () => {
-      setLoading(true);
+      // ── If the specials list API already resolved the product, use it directly
+      // and skip the network fetch entirely. This prevents the card from
+      // re-fetching a child product ID that the public products list endpoint
+      // would reject (isLinkedVariant filter), causing the card to disappear.
+      let fetched: Product | null = special.product ?? null;
 
-      try {
-        // ── Use pre-fetched product if the API already resolved it ──────────
-        let fetched: Product | null = special.product ?? null;
+      if (!fetched) {
+        // No pre-resolved product — fetch it ourselves
+        setLoading(true);
+        try {
+          let productId =
+            special.productId ||
+            special.productIds?.[0] ||
+            (special.type === 'buy_x_get_y'              ? special.conditions.buyProductId         : null) ||
+            (special.type === 'conditional_add_on_price' ? special.conditions.triggerProductId     : null);
 
-        // ── Otherwise fall back to fetching by productId ────────────────────
-        if (!fetched) {
-          let productId = special.productId || special.productIds?.[0];
-          if (special.type === 'buy_x_get_y' && special.conditions.buyProductId) {
-            productId = special.conditions.buyProductId;
-          } else if (special.type === 'conditional_add_on_price' && special.conditions.triggerProductId) {
-            productId = special.conditions.triggerProductId;
-          }
+          if (!productId) { setLoading(false); return; }
 
-          if (productId) {
-            // Use the /[id] endpoint which does NOT filter by isLinkedVariant
-            // so linked variant children are still fetchable here.
-            const res = await fetch(`/api/products/${productId}`);
-            if (!res.ok || cancelled) { setLoading(false); return; }
-            const data = await res.json();
-            fetched = data.product ?? null;
-          }
-        }
-
-        if (cancelled) return;
-
-        // Only hide the card if the product is explicitly inactive.
-        // Do NOT hide just because isLinkedVariant is true — the API already
-        // resolved those to their parent, so if we still have a child here
-        // it means the special was set up without the API enrichment path
-        // and we should still show it.
-        if (!fetched || !fetched.active) {
-          setLoading(false);
+          // Use the /[id] single-product endpoint which does NOT filter by
+          // isLinkedVariant, so child products are still fetchable here.
+          const res = await fetch(`/api/products/${productId}`);
+          if (!res.ok || cancelled) { if (!cancelled) setLoading(false); return; }
+          const data = await res.json();
+          fetched = data.product ?? null;
+        } catch (err) {
+          console.error('SpecialCard: failed to fetch product', err);
+          if (!cancelled) setLoading(false);
           return;
         }
+      }
 
-        setProduct(fetched);
+      if (cancelled) return;
 
-        // ── Variant pre-selection ───────────────────────────────────────────
-        const targetRef =
-          special.variantId              || special.conditions?.variantId      ||
-          special.variantSku             || special.conditions?.variantSku     ||
-          special.variantBarcode         || special.conditions?.variantBarcode ||
-          null;
+      // Only hide the card when the product is explicitly inactive.
+      if (!fetched || !fetched.active) {
+        setLoading(false);
+        return;
+      }
 
-        if (fetched.hasVariants && fetched.variants?.length) {
-          const activeVariants = fetched.variants.filter(v => v.active);
+      setProduct(fetched);
 
-          if (targetRef) {
-            const linked =
-              activeVariants.find(v => v._id?.toString() === targetRef.toString()) ||
-              activeVariants.find(v => v.sku              === targetRef) ||
-              activeVariants.find(v => v.barcode          === targetRef);
-            if (linked) setSelectedVariant(linked);
-          } else if (fetched.stockLevel === 0) {
-            const fallback = activeVariants.find(v => v.stockLevel > 0);
-            if (fallback) setSelectedVariant(fallback);
-          }
+      // ── Variant pre-selection ─────────────────────────────────────────────
+      const targetRef =
+        special.variantId      || special.conditions?.variantId      ||
+        special.variantSku     || special.conditions?.variantSku     ||
+        special.variantBarcode || special.conditions?.variantBarcode ||
+        null;
+
+      if (fetched.hasVariants && fetched.variants?.length) {
+        const active = fetched.variants.filter(v => v.active);
+        if (targetRef) {
+          const linked =
+            active.find(v => v._id?.toString() === targetRef.toString()) ||
+            active.find(v => v.sku              === targetRef) ||
+            active.find(v => v.barcode          === targetRef);
+          if (linked) setSelectedVariant(linked);
+        } else if (fetched.stockLevel === 0) {
+          const fallback = active.find(v => v.stockLevel > 0);
+          if (fallback) setSelectedVariant(fallback);
         }
+      }
 
-        setBundleQty(1);
-        setQuantity(1);
+      setBundleQty(1);
+      setQuantity(1);
+      if (!cancelled) setLoading(false);
 
-        // ── Fetch add-on for conditional_add_on_price ───────────────────────
-        if (special.type === 'conditional_add_on_price' && special.conditions.targetProductId) {
-          fetch(`/api/products/${special.conditions.targetProductId}`)
-            .then(r => (r.ok ? r.json() : null))
-            .then(d => { if (d?.product?.active && !cancelled) setAddonProduct(d.product); })
-            .catch(() => null);
-        }
-      } catch (err) {
-        console.error('Failed to initialise special card:', err);
-      } finally {
-        if (!cancelled) setLoading(false);
+      // Fetch add-on for conditional_add_on_price
+      if (special.type === 'conditional_add_on_price' && special.conditions.targetProductId) {
+        fetch(`/api/products/${special.conditions.targetProductId}`)
+          .then(r => (r.ok ? r.json() : null))
+          .then(d => { if (d?.product?.active && !cancelled) setAddonProduct(d.product); })
+          .catch(() => null);
       }
     };
 
     init();
     return () => { cancelled = true; };
   }, [special._id]);
-
-  // ── Derived values ────────────────────────────────────────────────────────
 
   const activeVariants   = product?.variants?.filter(v => v.active) ?? [];
   const hasVariantPicker = !!(product?.hasVariants && activeVariants.length > 0);
@@ -345,8 +322,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
   const primaryImage = selectedVariant?.images?.length
     ? selectedVariant.images[0]
     : (special.images?.[0] || product?.images?.[0]);
-
-  // ── Price logic ───────────────────────────────────────────────────────────
 
   const getDisplayPrice = (): number => {
     if (!product) return 0;
@@ -388,13 +363,10 @@ export default function SpecialCard({ special }: SpecialCardProps) {
     if (special.type === 'buy_x_get_y') return 0;
     if (special.type === 'conditional_add_on_price') {
       return special.conditions.triggerPrice != null
-        ? Math.max(0, basePrice - special.conditions.triggerPrice)
-        : 0;
+        ? Math.max(0, basePrice - special.conditions.triggerPrice) : 0;
     }
     return Math.max(0, basePrice - displayPrice);
   })();
-
-  // ── Badge ─────────────────────────────────────────────────────────────────
 
   const getSpecialBadge = (): string => {
     if (special.badgeText) return special.badgeText;
@@ -403,14 +375,12 @@ export default function SpecialCard({ special }: SpecialCardProps) {
       case 'amount_off':               return `R${special.conditions.discountAmount} OFF`;
       case 'fixed_price':              return `NOW R${special.conditions.newPrice}`;
       case 'multibuy':                 return `${special.conditions.requiredQuantity} FOR R${special.conditions.specialPrice}`;
-      case 'buy_x_get_y':             return `BUY ${special.conditions.buyQuantity} GET ${special.conditions.getQuantity}`;
+      case 'buy_x_get_y':              return `BUY ${special.conditions.buyQuantity} GET ${special.conditions.getQuantity}`;
       case 'bundle':                   return 'BUNDLE DEAL';
       case 'conditional_add_on_price': return `UNLOCK @ R${special.conditions.overridePrice}`;
       default:                         return 'SPECIAL';
     }
   };
-
-  // ── Cart actions ──────────────────────────────────────────────────────────
 
   const isMultibuy     = special.type === 'multibuy';
   const isAddonDeal    = special.type === 'conditional_add_on_price';
@@ -420,11 +390,8 @@ export default function SpecialCard({ special }: SpecialCardProps) {
   const incrementQuantity = (e: React.MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     if (!product) return;
-    if (isMultibuy) {
-      if ((bundleQty + 1) * bundleSize <= stock) setBundleQty(q => q + 1);
-    } else {
-      if (quantity < stock) setQuantity(q => q + 1);
-    }
+    if (isMultibuy) { if ((bundleQty + 1) * bundleSize <= stock) setBundleQty(q => q + 1); }
+    else            { if (quantity < stock) setQuantity(q => q + 1); }
   };
 
   const decrementQuantity = (e: React.MouseEvent) => {
@@ -436,7 +403,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     if (!product) return;
-
     addItem({
       id:               product._id,
       variantId:        selectedVariant?._id,
@@ -449,15 +415,11 @@ export default function SpecialCard({ special }: SpecialCardProps) {
       appliedSpecialId: special._id,
       originalPrice:    basePrice,
     });
-
     if (isAddonDeal) {
       setShowAddonModal(true);
     } else {
       setJustAdded(true);
-      setTimeout(() => {
-        setJustAdded(false);
-        isMultibuy ? setBundleQty(1) : setQuantity(1);
-      }, 1500);
+      setTimeout(() => { setJustAdded(false); isMultibuy ? setBundleQty(1) : setQuantity(1); }, 1500);
     }
   };
 
@@ -493,8 +455,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
     setBundleQty(1);
   };
 
-  // ── Variant picker options ────────────────────────────────────────────────
-
   const variantOptions: VariantOption[] = product ? [
     {
       value:      '',
@@ -510,12 +470,11 @@ export default function SpecialCard({ special }: SpecialCardProps) {
     })),
   ] : [];
 
-  // ── Only hide card if product is explicitly inactive after loading ─────────
-  // Do NOT hide for specials with no productId (category/bundle specials).
+  // Only hide if we expected a product and genuinely couldn't resolve one
   const expectedProduct = !!(
+    special.product ||
     special.productId ||
     special.productIds?.[0] ||
-    special.product ||
     (special.type === 'buy_x_get_y'              && special.conditions?.buyProductId) ||
     (special.type === 'conditional_add_on_price' && special.conditions?.triggerProductId)
   );
@@ -528,13 +487,11 @@ export default function SpecialCard({ special }: SpecialCardProps) {
   const displayDescription =
     special.description?.trim()
       ? special.description
-      : isPosSpecial
-        ? (product?.description?.trim() || '')
-        : '';
+      : isPosSpecial ? (product?.description?.trim() || '') : '';
 
   const hasBanner =
     special.type === 'buy_x_get_y' ||
-    special.type === 'multibuy' ||
+    special.type === 'multibuy'    ||
     special.type === 'conditional_add_on_price' ||
     (special.type === 'bundle' && savings > 0);
 
@@ -598,9 +555,7 @@ export default function SpecialCard({ special }: SpecialCardProps) {
             {special.name}
           </h3>
           {displayDescription ? (
-            <p className="text-[11px] text-gray-500 line-clamp-2 mb-2 min-h-[1.75rem]">
-              {displayDescription}
-            </p>
+            <p className="text-[11px] text-gray-500 line-clamp-2 mb-2 min-h-[1.75rem]">{displayDescription}</p>
           ) : (
             <div className="mb-2 min-h-[1.75rem]" />
           )}
@@ -628,17 +583,11 @@ export default function SpecialCard({ special }: SpecialCardProps) {
 
             <div className="mb-2">
               <div className="flex items-baseline gap-1.5 flex-wrap">
-                <span className="text-lg font-bold text-brand-orange">
-                  R{displayPrice.toFixed(2)}
-                </span>
+                <span className="text-lg font-bold text-brand-orange">R{displayPrice.toFixed(2)}</span>
                 {savings > 0 && (
                   <>
-                    <span className="text-xs text-gray-400 line-through">
-                      R{basePrice.toFixed(2)}
-                    </span>
-                    <span className="text-xs text-green-600 font-semibold">
-                      Save R{savings.toFixed(2)}
-                    </span>
+                    <span className="text-xs text-gray-400 line-through">R{basePrice.toFixed(2)}</span>
+                    <span className="text-xs text-green-600 font-semibold">Save R{savings.toFixed(2)}</span>
                   </>
                 )}
               </div>
@@ -703,7 +652,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
                     <Plus className="w-4 h-4 text-gray-600" />
                   </button>
                 </div>
-
                 <button
                   onClick={handleAddToCart}
                   className="flex-1 flex items-center justify-center gap-1 bg-brand-orange hover:bg-orange-600 text-white py-2 rounded-lg transition-colors"
@@ -722,24 +670,17 @@ export default function SpecialCard({ special }: SpecialCardProps) {
       </div>
 
       {showAddonModal && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-          onClick={e => e.stopPropagation()}
-        >
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={e => e.stopPropagation()}>
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden">
             <div className="bg-amber-50 border-b border-amber-200 px-5 py-4 flex items-start justify-between">
               <div>
                 <p className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-0.5">🔓 Special Unlocked!</p>
                 <h2 className="text-lg font-bold text-brand-black leading-tight">Would you like to add this?</h2>
               </div>
-              <button
-                onClick={handleDeclineAddon}
-                className="p-1 text-gray-400 hover:text-gray-600 transition-colors ml-3 flex-shrink-0"
-              >
+              <button onClick={handleDeclineAddon} className="p-1 text-gray-400 hover:text-gray-600 transition-colors ml-3 flex-shrink-0">
                 <XCircle className="w-5 h-5" />
               </button>
             </div>
-
             <div className="p-5">
               <div className="flex items-start gap-3 mb-5">
                 {addonProduct?.images[0] ? (
@@ -771,7 +712,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
                   )}
                 </div>
               </div>
-
               <div className="space-y-2">
                 <button
                   onClick={handleAcceptAddon}
