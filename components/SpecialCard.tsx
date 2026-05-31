@@ -54,7 +54,6 @@ interface Special {
   featured: boolean;
   productId?: string;
   productIds?: string[];
-  // variantId on the special itself (some specials target a specific variant)
   variantId?: string;
 }
 
@@ -62,7 +61,7 @@ interface SpecialCardProps {
   special: Special;
 }
 
-// ── VariantPicker (copied from ProductCard — same portal pattern) ─────────────
+// ── VariantPicker ─────────────────────────────────────────────────────────────
 
 interface VariantOption {
   value: string;
@@ -220,19 +219,17 @@ export default function SpecialCard({ special }: SpecialCardProps) {
   const { branch }  = useBranch();
   const addItem     = useCartStore((state) => state.addItem);
 
-  const [product,      setProduct]      = useState<Product | null>(null);
-  const [addonProduct, setAddonProduct] = useState<Product | null>(null);
-  const [loading,      setLoading]      = useState(true);
-  const [imgError,     setImgError]     = useState(false);
-  const [justAdded,    setJustAdded]    = useState(false);
-  const [showAddonModal, setShowAddonModal] = useState(false);
-
-  // Variant state — mirrors ProductCard exactly
+  const [product,         setProduct]         = useState<Product | null>(null);
+  const [addonProduct,    setAddonProduct]    = useState<Product | null>(null);
+  const [loading,         setLoading]         = useState(true);
+  const [imgError,        setImgError]        = useState(false);
+  const [justAdded,       setJustAdded]       = useState(false);
+  const [showAddonModal,  setShowAddonModal]  = useState(false);
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | undefined>(undefined);
-  const [quantity,         setQuantity]        = useState(1);
-  const [bundleQty,        setBundleQty]       = useState(1);
+  const [quantity,        setQuantity]        = useState(1);
+  const [bundleQty,       setBundleQty]       = useState(1);
 
-  // ── Fetch product (and optional add-on) ──────────────────────────────────
+  // ── Fetch product ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!special._id) return;
     let cancelled = false;
@@ -242,7 +239,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
       try {
         let productId = special.productId || special.productIds?.[0];
 
-        // Some special types point at a different field for their trigger product
         if (special.type === 'buy_x_get_y' && special.conditions.buyProductId) {
           productId = special.conditions.buyProductId;
         } else if (special.type === 'conditional_add_on_price' && special.conditions.triggerProductId) {
@@ -257,7 +253,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
         const data = await res.json();
         const fetched: Product = data.product;
 
-        // ── HIDDEN CHECK: skip inactive products entirely ──────────────────
         if (!fetched?.active) {
           if (!cancelled) setLoading(false);
           return;
@@ -266,11 +261,12 @@ export default function SpecialCard({ special }: SpecialCardProps) {
         if (!cancelled) {
           setProduct(fetched);
 
-          // ── VARIANT LINKING ───────────────────────────────────────────────
-          // Priority order:
-          //   1. special.variantId            (special explicitly targets a variant)
-          //   2. special.conditions.variantId (some special types embed it here)
-          //   3. Auto-select: if base product OOS but a variant has stock, pick that
+          // ── Variant pre-selection ─────────────────────────────────────────
+          // Priority:
+          //   1. special.variantId  (set by the API when it resolves a linked
+          //      variant child → parent, or explicitly set on the special)
+          //   2. special.conditions.variantId  (some special types embed it)
+          //   3. Auto-fallback: base OOS → first in-stock active variant
           const targetVariantId =
             special.variantId ||
             special.conditions?.variantId ||
@@ -280,13 +276,13 @@ export default function SpecialCard({ special }: SpecialCardProps) {
             const activeVariants = fetched.variants.filter(v => v.active);
 
             if (targetVariantId) {
-              // Linked variant — select it by ID or fall back to SKU match
+              // Match by _id (string comparison — both may be plain strings or
+              // ObjectId.toString() values, so stringify both sides to be safe)
               const linked =
-                activeVariants.find(v => v._id === targetVariantId) ||
-                activeVariants.find(v => v.sku  === targetVariantId);
+                activeVariants.find(v => v._id?.toString() === targetVariantId.toString()) ||
+                activeVariants.find(v => v.sku             === targetVariantId);
               if (linked) setSelectedVariant(linked);
             } else if (fetched.stockLevel === 0) {
-              // Base OOS — auto-pick first in-stock active variant (same as ProductCard)
               const fallback = activeVariants.find(v => v.stockLevel > 0);
               if (fallback) setSelectedVariant(fallback);
             }
@@ -296,7 +292,7 @@ export default function SpecialCard({ special }: SpecialCardProps) {
           setQuantity(1);
         }
 
-        // Fetch add-on product for conditional_add_on_price specials
+        // Fetch add-on for conditional_add_on_price
         if (!cancelled && special.type === 'conditional_add_on_price' && special.conditions.targetProductId) {
           fetch(`/api/products/${special.conditions.targetProductId}`)
             .then(r => (r.ok ? r.json() : null))
@@ -314,17 +310,17 @@ export default function SpecialCard({ special }: SpecialCardProps) {
     return () => { cancelled = true; };
   }, [special._id]);
 
-  // ── Derived display values (mirrors ProductCard logic) ───────────────────
+  // ── Derived values ────────────────────────────────────────────────────────
 
-  const activeVariants = product?.variants?.filter(v => v.active) ?? [];
+  const activeVariants   = product?.variants?.filter(v => v.active) ?? [];
   const hasVariantPicker = !!(product?.hasVariants && activeVariants.length > 0);
 
   const basePrice = selectedVariant
     ? (selectedVariant.price ?? product?.price ?? 0)
     : (product?.price ?? 0);
 
-  const stock   = selectedVariant ? selectedVariant.stockLevel : (product?.stockLevel ?? 0);
-  const inStock = stock > 0;
+  const stock    = selectedVariant ? selectedVariant.stockLevel : (product?.stockLevel ?? 0);
+  const inStock  = stock > 0;
   const lowStock = stock > 0 && stock <= 10;
 
   const primaryImage = selectedVariant?.images?.length
@@ -354,16 +350,16 @@ export default function SpecialCard({ special }: SpecialCardProps) {
   };
 
   const getCartUnitPrice = (): number => {
-    const dp = getDisplayPrice();
     if (special.type === 'multibuy') {
       return special.conditions.specialPrice
         ? (special.conditions.specialPrice / (special.conditions.requiredQuantity || 1))
         : basePrice;
     }
-    return dp;
+    return getDisplayPrice();
   };
 
   const displayPrice = getDisplayPrice();
+
   const savings = (() => {
     if (!product) return 0;
     if (special.type === 'multibuy') {
@@ -397,9 +393,9 @@ export default function SpecialCard({ special }: SpecialCardProps) {
 
   // ── Cart actions ──────────────────────────────────────────────────────────
 
-  const isMultibuy  = special.type === 'multibuy';
-  const isAddonDeal = special.type === 'conditional_add_on_price';
-  const bundleSize  = isMultibuy ? (special.conditions.requiredQuantity || 1) : 1;
+  const isMultibuy     = special.type === 'multibuy';
+  const isAddonDeal    = special.type === 'conditional_add_on_price';
+  const bundleSize     = isMultibuy ? (special.conditions.requiredQuantity || 1) : 1;
   const actualQuantity = isMultibuy ? bundleQty * bundleSize : quantity;
 
   const incrementQuantity = (e: React.MouseEvent) => {
@@ -423,16 +419,16 @@ export default function SpecialCard({ special }: SpecialCardProps) {
     if (!product) return;
 
     addItem({
-      id:        product._id,
-      variantId: selectedVariant?._id,
-      name:      selectedVariant ? selectedVariant.name : product.name,
-      variantName: selectedVariant?.name,
-      price:     getCartUnitPrice(),
-      image:     primaryImage || '/placeholder.png',
-      quantity:  actualQuantity,
-      sku:       selectedVariant?.sku || product.sku,
+      id:              product._id,
+      variantId:       selectedVariant?._id,
+      name:            selectedVariant ? selectedVariant.name : product.name,
+      variantName:     selectedVariant?.name,
+      price:           getCartUnitPrice(),
+      image:           primaryImage || '/placeholder.png',
+      quantity:        actualQuantity,
+      sku:             selectedVariant?.sku || product.sku,
       appliedSpecialId: special._id,
-      originalPrice:    basePrice,
+      originalPrice:   basePrice,
     });
 
     if (isAddonDeal) {
@@ -450,14 +446,14 @@ export default function SpecialCard({ special }: SpecialCardProps) {
     e.preventDefault(); e.stopPropagation();
     if (!addonProduct) return;
     addItem({
-      id:       addonProduct._id,
-      name:     addonProduct.name,
-      price:    special.conditions.overridePrice,
-      image:    addonProduct.images[0] || '/placeholder.png',
-      quantity: special.conditions.targetQuantity || 1,
-      sku:      addonProduct.sku,
+      id:              addonProduct._id,
+      name:            addonProduct.name,
+      price:           special.conditions.overridePrice,
+      image:           addonProduct.images[0] || '/placeholder.png',
+      quantity:        special.conditions.targetQuantity || 1,
+      sku:             addonProduct.sku,
       appliedSpecialId: special._id,
-      originalPrice:    addonProduct.price,
+      originalPrice:   addonProduct.price,
     });
     setJustAdded(true);
     setShowAddonModal(false);
@@ -495,18 +491,7 @@ export default function SpecialCard({ special }: SpecialCardProps) {
     })),
   ] : [];
 
-  // ── POS special description fallback ─────────────────────────────────────
-
-  const isPosSpecial = special.source === 'pos_ftp_sync';
-  const displayDescription =
-    special.description?.trim()
-      ? special.description
-      : isPosSpecial
-        ? (product?.description?.trim() || '')
-        : '';
-
-  // ── Don't render only when a product was expected but came back inactive ──
-  // Specials with no productId (category/bundle specials) should still render.
+  // ── Don't render if a product was expected but came back inactive ─────────
   const expectedProduct = !!(
     special.productId ||
     special.productIds?.[0] ||
@@ -518,6 +503,14 @@ export default function SpecialCard({ special }: SpecialCardProps) {
   const badge      = getSpecialBadge();
   const specialUrl = branch ? `/${branch.slug}/specials/${special.slug}` : `/specials/${special.slug}`;
 
+  const isPosSpecial = special.source === 'pos_ftp_sync';
+  const displayDescription =
+    special.description?.trim()
+      ? special.description
+      : isPosSpecial
+        ? (product?.description?.trim() || '')
+        : '';
+
   const hasBanner =
     special.type === 'buy_x_get_y' ||
     special.type === 'multibuy' ||
@@ -527,7 +520,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
   return (
     <div className="bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition-all duration-300 border border-gray-100 relative flex flex-col h-full">
 
-      {/* ── Added flash overlay — matches ProductCard ── */}
       {justAdded && (
         <div className="absolute inset-0 bg-green-500/90 z-20 flex items-center justify-center animate-fade-in pointer-events-none">
           <div className="text-center">
@@ -571,7 +563,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
             )}
           </div>
 
-          {/* Low-stock warning */}
           {lowStock && (
             <div className="absolute bottom-2 right-2">
               <span className="bg-yellow-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
@@ -606,7 +597,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
 
         {!loading && product && (
           <>
-            {/* Variant picker — only shown when product has active variants */}
             {hasVariantPicker && (
               <div className="mb-2" onClick={e => e.preventDefault()}>
                 <VariantPicker
@@ -637,7 +627,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
                 )}
               </div>
 
-              {/* Special type banners */}
               {special.type === 'buy_x_get_y' && (
                 <div className="mt-1.5 bg-blue-50 border border-blue-200 rounded-md px-2 py-1.5">
                   <p className="text-[10px] text-blue-900 font-semibold truncate">
