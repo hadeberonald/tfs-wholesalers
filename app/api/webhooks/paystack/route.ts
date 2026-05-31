@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify webhook signature
-    const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
+    const paystackSecret = process.env.PAYSTACK_SECRET_KEY!;
     if (!paystackSecret) {
       console.error('[Webhook] PAYSTACK_SECRET_KEY is not set');
       return NextResponse.json({ error: 'Webhook not configured' }, { status: 500 });
