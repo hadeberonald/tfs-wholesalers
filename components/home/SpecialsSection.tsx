@@ -79,8 +79,8 @@ export default function SpecialsSection() {
             if (s.endDate   && new Date(s.endDate)   < now) return false;
             return s.active;
           })
-          // Normalise productId to the resolved parent's _id so SpecialCard's
-          // fallback fetch (when special.product is absent) also hits the right doc.
+          // Only keep specials whose pre-resolved product is active
+          .filter((s: Special) => s.product?.active === true)
           .map((s: Special) => {
             if (s.product?._id && s.product._id.toString() !== s.productId?.toString()) {
               return { ...s, productId: s.product._id.toString() };
