@@ -1,6 +1,7 @@
 // src/screens/PickingScreen.tsx
 // Fixed: patches assignedPickerId + assignedPickerName when starting picking
 // so OrdersListScreen can show who is picking and offer "Return to Pick".
+// Fixed: if ALL items are OOS, cancels the order instead of advancing to Packaging.
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -340,8 +341,50 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
 
   const getItem = (k: string) => { let gi = 0; for (const grp of groups) { for (const it of grp.items) { if (allScanKeys[gi] === k) return it; gi++; } } return null; };
 
+  // ── NEW: cancel order when all items are OOS ──────────────────────────────
+  const cancelOrder = useCallback(async () => {
+    try {
+      await axios.patch(
+        `${API_URL}/api/orders/${orderId}`,
+        {
+          status: 'cancelled',
+          cancelledAt: new Date().toISOString(),
+          cancellationReason: 'All items out of stock during picking',
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      showModal({
+        title: 'Order Cancelled',
+        message: 'The order has been cancelled. The customer will be refunded in full.',
+        buttons: [{ text: 'OK', onPress: () => navigation.goBack() }],
+      });
+    } catch (err: any) {
+      console.error('Cancel order failed:', err.response?.data || err.message);
+      showModal({
+        title: 'Error',
+        message: 'Failed to cancel the order. Please try again.',
+        buttons: [{ text: 'OK' }],
+      });
+    }
+  }, [orderId, token, navigation, showModal]);
+
   const handleComplete = useCallback(async () => {
     if (!order) return;
+
+    // ── NEW: if every slot is OOS, cancel the order outright ─────────────────
+    const allOOS = allScanKeys.length > 0 && allScanKeys.every(k => oos.has(k));
+    if (allOOS) {
+      showModal({
+        title: '⚠ All Items Out of Stock',
+        message: 'Every item in this order is out of stock. The order will be cancelled and the customer will be fully refunded.',
+        buttons: [
+          { text: 'Go Back', style: 'cancel' },
+          { text: 'Cancel Order', style: 'destructive', onPress: () => cancelOrder() },
+        ],
+      });
+      return;
+    }
+
     const pending = allScanKeys.filter(k => { if (oos.has(k)) return false; const item = getItem(k); return !item || (pickCounts[k] ?? 0) < item.quantity; });
     if (pending.length > 0) {
       const missing = pending.map(k => { const item = getItem(k); const picked = pickCounts[k] ?? 0; return item ? ` • ${item.name}${item.variantName ? ` (${item.variantName})` : ''} — ${picked}/${item.quantity} picked` : ''; }).filter(Boolean);
@@ -352,7 +395,7 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
     if (oosCount > 0) {
       showModal({ title: `${oosCount} OOS Item${oosCount > 1 ? 's' : ''}`, message: `${oosCount} item${oosCount > 1 ? 's were' : ' was'} marked out of stock. Refunds have been queued. Continue to packaging?`, buttons: [{ text: 'Cancel', style: 'cancel' }, { text: 'Continue', onPress: () => advanceToPackaging() }] });
     } else { advanceToPackaging(); }
-  }, [order, allScanKeys, groups, pickCounts, oos, showModal]);
+  }, [order, allScanKeys, groups, pickCounts, oos, showModal, cancelOrder]);
 
   const advanceToPackaging = useCallback(async () => {
     try { await axios.patch(`${API_URL}/api/orders/${orderId}`, { status: 'packaging', packagingStartedAt: new Date().toISOString() }, { headers: { Authorization: `Bearer ${token}` } }); }
@@ -366,6 +409,9 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
   const resolvedSlots = allScanKeys.filter(k => { if (oos.has(k)) return true; const item = getItem(k); return item ? (pickCounts[k] ?? 0) >= item.quantity : false; }).length;
   const progress = totalUnits > 0 ? pickedUnits / totalUnits : 0;
   const allDone  = resolvedSlots === allScanKeys.length;
+
+  // ── NEW: detect when everything is OOS so we can relabel the footer button ─
+  const allOOSResolved = allScanKeys.length > 0 && allScanKeys.every(k => oos.has(k));
 
   const groupScanKeys: string[][] = [];
   { let gi = 0; for (const grp of groups) { const keys: string[] = []; for (let i = 0; i < grp.items.length; i++) { keys.push(allScanKeys[gi]); gi++; } groupScanKeys.push(keys); } }
@@ -425,9 +471,13 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
           </View>
         )}
         {oos.size > 0 && (
-          <View style={styles.refundBanner}>
-            <AlertTriangle size={16} color="#ef4444" />
-            <Text style={styles.refundBannerText}>{oos.size} item{oos.size > 1 ? 's' : ''} out of stock — refund{oos.size > 1 ? 's' : ''} will be issued to the customer</Text>
+          <View style={[styles.refundBanner, allOOSResolved && styles.refundBannerAllOOS]}>
+            <AlertTriangle size={16} color={allOOSResolved ? '#7f1d1d' : '#ef4444'} />
+            <Text style={[styles.refundBannerText, allOOSResolved && styles.refundBannerTextAllOOS]}>
+              {allOOSResolved
+                ? '⚠ All items are out of stock — this order will be cancelled and the customer fully refunded.'
+                : `${oos.size} item${oos.size > 1 ? 's' : ''} out of stock — refund${oos.size > 1 ? 's' : ''} will be issued to the customer`}
+            </Text>
           </View>
         )}
         {groups.map((grp, gi) => (
@@ -443,9 +493,23 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
       </ScrollView>
 
       <View style={styles.footer}>
-        <TouchableOpacity style={[styles.completeBtn, !allDone && styles.completeBtnDisabled]} onPress={handleComplete} disabled={!allDone}>
-          <Ionicons name="arrow-forward" size={22} color="#fff" />
-          <Text style={styles.completeBtnText}>{allDone ? 'Continue to Packaging' : `Resolve All Items (${totalUnits - pickedUnits} unit${totalUnits - pickedUnits !== 1 ? 's' : ''} left)`}</Text>
+        <TouchableOpacity
+          style={[
+            styles.completeBtn,
+            !allDone && styles.completeBtnDisabled,
+            allOOSResolved && styles.completeBtnCancel,
+          ]}
+          onPress={handleComplete}
+          disabled={!allDone}
+        >
+          <Ionicons name={allOOSResolved ? 'close-circle' : 'arrow-forward'} size={22} color="#fff" />
+          <Text style={styles.completeBtnText}>
+            {allOOSResolved
+              ? 'Cancel Order (All OOS)'
+              : allDone
+                ? 'Continue to Packaging'
+                : `Resolve All Items (${totalUnits - pickedUnits} unit${totalUnits - pickedUnits !== 1 ? 's' : ''} left)`}
+          </Text>
         </TouchableOpacity>
         {!allDone && <Text style={styles.footerHint}>Pick items or mark them as out of stock to continue</Text>}
       </View>
@@ -496,11 +560,15 @@ const styles = StyleSheet.create({
   scanActiveBannerText: { flex: 1, fontSize: 13, color: '#fff', lineHeight: 18, fontWeight: '600' },
   refundBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#fee2e2', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#fca5a5', marginBottom: 12 },
   refundBannerText: { flex: 1, fontSize: 13, color: '#991b1b', lineHeight: 18, fontWeight: '600' },
+  refundBannerAllOOS: { backgroundColor: '#7f1d1d', borderColor: '#991b1b' },
+  refundBannerTextAllOOS: { color: '#fff' },
   savingsCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#fffbeb', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#fde68a', marginTop: 8 },
   savingsText: { flex: 1, fontSize: 13, color: '#92400e', lineHeight: 18 },
   footer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', padding: 16, paddingBottom: Platform.OS === 'ios' ? 34 : 16, borderTopWidth: 1, borderTopColor: '#e5e7eb' },
   completeBtn: { backgroundColor: '#FF6B35', borderRadius: 14, height: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, shadowColor: '#FF6B35', shadowOpacity: 0.4, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 5 },
-  completeBtnDisabled: { backgroundColor: '#9ca3af', shadowOpacity: 0 }, completeBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  completeBtnDisabled: { backgroundColor: '#9ca3af', shadowOpacity: 0 },
+  completeBtnCancel: { backgroundColor: '#dc2626', shadowColor: '#dc2626' },
+  completeBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   footerHint: { textAlign: 'center', fontSize: 11, color: '#9ca3af', marginTop: 8 },
 });
 const gs = StyleSheet.create({

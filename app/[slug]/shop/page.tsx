@@ -44,7 +44,13 @@ export default function ShopPage() {
   const [loading, setLoading]             = useState(true);
   const [loadingMore, setLoadingMore]     = useState(false);
   const [searchQuery, setSearchQuery]     = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('');
+
+  // ── FIX: initialise directly from URL so first render already has the
+  //         correct value — no async effect needed, no race condition.
+  const [selectedCategory, setSelectedCategory] = useState<string>(
+    () => searchParams.get('category') ?? ''
+  );
+
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [categorySearchQuery, setCategorySearchQuery]   = useState('');
   const [sortBy, setSortBy] = useState<'default' | 'newest' | 'name' | 'price-asc' | 'price-desc'>('default');
@@ -52,15 +58,16 @@ export default function ShopPage() {
   const [hasMore, setHasMore]             = useState(false);
   const [isSearchMode, setIsSearchMode]   = useState(false);
 
-  // For random pagination: track IDs already shown so backend can exclude them
-  const seenIdsRef = useRef<Set<string>>(new Set());
-
+  const seenIdsRef        = useRef<Set<string>>(new Set());
   const searchDebounceRef = useRef<NodeJS.Timeout>();
 
-  // ── Init from URL ────────────────────────────────────────────────────────
+  // ── Sync selectedCategory when the URL changes externally (browser
+  //    back/forward, or the carousel navigating to a new category).
+  //    We only update when the URL param actually differs from state so we
+  //    don't trigger a redundant fetch.
   useEffect(() => {
-    const categoryParam = searchParams.get('category');
-    if (categoryParam) setSelectedCategory(categoryParam);
+    const categoryParam = searchParams.get('category') ?? '';
+    setSelectedCategory(prev => (prev !== categoryParam ? categoryParam : prev));
   }, [searchParams]);
 
   useEffect(() => {
@@ -99,7 +106,6 @@ export default function ShopPage() {
 
     if (sortBy === 'default') {
       url += `&sort=random`;
-      // Pass already-seen IDs so backend excludes them → no duplicates across pages
       const seen = Array.from(seenIdsRef.current);
       if (seen.length > 0) url += `&excludeIds=${seen.join(',')}`;
     } else if (sortBy === 'newest') {
@@ -120,15 +126,12 @@ export default function ShopPage() {
         const data = await res.json();
         const incoming: Product[] = data.products || [];
 
-        // Track seen IDs for random pagination deduplication
         incoming.forEach(p => seenIdsRef.current.add(p._id));
 
         setProducts(prev => append ? [...prev, ...incoming] : incoming);
 
         if (sortBy === 'default') {
-          // For random mode, hasMore = there are still unseen products left
           setHasMore(data.hasMore ?? false);
-          // total here = remaining products (excluding seen), so show grand total differently
           setTotalProducts((data.total ?? 0) + seenIdsRef.current.size);
         } else {
           setTotalProducts(data.total || 0);

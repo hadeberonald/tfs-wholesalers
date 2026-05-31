@@ -1,14 +1,14 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Alert, Image,
+  ActivityIndicator, Alert, Image, TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
   MapPin, ChevronLeft, ChevronRight, Package, ShoppingBag,
-  Truck, AlertCircle, CheckCircle, Tag,
+  Truck, AlertCircle, CheckCircle, Tag, Phone,
 } from 'lucide-react-native';
 import { useStore } from '@/lib/store';
 import api from '@/lib/api';
@@ -36,6 +36,12 @@ function specialTypeBadge(type?: string) {
   );
 }
 
+// Validate SA mobile: 10 digits starting with 0, or +27 followed by 9 digits
+function isValidPhone(phone: string): boolean {
+  const cleaned = phone.replace(/[\s\-()]/g, '');
+  return /^(0\d{9}|\+27\d{9})$/.test(cleaned);
+}
+
 export default function CheckoutScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -45,7 +51,9 @@ export default function CheckoutScreen() {
   } = useStore();
 
   const [deliveryAddress, setDeliveryAddress] = useState<DeliveryAddress | null>(null);
-  const [placingOrder, setPlacingOrder] = useState(false);
+  const [placingOrder, setPlacingOrder]         = useState(false);
+  const [phone, setPhone]                       = useState<string>((user as any)?.phone || '');
+  const [phoneError, setPhoneError]             = useState<string>('');
 
   useFocusEffect(
     useCallback(() => {
@@ -68,7 +76,24 @@ export default function CheckoutScreen() {
   const bonusItems   = items.filter(i => i.isBonusItem || i.isFreeItem || i.isMultibuyBonus);
   const comboItems   = items.filter(i => i.isComboItem);
 
+  const handlePhoneChange = (text: string) => {
+    setPhone(text);
+    if (phoneError) setPhoneError('');
+  };
+
   const placeOrder = async () => {
+    // ── Phone validation ───────────────────────────────────────────────────
+    const trimmedPhone = phone.trim();
+    if (!trimmedPhone) {
+      setPhoneError('Please enter your phone number so we can contact you about your delivery.');
+      return;
+    }
+    if (!isValidPhone(trimmedPhone)) {
+      setPhoneError('Please enter a valid South African mobile number (e.g. 082 123 4567).');
+      return;
+    }
+    setPhoneError('');
+
     if (!deliveryAddress) {
       Alert.alert('Delivery Address Required', 'Please select a delivery address before continuing.');
       return;
@@ -129,7 +154,7 @@ export default function CheckoutScreen() {
         customerInfo: {
           name:  user.name,
           email: user.email,
-          phone: (user as any).phone || '',
+          phone: trimmedPhone,         // ← always use the validated input value
         },
         items: orderItems,
         shippingAddress: {
@@ -227,165 +252,217 @@ export default function CheckoutScreen() {
     );
   }
 
-  const canCheckout = !!deliveryAddress && !deliveryAddress.outsideZone && !placingOrder;
+  const phoneValid  = isValidPhone(phone.trim());
+  const canCheckout = !!deliveryAddress && !deliveryAddress.outsideZone && !placingOrder && phoneValid;
 
-  // Footer height estimate for scroll spacer: base (warnings + button) + inset
   const footerHeight = 80 + insets.bottom;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <ChevronLeft color="#1f2937" size={24} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Checkout</Text>
-        <Text style={styles.headerSub}>{items.length} item{items.length !== 1 ? 's' : ''}</Text>
-      </View>
-
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Delivery Address</Text>
-          {deliveryAddress ? (
-            <TouchableOpacity
-              style={[styles.addressSelected, deliveryAddress.outsideZone && styles.addressSelectedError]}
-              onPress={() => router.push('/address-picker')}
-            >
-              <View style={styles.addressIconWrap}>
-                <MapPin color={deliveryAddress.outsideZone ? '#ef4444' : '#FF6B35'} size={18} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.addressStreet} numberOfLines={1}>
-                  {deliveryAddress.street || deliveryAddress.name}
-                </Text>
-                <Text style={styles.addressCity} numberOfLines={1}>
-                  {[deliveryAddress.city, deliveryAddress.province, deliveryAddress.postalCode].filter(Boolean).join(', ')}
-                </Text>
-                {deliveryAddress.outsideZone ? (
-                  <Text style={styles.outsideZoneText}>
-                    ⚠️ {deliveryAddress.distance.toFixed(1)} km – outside delivery area
-                  </Text>
-                ) : (
-                  <Text style={styles.deliveryFeeInline}>
-                    {deliveryAddress.distance.toFixed(1)} km · Delivery: R{deliveryFee.toFixed(2)}
-                  </Text>
-                )}
-              </View>
-              <ChevronRight color="#9ca3af" size={18} />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity style={styles.addressEmpty} onPress={() => router.push('/address-picker')}>
-              <MapPin color="#FF6B35" size={20} />
-              <Text style={styles.addressEmptyText}>Select delivery address</Text>
-              <ChevronRight color="#9ca3af" size={18} />
-            </TouchableOpacity>
-          )}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={0}
+      >
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <ChevronLeft color="#1f2937" size={24} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Checkout</Text>
+          <Text style={styles.headerSub}>{items.length} item{items.length !== 1 ? 's' : ''}</Text>
         </View>
 
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Your Items ({items.length})</Text>
-          {regularItems.map((item, i) => renderItem(item, i))}
-          {comboItems.length > 0 && (
-            <>
-              <View style={styles.groupDivider}>
-                <Text style={styles.groupDividerText}>📦 Combo Items</Text>
-              </View>
-              {comboItems.map((item, i) => renderItem(item, i + 1000))}
-            </>
-          )}
-          {bonusItems.length > 0 && (
-            <>
-              <View style={styles.groupDivider}>
-                <Text style={styles.groupDividerText}>🎁 Free Bonus Items</Text>
-              </View>
-              {bonusItems.map((item, i) => renderItem(item, i + 2000))}
-            </>
-          )}
-        </View>
+        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
-        {totalSavings > 0 && (
-          <View style={styles.savingsCard}>
-            <CheckCircle color="#10b981" size={18} />
-            <Text style={styles.savingsText}>
-              You're saving <Text style={{ fontWeight: '800' }}>R{totalSavings.toFixed(2)}</Text> with specials!
+          {/* ── Phone number ──────────────────────────────────────────────── */}
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Contact Number</Text>
+            <Text style={styles.phoneSubtitle}>
+              We'll use this to contact you about your delivery.
             </Text>
+            <View style={[styles.phoneInputWrap, phoneError ? styles.phoneInputWrapError : phoneValid && phone.trim() ? styles.phoneInputWrapValid : null]}>
+              <Phone size={18} color={phoneError ? '#ef4444' : phoneValid && phone.trim() ? '#10b981' : '#9ca3af'} />
+              <TextInput
+                style={styles.phoneInput}
+                placeholder="e.g. 082 123 4567"
+                placeholderTextColor="#9ca3af"
+                keyboardType="phone-pad"
+                value={phone}
+                onChangeText={handlePhoneChange}
+                returnKeyType="done"
+                maxLength={13}
+              />
+              {phoneValid && phone.trim() ? (
+                <CheckCircle size={18} color="#10b981" />
+              ) : null}
+            </View>
+            {phoneError ? (
+              <View style={styles.phoneErrorRow}>
+                <AlertCircle size={13} color="#ef4444" />
+                <Text style={styles.phoneErrorText}>{phoneError}</Text>
+              </View>
+            ) : null}
           </View>
-        )}
 
-        {bonusItems.length > 0 && (
-          <View style={styles.bonusNotice}>
-            <AlertCircle color="#f59e0b" size={16} />
-            <Text style={styles.bonusNoticeText}>
-              {bonusItems.length} free bonus item{bonusItems.length > 1 ? 's' : ''} included with your order
-            </Text>
+          {/* ── Delivery address ─────────────────────────────────────────── */}
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Delivery Address</Text>
+            {deliveryAddress ? (
+              <TouchableOpacity
+                style={[styles.addressSelected, deliveryAddress.outsideZone && styles.addressSelectedError]}
+                onPress={() => router.push('/address-picker')}
+              >
+                <View style={styles.addressIconWrap}>
+                  <MapPin color={deliveryAddress.outsideZone ? '#ef4444' : '#FF6B35'} size={18} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.addressStreet} numberOfLines={1}>
+                    {deliveryAddress.street || deliveryAddress.name}
+                  </Text>
+                  <Text style={styles.addressCity} numberOfLines={1}>
+                    {[deliveryAddress.city, deliveryAddress.province, deliveryAddress.postalCode].filter(Boolean).join(', ')}
+                  </Text>
+                  {deliveryAddress.outsideZone ? (
+                    <Text style={styles.outsideZoneText}>
+                      ⚠️ {deliveryAddress.distance.toFixed(1)} km – outside delivery area
+                    </Text>
+                  ) : (
+                    <Text style={styles.deliveryFeeInline}>
+                      {deliveryAddress.distance.toFixed(1)} km · Delivery: R{deliveryFee.toFixed(2)}
+                    </Text>
+                  )}
+                </View>
+                <ChevronRight color="#9ca3af" size={18} />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={styles.addressEmpty} onPress={() => router.push('/address-picker')}>
+                <MapPin color="#FF6B35" size={20} />
+                <Text style={styles.addressEmptyText}>Select delivery address</Text>
+                <ChevronRight color="#9ca3af" size={18} />
+              </TouchableOpacity>
+            )}
           </View>
-        )}
 
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Order Summary</Text>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Subtotal</Text>
-            <Text style={styles.summaryValue}>R{subtotal.toFixed(2)}</Text>
+          {/* ── Items ────────────────────────────────────────────────────── */}
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Your Items ({items.length})</Text>
+            {regularItems.map((item, i) => renderItem(item, i))}
+            {comboItems.length > 0 && (
+              <>
+                <View style={styles.groupDivider}>
+                  <Text style={styles.groupDividerText}>📦 Combo Items</Text>
+                </View>
+                {comboItems.map((item, i) => renderItem(item, i + 1000))}
+              </>
+            )}
+            {bonusItems.length > 0 && (
+              <>
+                <View style={styles.groupDivider}>
+                  <Text style={styles.groupDividerText}>🎁 Free Bonus Items</Text>
+                </View>
+                {bonusItems.map((item, i) => renderItem(item, i + 2000))}
+              </>
+            )}
           </View>
+
           {totalSavings > 0 && (
-            <View style={styles.summaryRow}>
-              <Text style={[styles.summaryLabel, { color: '#10b981' }]}>Specials Savings</Text>
-              <Text style={[styles.summaryValue, { color: '#10b981' }]}>-R{totalSavings.toFixed(2)}</Text>
+            <View style={styles.savingsCard}>
+              <CheckCircle color="#10b981" size={18} />
+              <Text style={styles.savingsText}>
+                You're saving <Text style={{ fontWeight: '800' }}>R{totalSavings.toFixed(2)}</Text> with specials!
+              </Text>
             </View>
           )}
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Delivery</Text>
-            <Text style={styles.summaryValue}>
-              {!deliveryAddress
-                ? <Text style={{ color: '#9ca3af' }}>Select address</Text>
-                : `R${deliveryFee.toFixed(2)}`}
-            </Text>
-          </View>
-          <View style={[styles.summaryRow, styles.summaryTotal]}>
-            <Text style={styles.summaryTotalLabel}>Total</Text>
-            <Text style={styles.summaryTotalValue}>R{total.toFixed(2)}</Text>
-          </View>
-        </View>
 
-        <View style={styles.deliveryInfoRow}>
-          <Truck color="#6b7280" size={16} />
-          <Text style={styles.deliveryInfoText}>Delivered by TFS Wholesalers.</Text>
-        </View>
-
-        {/* Dynamic spacer that matches the footer's actual rendered height */}
-        <View style={{ height: footerHeight + 40 }} />
-      </ScrollView>
-
-      {/* NOTE: paddingBottom uses insets.bottom so it clears the Android nav bar on all devices */}
-      <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
-        {!deliveryAddress && (
-          <View style={styles.footerWarning}>
-            <AlertCircle color="#f59e0b" size={14} />
-            <Text style={styles.footerWarningText}>Select a delivery address to continue</Text>
-          </View>
-        )}
-        {deliveryAddress?.outsideZone && (
-          <View style={styles.footerWarning}>
-            <AlertCircle color="#ef4444" size={14} />
-            <Text style={[styles.footerWarningText, { color: '#ef4444' }]}>
-              Address is outside our delivery zone
-            </Text>
-          </View>
-        )}
-        <TouchableOpacity
-          style={[styles.placeOrderBtn, !canCheckout && styles.placeOrderBtnDisabled]}
-          onPress={placeOrder}
-          disabled={!canCheckout}
-        >
-          {placingOrder ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <>
-              <Text style={styles.placeOrderBtnText}>Place Order — R{total.toFixed(2)}</Text>
-              <ChevronRight color="#fff" size={20} />
-            </>
+          {bonusItems.length > 0 && (
+            <View style={styles.bonusNotice}>
+              <AlertCircle color="#f59e0b" size={16} />
+              <Text style={styles.bonusNoticeText}>
+                {bonusItems.length} free bonus item{bonusItems.length > 1 ? 's' : ''} included with your order
+              </Text>
+            </View>
           )}
-        </TouchableOpacity>
-      </View>
+
+          {/* ── Order summary ─────────────────────────────────────────────── */}
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Order Summary</Text>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Subtotal</Text>
+              <Text style={styles.summaryValue}>R{subtotal.toFixed(2)}</Text>
+            </View>
+            {totalSavings > 0 && (
+              <View style={styles.summaryRow}>
+                <Text style={[styles.summaryLabel, { color: '#10b981' }]}>Specials Savings</Text>
+                <Text style={[styles.summaryValue, { color: '#10b981' }]}>-R{totalSavings.toFixed(2)}</Text>
+              </View>
+            )}
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Delivery</Text>
+              <Text style={styles.summaryValue}>
+                {!deliveryAddress
+                  ? <Text style={{ color: '#9ca3af' }}>Select address</Text>
+                  : `R${deliveryFee.toFixed(2)}`}
+              </Text>
+            </View>
+            <View style={[styles.summaryRow, styles.summaryTotal]}>
+              <Text style={styles.summaryTotalLabel}>Total</Text>
+              <Text style={styles.summaryTotalValue}>R{total.toFixed(2)}</Text>
+            </View>
+          </View>
+
+          <View style={styles.deliveryInfoRow}>
+            <Truck color="#6b7280" size={16} />
+            <Text style={styles.deliveryInfoText}>Delivered by TFS Wholesalers.</Text>
+          </View>
+
+          <View style={{ height: footerHeight + 40 }} />
+        </ScrollView>
+
+        <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
+          {!phone.trim() && (
+            <View style={styles.footerWarning}>
+              <AlertCircle color="#f59e0b" size={14} />
+              <Text style={styles.footerWarningText}>Enter your phone number to continue</Text>
+            </View>
+          )}
+          {phone.trim() && !phoneValid && (
+            <View style={styles.footerWarning}>
+              <AlertCircle color="#ef4444" size={14} />
+              <Text style={[styles.footerWarningText, { color: '#ef4444' }]}>
+                Phone number is not valid
+              </Text>
+            </View>
+          )}
+          {!deliveryAddress && (
+            <View style={styles.footerWarning}>
+              <AlertCircle color="#f59e0b" size={14} />
+              <Text style={styles.footerWarningText}>Select a delivery address to continue</Text>
+            </View>
+          )}
+          {deliveryAddress?.outsideZone && (
+            <View style={styles.footerWarning}>
+              <AlertCircle color="#ef4444" size={14} />
+              <Text style={[styles.footerWarningText, { color: '#ef4444' }]}>
+                Address is outside our delivery zone
+              </Text>
+            </View>
+          )}
+          <TouchableOpacity
+            style={[styles.placeOrderBtn, !canCheckout && styles.placeOrderBtnDisabled]}
+            onPress={placeOrder}
+            disabled={!canCheckout}
+          >
+            {placingOrder ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Text style={styles.placeOrderBtnText}>Place Order — R{total.toFixed(2)}</Text>
+                <ChevronRight color="#fff" size={20} />
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -415,6 +492,20 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 15, fontWeight: '700', color: '#1f2937', marginBottom: 14 },
 
+  // ── Phone ──────────────────────────────────────────────────────────────────
+  phoneSubtitle: { fontSize: 12, color: '#6b7280', marginTop: -8, marginBottom: 12 },
+  phoneInputWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    borderWidth: 1.5, borderColor: '#e5e7eb', borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 12, backgroundColor: '#f9fafb',
+  },
+  phoneInputWrapError: { borderColor: '#ef4444', backgroundColor: '#fef2f2' },
+  phoneInputWrapValid: { borderColor: '#10b981', backgroundColor: '#f0fdf4' },
+  phoneInput: { flex: 1, fontSize: 15, color: '#1f2937', fontWeight: '500' },
+  phoneErrorRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  phoneErrorText: { fontSize: 12, color: '#ef4444', flex: 1 },
+
+  // ── Address ────────────────────────────────────────────────────────────────
   addressSelected: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
     backgroundColor: '#fff7f3', borderRadius: 14, padding: 14,
@@ -436,6 +527,7 @@ const styles = StyleSheet.create({
   },
   addressEmptyText: { flex: 1, fontSize: 14, color: '#FF6B35', fontWeight: '600' },
 
+  // ── Items ──────────────────────────────────────────────────────────────────
   itemRow: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 12,
     paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f9fafb',
@@ -488,7 +580,6 @@ const styles = StyleSheet.create({
   },
   deliveryInfoText: { flex: 1, fontSize: 12, color: '#9ca3af', lineHeight: 18 },
 
-  // NOTE: paddingBottom is applied inline using insets.bottom + 16
   footer: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: '#fff', padding: 16,
