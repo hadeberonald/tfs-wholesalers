@@ -13,6 +13,7 @@ interface Special {
   slug: string;
   description: string;
   type: string;
+  source?: string;
   badgeText?: string;
   images?: string[];
   conditions: any;
@@ -23,6 +24,10 @@ interface Special {
   productId?: string;
   productIds?: string[];
   categoryId?: string;
+  variantId?:      string;
+  variantSku?:     string;
+  variantBarcode?: string;
+  product?: any | null;
 }
 
 interface ComboItem {
@@ -73,6 +78,14 @@ export default function SpecialsSection() {
             if (s.startDate && new Date(s.startDate) > now) return false;
             if (s.endDate   && new Date(s.endDate)   < now) return false;
             return s.active;
+          })
+          // If the API resolved a linked variant child to its parent, normalise
+          // productId to the parent's _id so SpecialCard fetches the right doc.
+          .map((s: Special) => {
+            if (s.product?._id && s.product._id.toString() !== s.productId?.toString()) {
+              return { ...s, productId: s.product._id.toString() };
+            }
+            return s;
           })
           .slice(0, 8);
         setSpecials(active);
@@ -131,7 +144,6 @@ export default function SpecialsSection() {
           </div>
         )}
 
-        {/* Single "View All Specials" link only */}
         {feed.length > 0 && branch && (
           <div className="text-center mt-12">
             <Link

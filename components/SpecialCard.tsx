@@ -60,6 +60,8 @@ interface Special {
   variantId?:      string;
   variantSku?:     string;
   variantBarcode?: string;
+  // Enriched by the specials API — already resolved to the parent product
+  product?: Product | null;
 }
 
 interface SpecialCardProps {
@@ -234,84 +236,96 @@ export default function SpecialCard({ special }: SpecialCardProps) {
   const [quantity,        setQuantity]       = useState(1);
   const [bundleQty,       setBundleQty]      = useState(1);
 
-  // ── Fetch product ─────────────────────────────────────────────────────────
+  // ── Initialise from enriched product passed by the API ───────────────────
+  // The specials list API already fetches and resolves the product (including
+  // walking child → parent for linked variants). If that data is present we
+  // use it directly and skip the network fetch entirely, which also prevents
+  // the card from flashing then disappearing when the fetch returns a product
+  // that fails the active/isLinkedVariant checks.
   useEffect(() => {
     if (!special._id) return;
     let cancelled = false;
 
-    const fetchProduct = async () => {
+    const init = async () => {
       setLoading(true);
-      try {
-        let productId = special.productId || special.productIds?.[0];
 
-        if (special.type === 'buy_x_get_y' && special.conditions.buyProductId) {
-          productId = special.conditions.buyProductId;
-        } else if (special.type === 'conditional_add_on_price' && special.conditions.triggerProductId) {
-          productId = special.conditions.triggerProductId;
+      try {
+        // ── Use pre-fetched product if the API already resolved it ──────────
+        let fetched: Product | null = special.product ?? null;
+
+        // ── Otherwise fall back to fetching by productId ────────────────────
+        if (!fetched) {
+          let productId = special.productId || special.productIds?.[0];
+          if (special.type === 'buy_x_get_y' && special.conditions.buyProductId) {
+            productId = special.conditions.buyProductId;
+          } else if (special.type === 'conditional_add_on_price' && special.conditions.triggerProductId) {
+            productId = special.conditions.triggerProductId;
+          }
+
+          if (productId) {
+            // Use the /[id] endpoint which does NOT filter by isLinkedVariant
+            // so linked variant children are still fetchable here.
+            const res = await fetch(`/api/products/${productId}`);
+            if (!res.ok || cancelled) { setLoading(false); return; }
+            const data = await res.json();
+            fetched = data.product ?? null;
+          }
         }
 
-        if (!productId) { setLoading(false); return; }
+        if (cancelled) return;
 
-        const res = await fetch(`/api/products/${productId}`);
-        if (!res.ok || cancelled) return;
-
-        const data = await res.json();
-        const fetched: Product = data.product;
-
-        if (!fetched?.active) {
-          if (!cancelled) setLoading(false);
+        // Only hide the card if the product is explicitly inactive.
+        // Do NOT hide just because isLinkedVariant is true — the API already
+        // resolved those to their parent, so if we still have a child here
+        // it means the special was set up without the API enrichment path
+        // and we should still show it.
+        if (!fetched || !fetched.active) {
+          setLoading(false);
           return;
         }
 
-        if (!cancelled) {
-          setProduct(fetched);
+        setProduct(fetched);
 
-          // ── Variant pre-selection ─────────────────────────────────────────
-          // Priority:
-          //   1. special.variantId / variantSku / variantBarcode
-          //      (set by the API when resolving a linked variant child → parent,
-          //       or explicitly stored on the special)
-          //   2. special.conditions.variantId / variantSku / variantBarcode
-          //   3. Auto-fallback: base OOS → first in-stock active variant
-          const targetRef =
-            special.variantId              || special.conditions?.variantId        ||
-            special.variantSku             || special.conditions?.variantSku       ||
-            special.variantBarcode         || special.conditions?.variantBarcode   ||
-            null;
+        // ── Variant pre-selection ───────────────────────────────────────────
+        const targetRef =
+          special.variantId              || special.conditions?.variantId      ||
+          special.variantSku             || special.conditions?.variantSku     ||
+          special.variantBarcode         || special.conditions?.variantBarcode ||
+          null;
 
-          if (fetched.hasVariants && fetched.variants?.length) {
-            const activeVariants = fetched.variants.filter(v => v.active);
+        if (fetched.hasVariants && fetched.variants?.length) {
+          const activeVariants = fetched.variants.filter(v => v.active);
 
-            if (targetRef) {
-              const linked =
-                activeVariants.find(v => v._id?.toString() === targetRef.toString()) ||
-                activeVariants.find(v => v.sku              === targetRef) ||
-                activeVariants.find(v => v.barcode          === targetRef);
-              if (linked) setSelectedVariant(linked);
-            } else if (fetched.stockLevel === 0) {
-              const fallback = activeVariants.find(v => v.stockLevel > 0);
-              if (fallback) setSelectedVariant(fallback);
-            }
+          if (targetRef) {
+            const linked =
+              activeVariants.find(v => v._id?.toString() === targetRef.toString()) ||
+              activeVariants.find(v => v.sku              === targetRef) ||
+              activeVariants.find(v => v.barcode          === targetRef);
+            if (linked) setSelectedVariant(linked);
+          } else if (fetched.stockLevel === 0) {
+            const fallback = activeVariants.find(v => v.stockLevel > 0);
+            if (fallback) setSelectedVariant(fallback);
           }
-
-          setBundleQty(1);
-          setQuantity(1);
         }
 
-        if (!cancelled && special.type === 'conditional_add_on_price' && special.conditions.targetProductId) {
+        setBundleQty(1);
+        setQuantity(1);
+
+        // ── Fetch add-on for conditional_add_on_price ───────────────────────
+        if (special.type === 'conditional_add_on_price' && special.conditions.targetProductId) {
           fetch(`/api/products/${special.conditions.targetProductId}`)
             .then(r => (r.ok ? r.json() : null))
             .then(d => { if (d?.product?.active && !cancelled) setAddonProduct(d.product); })
             .catch(() => null);
         }
       } catch (err) {
-        console.error('Failed to fetch product for special', err);
+        console.error('Failed to initialise special card:', err);
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
 
-    fetchProduct();
+    init();
     return () => { cancelled = true; };
   }, [special._id]);
 
@@ -389,7 +403,7 @@ export default function SpecialCard({ special }: SpecialCardProps) {
       case 'amount_off':               return `R${special.conditions.discountAmount} OFF`;
       case 'fixed_price':              return `NOW R${special.conditions.newPrice}`;
       case 'multibuy':                 return `${special.conditions.requiredQuantity} FOR R${special.conditions.specialPrice}`;
-      case 'buy_x_get_y':              return `BUY ${special.conditions.buyQuantity} GET ${special.conditions.getQuantity}`;
+      case 'buy_x_get_y':             return `BUY ${special.conditions.buyQuantity} GET ${special.conditions.getQuantity}`;
       case 'bundle':                   return 'BUNDLE DEAL';
       case 'conditional_add_on_price': return `UNLOCK @ R${special.conditions.overridePrice}`;
       default:                         return 'SPECIAL';
@@ -496,10 +510,12 @@ export default function SpecialCard({ special }: SpecialCardProps) {
     })),
   ] : [];
 
-  // ── Don't render if a product was expected but came back inactive ─────────
+  // ── Only hide card if product is explicitly inactive after loading ─────────
+  // Do NOT hide for specials with no productId (category/bundle specials).
   const expectedProduct = !!(
     special.productId ||
     special.productIds?.[0] ||
+    special.product ||
     (special.type === 'buy_x_get_y'              && special.conditions?.buyProductId) ||
     (special.type === 'conditional_add_on_price' && special.conditions?.triggerProductId)
   );
@@ -705,7 +721,6 @@ export default function SpecialCard({ special }: SpecialCardProps) {
         )}
       </div>
 
-      {/* ── Add-On Modal ──────────────────────────────────────────────────── */}
       {showAddonModal && (
         <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
