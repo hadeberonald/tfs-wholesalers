@@ -505,8 +505,15 @@ export default function SpecialCard({ special }: SpecialCardProps) {
         ? (product?.description?.trim() || '')
         : '';
 
-  // ── Don't render if product is inactive / failed to load ─────────────────
-  if (!loading && !product) return null;
+  // ── Don't render only when a product was expected but came back inactive ──
+  // Specials with no productId (category/bundle specials) should still render.
+  const expectedProduct = !!(
+    special.productId ||
+    special.productIds?.[0] ||
+    (special.type === 'buy_x_get_y'              && special.conditions?.buyProductId) ||
+    (special.type === 'conditional_add_on_price' && special.conditions?.triggerProductId)
+  );
+  if (!loading && expectedProduct && !product) return null;
 
   const badge      = getSpecialBadge();
   const specialUrl = branch ? `/${branch.slug}/specials/${special.slug}` : `/specials/${special.slug}`;
