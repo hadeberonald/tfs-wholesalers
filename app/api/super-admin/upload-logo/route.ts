@@ -5,7 +5,8 @@ import jwt from 'jsonwebtoken';
 import { ObjectId } from 'mongodb';
 import bcrypt from 'bcryptjs';
 
-const JWT_SECRET = process.env.NEXTAUTH_SECRET || 'your-secret-key-change-in-production';
+const JWT_SECRET = process.env.NEXTAUTH_SECRET;
+if (!JWT_SECRET) throw new Error('[SECURITY] NEXTAUTH_SECRET is not set. Refusing to start.');
 
 async function verifySuperAdmin(request: NextRequest) {
   try {

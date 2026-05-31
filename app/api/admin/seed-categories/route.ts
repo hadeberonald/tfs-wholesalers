@@ -1,6 +1,7 @@
 // app/api/admin/seed-categories/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
+import { requirePermission } from '@/lib/with-permission';
 
 const categories = [
   {
@@ -134,13 +135,11 @@ const categories = [
 ];
 
 export async function POST(request: NextRequest) {
-  try {
-    // Optional: Add authentication check here
-    // const session = await getServerSession();
-    // if (!session || session.user.role !== 'admin') {
-    //   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    // }
+  const auth = await requirePermission('categories:write');
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  if (!auth.isSuperAdmin) return NextResponse.json({ error: 'Forbidden: super-admins only' }, { status: 403 });
 
+  try {
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
     const categoriesCollection = db.collection('categories');

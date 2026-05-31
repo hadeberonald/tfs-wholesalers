@@ -4,7 +4,8 @@ import { cookies } from 'next/headers';
 import jwt from 'jsonwebtoken';
 import { ObjectId } from 'mongodb';
 
-const JWT_SECRET = process.env.NEXTAUTH_SECRET || 'your-secret-key-change-in-production';
+const JWT_SECRET = process.env.NEXTAUTH_SECRET;
+if (!JWT_SECRET) throw new Error('[SECURITY] NEXTAUTH_SECRET is not set. Refusing to start.');
 
 // Verify user is super admin
 async function verifySuperAdmin(request: NextRequest) {

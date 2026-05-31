@@ -3,7 +3,8 @@
 
 import { MongoClient } from 'mongodb';
 
-const uri = process.env.MONGODB_URI || 'mongodb+srv://ronaldvhadebe_db_user:RFWWUNVb2F0C6ysm@cluster0.xovcymo.mongodb.net/?appName=Cluster0';
+const uri = process.env.MONGODB_URI;
+if (!uri) { console.error('MONGODB_URI not set'); process.exit(1); }
 
 const categories = [
   {

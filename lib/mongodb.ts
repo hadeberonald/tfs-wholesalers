@@ -8,7 +8,7 @@ const uri = process.env.MONGODB_URI;
 
 const options = {
   tls: true,
-  tlsAllowInvalidCertificates: true,
+  tlsAllowInvalidCertificates: false,
   serverSelectionTimeoutMS: 30000,
   socketTimeoutMS: 45000,
 };
