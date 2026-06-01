@@ -86,7 +86,7 @@ export default function SpecialsPage() {
     try {
       console.log('🔍 Fetching all specials for branch:', branch.displayName, 'ID:', branch.id);
       
-      // ✅ FIX: Fetch promotional specials WITH branchId
+      // Promotional specials — API filters out-of-stock products server-side
       const specialsRes = await fetch(`/api/specials?active=true&branchId=${branch.id}`);
       if (specialsRes.ok) {
         const data = await specialsRes.json();
@@ -94,26 +94,20 @@ export default function SpecialsPage() {
         setPromotionalSpecials(data.specials || []);
       }
 
-      // ✅ FIX: Fetch product specials WITH branchId
+      // Product specials — API filters out-of-stock products server-side
       const productsRes = await fetch(`/api/products?special=true&branchId=${branch.id}`);
       if (productsRes.ok) {
         const data = await productsRes.json();
-        const active = (data.products || []).filter(
-          (p: Product) => p.active && p.stockLevel > 0
-        );
-        console.log('✅ Product specials:', active.length);
-        setProductSpecials(active);
+        console.log('✅ Product specials:', data.products?.length || 0);
+        setProductSpecials(data.products || []);
       }
 
-      // ✅ FIX: Fetch combos WITH branchId
+      // Combos — API filters out-of-stock combos server-side
       const combosRes = await fetch(`/api/combos?active=true&branchId=${branch.id}`);
       if (combosRes.ok) {
         const data = await combosRes.json();
-        const active = (data.combos || []).filter(
-          (c: Combo) => c.active && c.stockLevel > 0
-        );
-        console.log('✅ Combos:', active.length);
-        setCombos(active);
+        console.log('✅ Combos:', data.combos?.length || 0);
+        setCombos(data.combos || []);
       }
     } catch (error) {
       console.error('❌ Error loading specials:', error);
@@ -123,9 +117,9 @@ export default function SpecialsPage() {
   };
 
   const featuredPromotions = promotionalSpecials.filter(s => s.featured);
-  const regularPromotions = promotionalSpecials.filter(s => !s.featured);
-  const featuredCombos = combos.filter(c => c.featured);
-  const regularCombos = combos.filter(c => !c.featured);
+  const regularPromotions  = promotionalSpecials.filter(s => !s.featured);
+  const featuredCombos     = combos.filter(c => c.featured);
+  const regularCombos      = combos.filter(c => !c.featured);
   const hasContent = promotionalSpecials.length > 0 || productSpecials.length > 0 || combos.length > 0;
 
   if (branchLoading || loading) {
