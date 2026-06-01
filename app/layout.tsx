@@ -10,7 +10,7 @@ import GateWrapper from '@/components/GateWrapper';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'TFS Wholesalers - Quality Products at Wholesale Prices',
+  title: 'TFS Wholesalers - We Put U first',
   description: "South Africa's trusted wholesale supplier",
 };
 

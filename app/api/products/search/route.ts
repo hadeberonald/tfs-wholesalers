@@ -38,21 +38,25 @@ export async function GET(request: NextRequest) {
     const filter: any = {
       branchId: new ObjectId(branchId),
       active: true,
-      // ── KEY FIX: exclude linked variant children so only parent products
-      // (which carry the full variants array) appear in results.
-      // Without this, searching "playgirl" returns the parent AND all 3
-      // individual child docs as separate cards with no variant picker.
       isLinkedVariant: { $ne: true },
-      $or: [
-        { name: nameRegex },
-        { barcode: codeRegex },
-        { tags: tagRegex },
-        // These still match the parent because variant sub-docs are embedded
-        // inside the parent's variants[] array — so a search for "Flirt" will
-        // still find the Temptation parent via variants.name, and the card
-        // will show all variants in the picker.
-        { 'variants.name': nameRegex },
-        { 'variants.barcode': codeRegex },
+      // Only show products that have stock at the parent level OR have at least
+      // one active variant with stock — handles both simple and variant products.
+      $and: [
+        {
+          $or: [
+            { stockLevel: { $gt: 0 } },
+            { variants: { $elemMatch: { active: true, stockLevel: { $gt: 0 } } } },
+          ],
+        },
+        {
+          $or: [
+            { name: nameRegex },
+            { barcode: codeRegex },
+            { tags: tagRegex },
+            { 'variants.name': nameRegex },
+            { 'variants.barcode': codeRegex },
+          ],
+        },
       ],
     };
 

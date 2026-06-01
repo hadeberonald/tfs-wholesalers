@@ -84,6 +84,10 @@ export async function GET(request: NextRequest) {
       if (resolved?.isLinkedVariant && resolved.linkedVariantParentId) {
         const parentId = resolved.linkedVariantParentId.toString();
         const parent   = productMap[parentId] ?? null;
+
+        // Hide if the parent has no stock anywhere
+        if (!parent || !hasAnyStock(parent)) return { ...s, product: null };
+
         return {
           ...s,
           product:   parent,
@@ -91,14 +95,15 @@ export async function GET(request: NextRequest) {
         };
       }
 
+      // Hide if the resolved product has no stock anywhere
+      if (!resolved || !resolved.active || !hasAnyStock(resolved)) {
+        return { ...s, product: null };
+      }
+
       return { ...s, product: resolved };
     });
 
     // ── Deduplicate: one card per parent product ───────────────────────────
-    // If multiple specials resolve to the same parent (e.g. 3 variant specials
-    // all pointing at the same parent), only the first is kept so the parent
-    // card appears once with the correct variant pre-selected.
-    // Remove this block if you want a separate card per variant-special.
     const seenParentIds = new Set<string>();
     const deduped = enrichedSpecials.filter(s => {
       const pid = s.product?._id?.toString();
@@ -113,6 +118,18 @@ export async function GET(request: NextRequest) {
     console.error('Failed to fetch specials:', error);
     return NextResponse.json({ error: 'Failed to fetch specials' }, { status: 500 });
   }
+}
+
+/**
+ * Returns true if a product has stock at the parent level OR has at least one
+ * active variant with stock. Mirrors the $or query used in the products API.
+ */
+function hasAnyStock(product: any): boolean {
+  if (product.stockLevel > 0) return true;
+  if (Array.isArray(product.variants)) {
+    return product.variants.some((v: any) => v.active && v.stockLevel > 0);
+  }
+  return false;
 }
 
 export async function POST(request: NextRequest) {

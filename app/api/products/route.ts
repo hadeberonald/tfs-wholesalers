@@ -21,7 +21,6 @@ export async function GET(request: NextRequest) {
     const search      = searchParams.get('search');
     const excludeId   = searchParams.get('excludeId');
     const excludeLinked = searchParams.get('excludeLinked');
-    // For random pagination: comma-separated list of _id strings already shown
     const excludeIds  = searchParams.get('excludeIds');
 
     const client = await clientPromise;
@@ -35,6 +34,12 @@ export async function GET(request: NextRequest) {
     } else {
       query.active = true;
       query.isLinkedVariant = { $ne: true };
+      // Only show products that have stock at the parent level OR have at least
+      // one active variant with stock — handles both simple and variant products.
+      query.$or = [
+        { stockLevel: { $gt: 0 } },
+        { variants: { $elemMatch: { active: true, stockLevel: { $gt: 0 } } } },
+      ];
       if (branchId) query.branchId = new ObjectId(branchId);
     }
 
@@ -46,7 +51,6 @@ export async function GET(request: NextRequest) {
       query.isLinkedVariant = { $ne: true };
     }
 
-    // Exclude already-seen IDs (used for random pagination)
     if (excludeIds) {
       const ids = excludeIds
         .split(',')
@@ -92,7 +96,7 @@ export async function GET(request: NextRequest) {
     const limitNum       = limit ? parseInt(limit) : 25;
     const effectiveLimit = search ? Math.min(parseInt(limit || '200'), 500) : limitNum;
 
-    // ── Random sort: use $sample via aggregation pipeline ─────────────────
+    // ── Random sort ────────────────────────────────────────────────────────
     if (sort === 'random' && !search && !barcode) {
       const total = await db.collection('products').countDocuments(query);
 
@@ -102,14 +106,11 @@ export async function GET(request: NextRequest) {
       ];
 
       const products = await db.collection('products').aggregate(pipeline).toArray();
-
-      // hasMore is true if there are more un-seen products beyond what we just returned.
-      // total already excludes seen IDs (via $nin above), so:
       const hasMore = total > products.length;
 
       return NextResponse.json({
         products,
-        total,            // total remaining (excluding already-seen)
+        total,
         page: pageNum,
         limit: effectiveLimit,
         totalPages: Math.ceil(total / limitNum),
