@@ -1,4 +1,4 @@
-// types.ts - FIXED VERSION with 'bundle' added to Special type
+// types.ts
 
 export interface Product {
   _id: string;
@@ -48,51 +48,75 @@ export interface Category {
   children?: Category[];
 }
 
-// ✅ FIXED: Added 'bundle' to type union
 export interface Special {
   _id: string;
   name: string;
   slug: string;
   description: string;
-  type: 'percentage_off' | 'amount_off' | 'fixed_price' | 'multibuy' | 'buy_x_get_y' | 'bundle';
+  type:
+    | 'percentage_off'
+    | 'amount_off'
+    | 'fixed_price'
+    | 'multibuy'
+    | 'buy_x_get_y'
+    | 'bundle'
+    | 'conditional_add_on_price';
+  source?: string;
   badgeText?: string;
   images?: string[];
   conditions: {
-    // Percentage off
+    // percentage_off
     discountPercentage?: number;
     maximumDiscount?: number;
-    
-    // Amount off
+
+    // amount_off
     discountAmount?: number;
-    
-    // Fixed price
+
+    // fixed_price
     newPrice?: number;
-    
-    // Multibuy
+
+    // multibuy
     requiredQuantity?: number;
     specialPrice?: number;
-    
-    // Buy X Get Y
+
+    // buy_x_get_y
     buyProductId?: string;
     buyQuantity?: number;
     getProductId?: string;
     getQuantity?: number;
     getDiscount?: number;
-    
-    // Bundle
+
+    // bundle
     bundlePrice?: number;
     bundleProducts?: {
       productId: string;
       variantId?: string;
       quantity: number;
     }[];
+
+    // conditional_add_on_price
+    triggerProductId?: string;
+    triggerPrice?: number;
+    targetProductId?: string;
+    targetQuantity?: number;
+    overridePrice?: number;
+
+    // shared / variant targeting
+    variantId?: string;
+    variantSku?: string;
+    variantBarcode?: string;
   };
   active: boolean;
   featured: boolean;
   productId?: string;
   productIds?: string[];
+  categoryId?: string;
+  variantId?: string;
+  variantSku?: string;
+  variantBarcode?: string;
   startDate?: string;
   endDate?: string;
+  product?: Product | null;
 }
 
 export interface Combo {
@@ -115,7 +139,6 @@ export interface ComboItem {
   quantity: number;
 }
 
-// ✅ FIXED: Added 'super-admin' to role union
 export interface User {
   id: string;
   email: string;
@@ -149,18 +172,18 @@ export interface CartItem {
   image: string;
   quantity: number;
   sku: string;
-  
+
   appliedSpecialId?: string;
   originalPrice?: number;
   specialDiscount?: number;
   specialDescription?: string;
   meetsSpecialRequirement?: boolean;
-  
+
   isFreeItem?: boolean;
   isMultibuyBonus?: boolean;
   linkedToItemId?: string;
   autoAdded?: boolean;
-  
+
   isCombo?: boolean;
   comboItemCount?: number;
 }

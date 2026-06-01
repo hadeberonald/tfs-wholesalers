@@ -29,10 +29,10 @@ export async function PUT(
     const { password, adminRoleId, activeBranchId, branchId, ...rest } = body;
     const updateData: any = { ...rest };
 
-    // Only super-admins can change the top-level role field
-    if (updateData.role !== undefined && !auth.isSuperAdmin) {
+    // Only super-admins can assign the super-admin role
+    if (updateData.role === 'super-admin' && !auth.isSuperAdmin) {
       return NextResponse.json(
-        { error: 'Not authorized to change user roles' },
+        { error: 'Not authorized to assign super-admin role' },
         { status: 403 }
       );
     }

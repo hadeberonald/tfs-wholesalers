@@ -81,7 +81,7 @@ function pairProducts(products: Product[]): Array<[Product, Product | null]> {
   return pairs;
 }
 
-// ─── ProductListHeader — defined OUTSIDE ShopScreen so it never remounts ─────
+// ─── ProductListHeader ────────────────────────────────────────────────────────
 const ProductListHeader = memo(({
   searchQuery,
   isSearchMode,
@@ -110,7 +110,6 @@ const ProductListHeader = memo(({
   onOpenSort: () => void;
 }) => (
   <View style={styles.filtersContainer}>
-    {/* Search bar */}
     <View style={styles.searchContainer}>
       <Search color="#6b7280" size={20} />
       <TextInput
@@ -129,7 +128,6 @@ const ProductListHeader = memo(({
       )}
     </View>
 
-    {/* Category (browse mode only) */}
     {!isSearchMode && (
       <TouchableOpacity style={styles.filterButton} onPress={onOpenCategory}>
         <Text style={styles.filterButtonText} numberOfLines={1}>
@@ -139,13 +137,11 @@ const ProductListHeader = memo(({
       </TouchableOpacity>
     )}
 
-    {/* Sort */}
     <TouchableOpacity style={styles.sortButton} onPress={onOpenSort}>
       <Text style={styles.sortButtonText}>Sort: {SORT_LABELS[sortBy]}</Text>
       <ChevronDown color="#6b7280" size={16} />
     </TouchableOpacity>
 
-    {/* Results info */}
     <View style={styles.resultsInfo}>
       <Text style={styles.resultsText}>
         {isSearchMode
@@ -162,6 +158,9 @@ const ProductListHeader = memo(({
   </View>
 ));
 
+// ─── Specials pagination constants ────────────────────────────────────────────
+const SPECIALS_PAGE_SIZE = 20;
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function ShopScreen() {
@@ -177,6 +176,7 @@ export default function ShopScreen() {
   const [categories, setCategories]         = useState<Category[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [loadingMore, setLoadingMore]       = useState(false);
+  const [loadingMoreSpecials, setLoadingMoreSpecials] = useState(false);
   const [searchQuery, setSearchQuery]       = useState('');
   const [committedQuery, setCommittedQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(
@@ -190,6 +190,11 @@ export default function ShopScreen() {
   const [totalPages, setTotalPages]       = useState(1);
   const [totalProducts, setTotalProducts] = useState(0);
   const PAGE_SIZE = 20;
+
+  // Specials pagination
+  const [specialsPage, setSpecialsPage]         = useState(1);
+  const [specialsTotalPages, setSpecialsTotalPages] = useState(1);
+  const [specialsTotal, setSpecialsTotal]       = useState(0);
 
   const [isSearchMode, setIsSearchMode] = useState(false);
 
@@ -213,7 +218,11 @@ export default function ShopScreen() {
         fetchPage(1, true);
       }
     } else {
-      loadSpecials();
+      // Reset specials pagination and reload from scratch
+      setSpecials([]);
+      setSpecialsPage(1);
+      setSpecialsTotalPages(1);
+      loadSpecials(1, true);
       loadCombos();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -269,28 +278,53 @@ export default function ShopScreen() {
     fetchPage(currentPage + 1);
   };
 
-  const loadSpecials = async () => {
+  // ── Specials — paginated, pre-resolved product filter applied client-side ─
+  const loadSpecials = async (page = 1, isFirstPage = false) => {
+    if (!branch) return;
     try {
-      setInitialLoading(true);
-      const res = await api.get(`/api/specials?branchId=${branch?._id}&active=true`);
+      isFirstPage ? setInitialLoading(true) : setLoadingMoreSpecials(true);
+
+      // Fetch a page of specials. The API already pre-resolves `product` on
+      // each special so we can filter by product.active without extra requests.
+      const res = await api.get(
+        `/api/specials?branchId=${branch._id}&active=true&page=${page}&limit=${SPECIALS_PAGE_SIZE}`,
+      );
+
       const now = new Date();
-      const activeSpecials = (res.data.specials || []).filter((s: Special) => {
+      const incoming: Special[] = (res.data.specials || []).filter((s: Special) => {
+        // Date range check
         if (s.startDate && new Date(s.startDate) > now) return false;
         if (s.endDate   && new Date(s.endDate)   < now) return false;
-        return s.active;
+        if (!s.active) return false;
+        // Only show specials whose product is active — this prevents SpecialCard
+        // from doing its own fallback fetch for inactive/unresolved products,
+        // which was the source of the slowness (hundreds of extra requests).
+        return s.product?.active === true;
       });
-      setSpecials(activeSpecials);
+
+      setSpecials((prev) => (isFirstPage ? incoming : [...prev, ...incoming]));
+      // Use raw total from API for pagination tracking (filtering is client-side)
+      setSpecialsTotal(res.data.total || 0);
+      setSpecialsTotalPages(res.data.totalPages || 1);
+      setSpecialsPage(page);
     } catch (error) {
       console.error('Failed to load specials:', error);
     } finally {
       setInitialLoading(false);
+      setLoadingMoreSpecials(false);
     }
+  };
+
+  const handleLoadMoreSpecials = () => {
+    if (loadingMoreSpecials || initialLoading) return;
+    if (specialsPage >= specialsTotalPages) return;
+    loadSpecials(specialsPage + 1);
   };
 
   const loadCombos = async () => {
     try {
       const res = await api.get(`/api/combos?branchId=${branch?._id}&active=true`);
-      setCombos(res.data.combos || []);
+      setCombos((res.data.combos || []).filter((c: Combo) => c.stockLevel > 0));
     } catch (error) {
       console.error('Failed to load combos:', error);
     }
@@ -388,6 +422,35 @@ export default function ShopScreen() {
       </View>
     );
 
+  // ── Specials FlatList helpers ─────────────────────────────────────────────
+  const specialRows = pairProducts(specials as any) as any;
+
+  const renderSpecialRow = ({ item }: { item: [Special, Special | null] }) => (
+    <View style={styles.row}>
+      <SpecialCard special={item[0]} />
+      {item[1] ? <SpecialCard special={item[1]} /> : <View style={{ width: CARD_WIDTH }} />}
+    </View>
+  );
+
+  const renderSpecialsFooter = () => {
+    if (loadingMoreSpecials) {
+      return (
+        <View style={styles.footerLoader}>
+          <ActivityIndicator size="small" color="#FF6B35" />
+          <Text style={styles.footerText}>Loading more specials…</Text>
+        </View>
+      );
+    }
+    if (!initialLoading && specials.length > 0 && specialsPage >= specialsTotalPages) {
+      return (
+        <View style={styles.footerLoader}>
+          <Text style={styles.footerEnd}>{specials.length} specials loaded</Text>
+        </View>
+      );
+    }
+    return null;
+  };
+
   // ─────────────────────────────────────────────────────────────────────────
 
   if (!branch) {
@@ -471,48 +534,53 @@ export default function ShopScreen() {
               <ActivityIndicator size="large" color="#FF6B35" />
             </View>
           ) : (
-            <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-              <View style={styles.content}>
-                {specials.length > 0 && (
-                  <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                      <Text style={styles.sectionTitle}>Special Offers</Text>
-                      <View style={styles.badge}>
-                        <Text style={styles.badgeText}>{specials.length}</Text>
+            <FlatList
+              data={specialRows}
+              keyExtractor={(_: any, index: number) => `special-row-${index}`}
+              renderItem={renderSpecialRow}
+              onEndReached={handleLoadMoreSpecials}
+              onEndReachedThreshold={0.4}
+              ListHeaderComponent={
+                specials.length > 0 ? (
+                  <View style={styles.sectionHeaderStandalone}>
+                    <Text style={styles.sectionTitle}>Special Offers</Text>
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>{specials.length}</Text>
+                    </View>
+                  </View>
+                ) : null
+              }
+              ListFooterComponent={
+                <>
+                  {renderSpecialsFooter()}
+                  {/* Combos below specials */}
+                  {combos.length > 0 && (
+                    <View style={styles.section}>
+                      <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Combo Deals</Text>
+                        <View style={styles.badge}>
+                          <Text style={styles.badgeText}>{combos.length}</Text>
+                        </View>
+                      </View>
+                      <View style={styles.productGrid}>
+                        {combos.map((combo) => (
+                          <ComboCard key={combo._id} combo={combo} />
+                        ))}
                       </View>
                     </View>
-                    <View style={styles.productGrid}>
-                      {specials.map((special) => (
-                        <SpecialCard key={special._id} special={special} />
-                      ))}
+                  )}
+                  {specials.length === 0 && combos.length === 0 && !initialLoading && (
+                    <View style={styles.emptyState}>
+                      <Tag color="#9ca3af" size={60} />
+                      <Text style={styles.emptyText}>No special offers available</Text>
                     </View>
-                  </View>
-                )}
-
-                {combos.length > 0 && (
-                  <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                      <Text style={styles.sectionTitle}>Combo Deals</Text>
-                      <View style={styles.badge}>
-                        <Text style={styles.badgeText}>{combos.length}</Text>
-                      </View>
-                    </View>
-                    <View style={styles.productGrid}>
-                      {combos.map((combo) => (
-                        <ComboCard key={combo._id} combo={combo} />
-                      ))}
-                    </View>
-                  </View>
-                )}
-
-                {specials.length === 0 && combos.length === 0 && (
-                  <View style={styles.emptyState}>
-                    <Tag color="#9ca3af" size={60} />
-                    <Text style={styles.emptyText}>No special offers available</Text>
-                  </View>
-                )}
-              </View>
-            </ScrollView>
+                  )}
+                </>
+              }
+              contentContainerStyle={styles.flatListContent}
+              showsVerticalScrollIndicator={false}
+              removeClippedSubviews
+            />
           )}
         </>
       )}
@@ -647,13 +715,14 @@ const styles = StyleSheet.create({
   errorText:  { fontSize: 16, color: '#9ca3af', marginTop: 12 },
 
   // ── Specials / combos ─────────────────────────────────────────────────────
-  content:       { padding: 16, paddingTop: 0 },
-  section:       { marginBottom: 24 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
-  sectionTitle:  { fontSize: 20, fontWeight: 'bold', color: '#1f2937' },
-  badge:         { backgroundColor: '#FF6B35', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
-  badgeText:     { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-  productGrid:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  content:                { padding: 16, paddingTop: 0 },
+  section:                { marginBottom: 24, paddingHorizontal: 16 },
+  sectionHeader:          { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  sectionHeaderStandalone:{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, paddingBottom: 8 },
+  sectionTitle:           { fontSize: 20, fontWeight: 'bold', color: '#1f2937' },
+  badge:                  { backgroundColor: '#FF6B35', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
+  badgeText:              { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+  productGrid:            { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
 
   // ── Modals ────────────────────────────────────────────────────────────────
   dropdownOverlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-start', paddingTop: 220, paddingHorizontal: 16 },

@@ -81,8 +81,9 @@ const getRoleBadgeColor = (role: string) => ({
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function AdminUsersPage() {
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, can } = useAuth();
   const isSuperAdmin = currentUser?.role === 'super-admin';
+  const canWrite = can('users:write');
 
   const [users, setUsers]           = useState<User[]>([]);
   const [adminRoles, setAdminRoles] = useState<AdminRole[]>([]);
@@ -532,7 +533,9 @@ export default function AdminUsersPage() {
                   <option value="customer">Customer</option>
                   <option value="picker">Picker</option>
                   <option value="delivery">Delivery Staff</option>
-                  {(isSuperAdmin || editingUser?.role === 'admin') && (
+                  {/* Any user with write access can assign the admin role;
+                      super-admin is backend-only and never shown here */}
+                  {(canWrite || editingUser?.role === 'admin') && (
                     <option value="admin">Admin</option>
                   )}
                 </select>
