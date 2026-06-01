@@ -12,7 +12,7 @@ import nodemailer from 'nodemailer';
 
 // ─── Internal POS receipt address ────────────────────────────────────────────
 
-const INTERNAL_ORDERS_EMAIL = 'onlineorders.nv@tfswholesalers.com';
+const INTERNAL_ORDERS_EMAIL = 'salesnv@tfswholesalers.com';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
