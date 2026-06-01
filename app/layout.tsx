@@ -23,7 +23,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <AuthProvider>
-          <GateWrapper>
+          
             <ConditionalHeader />
             <main className="pt-16">{children}</main>
             <Footer />
@@ -45,7 +45,7 @@ export default function RootLayout({
                 },
               }}
             />
-          </GateWrapper>
+          
         </AuthProvider>
       </body>
     </html>
