@@ -34,9 +34,29 @@ export default function Footer() {
                 </div>
               </Link>
             </div>
-            <p className="text-gray-400 text-sm leading-relaxed">
+            <p className="text-gray-400 text-sm leading-relaxed mb-4">
               Your trusted wholesale supplier for quality products at competitive prices. Serving businesses and bulk buyers across the region.
             </p>
+            <div className="flex items-center space-x-3">
+              <a
+                href="https://www.facebook.com/tfswholesalersvryheid"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="opacity-80 hover:opacity-100 transition-opacity"
+                aria-label="TFS Wholesalers on Facebook"
+              >
+                <img src="/fb.png" alt="Facebook" className="w-8 h-8 object-contain" />
+              </a>
+              <a
+                href="https://www.instagram.com/tfsvryheid/?hl=en"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="opacity-80 hover:opacity-100 transition-opacity"
+                aria-label="TFS Wholesalers on Instagram"
+              >
+                <img src="/ig.png" alt="Instagram" className="w-8 h-8 object-contain" />
+              </a>
+            </div>
           </div>
 
           {/* Quick Links */}
