@@ -3,24 +3,13 @@
  *
  * Server-side helpers for resolving a user's permissions from the DB.
  *
- * COLLECTION SHAPE — admin_roles:
- * {
- *   _id        : ObjectId
- *   name       : string          // e.g. "Marketing"
- *   description: string
- *   permissions: string[]        // e.g. ["specials:read","specials:write","combos:read"]
- *   isSystem   : boolean         // true = cannot be deleted (built-in roles)
- *   createdAt  : Date
- *   updatedAt  : Date
- * }
- *
- * USER DOCUMENT — new field:
- *   adminRoleId: ObjectId | null  // points to admin_roles._id
- *
- * CACHING:
- *   Role documents rarely change. We keep an in-process Map cache with a
- *   60-second TTL so each API request doesn't hit MongoDB for every auth check.
- *   The cache is busted by the role update/delete endpoints.
+ * NOTE ON CACHING:
+ *   The previous in-process Map cache caused stale permission reads in
+ *   production because each serverless instance has its own cache, so
+ *   bustRoleCache() on one instance never reaches the others. The cache
+ *   has been removed — MongoDB is hit directly on every permission check.
+ *   The connection is pooled (clientPromise), so this is not meaningfully
+ *   slower than the cached version was.
  */
 
 import clientPromise from '@/lib/mongodb';
@@ -38,55 +27,22 @@ export interface AdminRoleDoc {
   updatedAt: Date;
 }
 
-// ─── In-process cache ─────────────────────────────────────────────────────────
+// ─── No-op bust — kept so existing callers don't break ───────────────────────
 
-interface CacheEntry {
-  role: AdminRoleDoc;
-  expiresAt: number;
-}
-
-const roleCache = new Map<string, CacheEntry>();
-const CACHE_TTL_MS = 60_000; // 60 seconds
-
-function cacheSet(id: string, role: AdminRoleDoc) {
-  roleCache.set(id, { role, expiresAt: Date.now() + CACHE_TTL_MS });
-}
-
-function cacheGet(id: string): AdminRoleDoc | null {
-  const entry = roleCache.get(id);
-  if (!entry) return null;
-  if (Date.now() > entry.expiresAt) {
-    roleCache.delete(id);
-    return null;
-  }
-  return entry.role;
-}
-
-/** Call this from role update/delete API routes to force a fresh DB read */
-export function bustRoleCache(id?: string) {
-  if (id) {
-    roleCache.delete(id);
-  } else {
-    roleCache.clear();
-  }
+/** @deprecated Cache has been removed. This is a no-op kept for compatibility. */
+export function bustRoleCache(_id?: string) {
+  // intentionally empty — no cache to bust
 }
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────
 
 export async function getRoleById(roleId: ObjectId | string): Promise<AdminRoleDoc | null> {
-  const id = roleId.toString();
-  const cached = cacheGet(id);
-  if (cached) return cached;
-
   const client = await clientPromise;
   const db = client.db('tfs-wholesalers');
 
-  const role = await db.collection('admin_roles').findOne({
-    _id: new ObjectId(id),
-  }) as AdminRoleDoc | null;
-
-  if (role) cacheSet(id, role);
-  return role;
+  return db.collection('admin_roles').findOne({
+    _id: new ObjectId(roleId.toString()),
+  }) as Promise<AdminRoleDoc | null>;
 }
 
 export async function getAllRoles(): Promise<AdminRoleDoc[]> {
