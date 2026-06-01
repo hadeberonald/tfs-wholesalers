@@ -5,6 +5,7 @@
  *  - Supports BOTH branchId and activeBranchId on user documents
  *  - Handles branchId stored as string OR ObjectId
  *  - Single source of truth for auth → branch → permissions resolution
+ *  - Reads role from DB on every request (never trusts the JWT role claim)
  */
 
 import { cookies } from 'next/headers';
@@ -46,11 +47,6 @@ export type AdminBranchResult =
 
 // ─── Helper: resolve branchId from user doc ───────────────────────────────────
 
-/**
- * Users may have their branch stored under either `branchId` or `activeBranchId`,
- * and the value may be an ObjectId already or a plain string.
- * This normalises both cases to an ObjectId or null.
- */
 function resolveBranchId(user: Record<string, any>): ObjectId | null {
   const raw = user.activeBranchId ?? user.branchId ?? null;
   if (!raw) return null;
@@ -78,7 +74,21 @@ export async function getAdminBranch(): Promise<AdminBranchResult> {
       return { error: 'Invalid token', status: 401 };
     }
 
-    const { userId, role } = decoded;
+    const { userId } = decoded;
+
+    const client = await clientPromise;
+    const db = client.db('tfs-wholesalers');
+
+    // Always read role fresh from DB — never trust the JWT role claim,
+    // which is stale from login time and won't reflect role changes.
+    const user = await db.collection('users').findOne(
+      { _id: new ObjectId(userId) },
+      { projection: { role: 1, branchId: 1, activeBranchId: 1, adminRoleId: 1 } }
+    );
+
+    if (!user) return { error: 'User not found', status: 404 };
+
+    const role = user.role as string;
 
     // ── Super-admin: bypass all branch/role checks ────────────────────────────
     if (role === 'super-admin') {
@@ -93,17 +103,6 @@ export async function getAdminBranch(): Promise<AdminBranchResult> {
 
     // ── Non-admin roles (customers, pickers, etc.) ────────────────────────────
     if (role !== 'admin') return { error: 'Forbidden', status: 403 };
-
-    const client = await clientPromise;
-    const db = client.db('tfs-wholesalers');
-
-    // Project BOTH possible branch fields + adminRoleId
-    const user = await db.collection('users').findOne(
-      { _id: new ObjectId(userId) },
-      { projection: { branchId: 1, activeBranchId: 1, adminRoleId: 1 } }
-    );
-
-    if (!user) return { error: 'User not found', status: 404 };
 
     const branchId = resolveBranchId(user);
 
@@ -123,19 +122,17 @@ export async function getAdminBranch(): Promise<AdminBranchResult> {
         })()
       : null;
 
-    // Resolve permissions from the role document (cached for 60 s)
+    // Resolve permissions fresh from DB on every request
     const rawPermissions = await getUserPermissions(adminRoleId);
 
     // Expand write permissions to implicitly include read.
-    // e.g. if the role has "specials:write" but not "specials:read",
-    // the user should still pass a "specials:read" check.
     const permissionsSet = new Set<string>(rawPermissions ?? []);
-(rawPermissions ?? []).forEach((perm) => {
-  if (perm.endsWith(':write')) {
-    permissionsSet.add(perm.replace(':write', ':read'));
-  }
-});
-const permissions = Array.from(permissionsSet);
+    (rawPermissions ?? []).forEach((perm) => {
+      if (perm.endsWith(':write')) {
+        permissionsSet.add(perm.replace(':write', ':read'));
+      }
+    });
+    const permissions = Array.from(permissionsSet);
 
     return {
       userId,
