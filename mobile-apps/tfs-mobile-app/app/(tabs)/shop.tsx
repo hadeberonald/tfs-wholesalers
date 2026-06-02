@@ -192,9 +192,9 @@ export default function ShopScreen() {
   const PAGE_SIZE = 20;
 
   // Specials pagination
-  const [specialsPage, setSpecialsPage]         = useState(1);
+  const [specialsPage, setSpecialsPage]             = useState(1);
   const [specialsTotalPages, setSpecialsTotalPages] = useState(1);
-  const [specialsTotal, setSpecialsTotal]       = useState(0);
+  const [specialsTotal, setSpecialsTotal]           = useState(0);
 
   const [isSearchMode, setIsSearchMode] = useState(false);
 
@@ -218,7 +218,6 @@ export default function ShopScreen() {
         fetchPage(1, true);
       }
     } else {
-      // Reset specials pagination and reload from scratch
       setSpecials([]);
       setSpecialsPage(1);
       setSpecialsTotalPages(1);
@@ -278,32 +277,35 @@ export default function ShopScreen() {
     fetchPage(currentPage + 1);
   };
 
-  // ── Specials — paginated, pre-resolved product filter applied client-side ─
+  // ── Specials — stock check now mirrors the API's hasAnyStock logic ────────
+  const hasAnyStock = (product: any): boolean => {
+    if ((product.stockLevel ?? 0) > 0) return true;
+    if (Array.isArray(product.variants)) {
+      return product.variants.some((v: any) => v.active && v.stockLevel > 0);
+    }
+    return false;
+  };
+
   const loadSpecials = async (page = 1, isFirstPage = false) => {
     if (!branch) return;
     try {
       isFirstPage ? setInitialLoading(true) : setLoadingMoreSpecials(true);
 
-      // Fetch a page of specials. The API already pre-resolves `product` on
-      // each special so we can filter by product.active without extra requests.
       const res = await api.get(
         `/api/specials?branchId=${branch._id}&active=true&page=${page}&limit=${SPECIALS_PAGE_SIZE}`,
       );
 
       const now = new Date();
       const incoming: Special[] = (res.data.specials || []).filter((s: Special) => {
-        // Date range check
         if (s.startDate && new Date(s.startDate) > now) return false;
         if (s.endDate   && new Date(s.endDate)   < now) return false;
         if (!s.active) return false;
-        // Only show specials whose product is active — this prevents SpecialCard
-        // from doing its own fallback fetch for inactive/unresolved products,
-        // which was the source of the slowness (hundreds of extra requests).
-        return s.product?.active === true;
+        // Hide if product is missing, inactive, or fully out of stock
+        if (!s.product?.active) return false;
+        return hasAnyStock(s.product);
       });
 
       setSpecials((prev) => (isFirstPage ? incoming : [...prev, ...incoming]));
-      // Use raw total from API for pagination tracking (filtering is client-side)
       setSpecialsTotal(res.data.total || 0);
       setSpecialsTotalPages(res.data.totalPages || 1);
       setSpecialsPage(page);
@@ -553,7 +555,6 @@ export default function ShopScreen() {
               ListFooterComponent={
                 <>
                   {renderSpecialsFooter()}
-                  {/* Combos below specials */}
                   {combos.length > 0 && (
                     <View style={styles.section}>
                       <View style={styles.sectionHeader}>
@@ -680,14 +681,12 @@ const styles = StyleSheet.create({
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scrollView:      { flex: 1 },
 
-  // ── Tabs ──────────────────────────────────────────────────────────────────
   tabs:          { flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
   tab:           { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, gap: 8, borderBottomWidth: 2, borderBottomColor: 'transparent' },
   tabActive:     { borderBottomColor: '#FF6B35' },
   tabText:       { fontSize: 14, fontWeight: '600', color: '#6b7280' },
   tabTextActive: { color: '#FF6B35' },
 
-  // ── Filters header ────────────────────────────────────────────────────────
   filtersContainer: { backgroundColor: '#fff', padding: 16, gap: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb', marginBottom: 16 },
   searchContainer:  { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f3f4f6', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, gap: 12 },
   searchInput:      { flex: 1, fontSize: 16, color: '#1f2937' },
@@ -700,21 +699,17 @@ const styles = StyleSheet.create({
   clearSearchBtn:   { flexDirection: 'row', alignItems: 'center', gap: 4 },
   clearSearchText:  { fontSize: 13, color: '#FF6B35', fontWeight: '600' },
 
-  // ── FlatList ──────────────────────────────────────────────────────────────
   flatListContent: { paddingBottom: 24 },
   row:             { flexDirection: 'row', gap: CARD_GAP, paddingHorizontal: 16, marginBottom: CARD_GAP },
 
-  // ── Footer ────────────────────────────────────────────────────────────────
   footerLoader: { paddingVertical: 20, alignItems: 'center', gap: 8 },
   footerText:   { fontSize: 13, color: '#6b7280' },
   footerEnd:    { fontSize: 13, color: '#9ca3af' },
 
-  // ── Empty / error ─────────────────────────────────────────────────────────
   emptyState: { alignItems: 'center', paddingVertical: 60 },
   emptyText:  { fontSize: 16, color: '#6b7280', marginTop: 16, textAlign: 'center' },
   errorText:  { fontSize: 16, color: '#9ca3af', marginTop: 12 },
 
-  // ── Specials / combos ─────────────────────────────────────────────────────
   content:                { padding: 16, paddingTop: 0 },
   section:                { marginBottom: 24, paddingHorizontal: 16 },
   sectionHeader:          { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
@@ -724,7 +719,6 @@ const styles = StyleSheet.create({
   badgeText:              { color: '#fff', fontSize: 12, fontWeight: 'bold' },
   productGrid:            { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
 
-  // ── Modals ────────────────────────────────────────────────────────────────
   dropdownOverlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-start', paddingTop: 220, paddingHorizontal: 16 },
   dropdownMenu:       { backgroundColor: '#fff', borderRadius: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 8, maxHeight: 400, paddingBottom: 8 },
   dropdownMenuSmall:  { maxHeight: 260 },

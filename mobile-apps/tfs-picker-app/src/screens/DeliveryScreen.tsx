@@ -1,6 +1,6 @@
 // src/screens/DeliveryScreen.tsx  (maps to "DeliveryDetail" in navigator)
 // Replaces all Alert.alert calls with useAppModal to prevent iOS stacking.
-// Everything else unchanged.
+// Fixed: Android safe area — useSafeAreaInsets() replaces hardcoded paddingBottom.
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -14,6 +14,7 @@ import { useRoute } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import StatusStepper from '../components/StatusStepper';
 import { useAppModal } from '../components/AppModal';
 
@@ -24,6 +25,7 @@ export default function DeliveryDetailScreen({ navigation: navProp }: any) {
   const route      = useRoute();
   const params     = route.params as { orderId: string };
   const { showModal } = useAppModal();
+  const insets = useSafeAreaInsets();
 
   const [permission, requestPermission] = useCameraPermissions();
   const [scanning, setScanning]         = useState(false);
@@ -175,10 +177,19 @@ export default function DeliveryDetailScreen({ navigation: navProp }: any) {
   const totalPackages = order.packages?.length || 0;
   const allVerified   = verifiedPackages.size === totalPackages && totalPackages > 0;
 
+  // Dynamic bottom padding — respects Android gesture nav bar & iOS home indicator
+  const bottomPad = Math.max(insets.bottom, 16);
+
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={{ paddingBottom: bottomPad + 16 }}
+    >
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerBackButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity
+          style={styles.headerBackButton}
+          onPress={() => navigation.goBack()}
+        >
           <ArrowLeft size={24} color="#FF6B35" />
           <Text style={styles.headerBackButtonText}>Back</Text>
         </TouchableOpacity>
@@ -336,6 +347,7 @@ const styles = StyleSheet.create({
   cancelScanText:       { color: '#fff', fontSize: 16, fontWeight: '600' },
   scanButton:           { backgroundColor: '#FF6B35', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, margin: 16, borderRadius: 12, gap: 8 },
   scanButtonText:       { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  completeButton:       { backgroundColor: '#10B981', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, margin: 16, marginBottom: 32, borderRadius: 12, gap: 8 },
+  // completeButton marginBottom 0 — ScrollView contentContainerStyle handles safe area
+  completeButton:       { backgroundColor: '#10B981', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, margin: 16, marginBottom: 0, borderRadius: 12, gap: 8 },
   completeButtonText:   { color: '#fff', fontSize: 18, fontWeight: 'bold' },
 });

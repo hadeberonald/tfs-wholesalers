@@ -2,6 +2,7 @@
 // Fixed: patches assignedPickerId + assignedPickerName when starting picking
 // so OrdersListScreen can show who is picking and offer "Return to Pick".
 // Fixed: if ALL items are OOS, cancels the order instead of advancing to Packaging.
+// Fixed: Android safe area — useSafeAreaInsets() replaces hardcoded paddingBottom.
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -14,6 +15,7 @@ import {
   AlertTriangle, ChevronDown, ChevronUp, Layers, Star, XCircle, AlertCircle,
 } from 'lucide-react-native';
 import axios from 'axios';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '../stores/authStore';
 import BarcodeScanner from '../components/BarcodeScanner';
 import StatusStepper from '../components/StatusStepper';
@@ -204,9 +206,10 @@ function GroupSection({ group, scanKeys, pickCounts, oosSet, onManual, onOOS, is
 
 export default function PickingScreen({ route, navigation: navProp }: any) {
   const { orderId } = route.params;
-  const { token, user } = useAuthStore(); // ← user pulled here for picker assignment
+  const { token, user } = useAuthStore();
   const navigation  = navProp as any;
   const { showModal } = useAppModal();
+  const insets = useSafeAreaInsets();
 
   const [order, setOrder]             = useState<Order | null>(null);
   const [groups, setGroups]           = useState<ItemGroup[]>([]);
@@ -244,7 +247,6 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
       setAllScanKeys(keys);
       buildBarcodeLookup(g, keys);
 
-      // ── KEY FIX: include assignedPickerId + assignedPickerName ─────────────
       if (orderData.status === 'pending' || orderData.status === 'confirmed') {
         await axios.patch(
           `${API_URL}/api/orders/${orderId}`,
@@ -341,7 +343,6 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
 
   const getItem = (k: string) => { let gi = 0; for (const grp of groups) { for (const it of grp.items) { if (allScanKeys[gi] === k) return it; gi++; } } return null; };
 
-  // ── NEW: cancel order when all items are OOS ──────────────────────────────
   const cancelOrder = useCallback(async () => {
     try {
       await axios.patch(
@@ -371,7 +372,6 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
   const handleComplete = useCallback(async () => {
     if (!order) return;
 
-    // ── NEW: if every slot is OOS, cancel the order outright ─────────────────
     const allOOS = allScanKeys.length > 0 && allScanKeys.every(k => oos.has(k));
     if (allOOS) {
       showModal({
@@ -410,7 +410,6 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
   const progress = totalUnits > 0 ? pickedUnits / totalUnits : 0;
   const allDone  = resolvedSlots === allScanKeys.length;
 
-  // ── NEW: detect when everything is OOS so we can relabel the footer button ─
   const allOOSResolved = allScanKeys.length > 0 && allScanKeys.every(k => oos.has(k));
 
   const groupScanKeys: string[][] = [];
@@ -418,6 +417,9 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
 
   if (loading) return <View style={styles.centered}><ActivityIndicator size="large" color="#FF6B35" /><Text style={styles.loadingText}>Loading order...</Text></View>;
   if (!order)  return <View style={styles.centered}><Ionicons name="alert-circle-outline" size={64} color="#999" /><Text style={styles.errorText}>Order not found</Text><TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}><Text style={styles.backBtnText}>← Go Back</Text></TouchableOpacity></View>;
+
+  // Dynamic footer padding — respects Android gesture nav bar & iOS home indicator
+  const footerBottomPad = Math.max(insets.bottom, 16);
 
   return (
     <View style={styles.container}>
@@ -462,7 +464,11 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
         </View>
       </View>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: footerBottomPad + 88 }]}
+        showsVerticalScrollIndicator={false}
+      >
         {scannerVisible && (
           <View style={styles.scanActiveBanner}>
             <Ionicons name="barcode-outline" size={18} color="#fff" />
@@ -489,10 +495,9 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
             <Text style={styles.savingsText}>Customer saves <Text style={{ fontWeight: '800' }}>R{(order.totalSavings || 0).toFixed(2)}</Text> with specials on this order</Text>
           </View>
         )}
-        <View style={{ height: 120 }} />
       </ScrollView>
 
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: footerBottomPad }]}>
         <TouchableOpacity
           style={[
             styles.completeBtn,
@@ -564,12 +569,13 @@ const styles = StyleSheet.create({
   refundBannerTextAllOOS: { color: '#fff' },
   savingsCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#fffbeb', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#fde68a', marginTop: 8 },
   savingsText: { flex: 1, fontSize: 13, color: '#92400e', lineHeight: 18 },
-  footer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', padding: 16, paddingBottom: Platform.OS === 'ios' ? 34 : 16, borderTopWidth: 1, borderTopColor: '#e5e7eb' },
+  // Footer: no hardcoded paddingBottom — applied dynamically via insets
+  footer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', paddingTop: 16, paddingHorizontal: 16, borderTopWidth: 1, borderTopColor: '#e5e7eb' },
   completeBtn: { backgroundColor: '#FF6B35', borderRadius: 14, height: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, shadowColor: '#FF6B35', shadowOpacity: 0.4, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 5 },
   completeBtnDisabled: { backgroundColor: '#9ca3af', shadowOpacity: 0 },
   completeBtnCancel: { backgroundColor: '#dc2626', shadowColor: '#dc2626' },
   completeBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  footerHint: { textAlign: 'center', fontSize: 11, color: '#9ca3af', marginTop: 8 },
+  footerHint: { textAlign: 'center', fontSize: 11, color: '#9ca3af', marginTop: 8, marginBottom: 4 },
 });
 const gs = StyleSheet.create({
   wrapper: { borderRadius: 16, borderWidth: 2, overflow: 'hidden', marginBottom: 16 }, header: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },

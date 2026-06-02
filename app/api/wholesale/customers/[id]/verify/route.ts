@@ -12,17 +12,38 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
 
-    const updateData: any = { verificationStatus: body.verificationStatus, updatedAt: new Date() };
+    const updateData: any = {
+      verificationStatus: body.verificationStatus,
+      updatedAt: new Date(),
+    };
 
     if (body.verificationStatus === 'approved') {
-      updateData.active = true; updateData.verifiedAt = new Date(); updateData.verifiedBy = auth.userId;
+      updateData.active = true;
+      updateData.verifiedAt = new Date();
+      updateData.verifiedBy = auth.userId;
+
+      // Credit eligibility
+      updateData.creditApproved = body.creditApproved ?? false;
+      updateData.creditLimit = body.creditApproved ? (body.creditLimit ?? 0) : 0;
+      updateData.netTerms = body.creditApproved ? (body.netTerms ?? 30) : null;
+      updateData.outstandingBalance = 0;
+      updateData.blockedFromOrdering = false;
+
       if (!body.branchId && auth.branchId) updateData.branchId = auth.branchId;
     } else if (body.verificationStatus === 'rejected') {
-      updateData.active = false; updateData.rejectedAt = new Date(); updateData.rejectedBy = auth.userId;
+      updateData.active = false;
+      updateData.rejectedAt = new Date();
+      updateData.rejectedBy = auth.userId;
+      updateData.rejectionReason = body.rejectionReason ?? null;
     }
 
-    const result = await db.collection('wholesale_customers').updateOne({ _id: new ObjectId(params.id) }, { $set: updateData });
-    if (result.matchedCount === 0) return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+    const result = await db.collection('wholesale_customers').updateOne(
+      { _id: new ObjectId(params.id) },
+      { $set: updateData }
+    );
+
+    if (result.matchedCount === 0)
+      return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
 
     console.log('✅ Customer verification status updated:', params.id);
     return NextResponse.json({ success: true });

@@ -5,6 +5,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { ClipboardList, Settings, Car, MapPin, ClipboardCheck } from 'lucide-react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import LoginScreen              from './src/screens/LoginScreen';
 import OrdersListScreen         from './src/screens/OrdersListScreen';
@@ -24,8 +25,6 @@ import {
   registerForPushNotifications,
 } from './src/services/NotificationService';
 
-// ── NEW: wrap the whole app in AppModalProvider so any screen can use
-//         useAppModal() instead of Alert.alert (fixes iOS stacking alerts)
 import { AppModalProvider } from './src/components/AppModal';
 
 const Stack = createStackNavigator();
@@ -45,7 +44,7 @@ function MainTabs({ navigation }: any) {
         headerShown:      true,
         headerStyle:      { backgroundColor: '#fff' },
         headerTitleStyle: { fontWeight: '700', color: '#1a1a1a' },
-        tabBarStyle:      { display: 'none' }, // ← hides the bottom tab bar from UI
+        tabBarStyle:      { display: 'none' },
         headerRight: () => (
           <TouchableOpacity
             style={tabStyles.branchBtn}
@@ -146,29 +145,33 @@ export default function App() {
   }, [user]);
 
   return (
-    // AppModalProvider must wrap NavigationContainer so that screens
-    // nested anywhere in the tree can call useAppModal()
-    <AppModalProvider>
-      <NavigationContainer ref={navigationRef}>
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-          {!user ? (
-            <Stack.Screen name="Login" component={LoginScreen} />
-          ) : (
-            <>
-              <Stack.Screen
-                name="BranchSelect"
-                component={BranchSelectScreen}
-                options={{ presentation: activeBranch ? 'modal' : 'card' }}
-              />
-              <Stack.Screen name="Main"               component={MainTabs} />
-              <Stack.Screen name="Picking"            component={PickingScreen} />
-              <Stack.Screen name="Packaging"          component={PackagingScreen} />
-              <Stack.Screen name="DeliveryCollection" component={DeliveryCollectionScreen} />
-              <Stack.Screen name="DeliveryDetail"     component={DeliveryScreen} />
-            </>
-          )}
-        </Stack.Navigator>
-      </NavigationContainer>
-    </AppModalProvider>
+    // SafeAreaProvider must be the outermost wrapper so that
+    // useSafeAreaInsets() works correctly on every screen, including Android.
+    <SafeAreaProvider>
+      {/* AppModalProvider must wrap NavigationContainer so that screens
+          nested anywhere in the tree can call useAppModal() */}
+      <AppModalProvider>
+        <NavigationContainer ref={navigationRef}>
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            {!user ? (
+              <Stack.Screen name="Login" component={LoginScreen} />
+            ) : (
+              <>
+                <Stack.Screen
+                  name="BranchSelect"
+                  component={BranchSelectScreen}
+                  options={{ presentation: activeBranch ? 'modal' : 'card' }}
+                />
+                <Stack.Screen name="Main"               component={MainTabs} />
+                <Stack.Screen name="Picking"            component={PickingScreen} />
+                <Stack.Screen name="Packaging"          component={PackagingScreen} />
+                <Stack.Screen name="DeliveryCollection" component={DeliveryCollectionScreen} />
+                <Stack.Screen name="DeliveryDetail"     component={DeliveryScreen} />
+              </>
+            )}
+          </Stack.Navigator>
+        </NavigationContainer>
+      </AppModalProvider>
+    </SafeAreaProvider>
   );
 }

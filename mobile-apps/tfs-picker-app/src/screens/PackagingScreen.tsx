@@ -1,5 +1,6 @@
 // src/screens/PackagingScreen.tsx
 // All Alert.alert calls replaced with useAppModal() to prevent iOS stacking alerts.
+// Fixed: Android safe area — useSafeAreaInsets() replaces hardcoded paddingBottom.
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -15,6 +16,7 @@ import { useRoute } from '@react-navigation/native';
 import { useOrdersStore } from '../stores/ordersStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import StatusStepper from '../components/StatusStepper';
 import { useAppModal } from '../components/AppModal';
 
@@ -128,6 +130,7 @@ export default function PackagingScreen({ navigation: navProp }: any) {
   const orderId = params?.orderId;
   const { showModal } = useAppModal();
   const { completeOrder } = useOrdersStore();
+  const insets = useSafeAreaInsets();
 
   const [order, setOrder]   = useState<any>(null);
   const [groups, setGroups] = useState<ItemGroup[]>([]);
@@ -265,8 +268,15 @@ export default function PackagingScreen({ navigation: navProp }: any) {
   const comboCount   = order.items.filter((i: OrderItem) => i.isComboItem).length;
   const specialCount = order.items.filter((i: OrderItem) => i.specialType && !i.isComboItem && !i.isBonusItem).length;
 
+  // Dynamic bottom padding — respects Android gesture nav bar & iOS home indicator
+  const bottomPad = Math.max(insets.bottom, 16);
+
   return (
-    <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      style={styles.container}
+      keyboardShouldPersistTaps="handled"
+      contentContainerStyle={{ paddingBottom: bottomPad + 16 }}
+    >
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Text style={styles.backButtonText}>← Back</Text>
@@ -394,8 +404,6 @@ export default function PackagingScreen({ navigation: navProp }: any) {
           <Text style={styles.completeButtonText}>Complete Packaging</Text>
         </TouchableOpacity>
       )}
-
-      <View style={{ height: 40 }} />
     </ScrollView>
   );
 }
@@ -442,7 +450,8 @@ const styles = StyleSheet.create({
   packageTitle:   { flex: 1, fontSize: 15, fontWeight: 'bold', color: '#1a1a1a' },
   packageQR:      { fontSize: 13, color: '#666', marginBottom: 2 },
   packageItems:   { fontSize: 13, fontWeight: '600', color: '#374151' },
-  completeButton:     { backgroundColor: '#10b981', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, margin: 16, borderRadius: 12, gap: 8 },
+  // completeButton margin bottom intentionally 0 — ScrollView contentContainerStyle handles safe area
+  completeButton:     { backgroundColor: '#10b981', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, margin: 16, marginBottom: 0, borderRadius: 12, gap: 8 },
   completeButtonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
 });
 

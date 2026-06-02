@@ -1,5 +1,6 @@
 // src/screens/DeliveryCollectionScreen.tsx
 // After all packages are scanned, order status → out_for_delivery (not collecting).
+// Fixed: Android safe area — useSafeAreaInsets() replaces hardcoded paddingBottom.
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -12,6 +13,7 @@ import { Package, CheckCircle, ArrowLeft, Truck } from 'lucide-react-native';
 import { useRoute } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import StatusStepper from '../components/StatusStepper';
 import { useAppModal } from '../components/AppModal';
 import { useAuthStore } from '../stores/authStore';
@@ -24,6 +26,7 @@ export default function DeliveryCollectionScreen({ navigation: navProp }: any) {
   const params        = route.params as { orderId: string; claiming?: boolean };
   const { showModal } = useAppModal();
   const { user }      = useAuthStore();
+  const insets        = useSafeAreaInsets();
 
   const [permission, requestPermission] = useCameraPermissions();
   const [scanning, setScanning]         = useState(false);
@@ -34,7 +37,6 @@ export default function DeliveryCollectionScreen({ navigation: navProp }: any) {
 
   useEffect(() => { fetchOrder(); }, [params.orderId]);
 
-  // ── Fetch + optionally assign driver ──────────────────────────────────────
   const fetchOrder = async () => {
     try {
       const token    = await AsyncStorage.getItem('auth_token');
@@ -43,7 +45,6 @@ export default function DeliveryCollectionScreen({ navigation: navProp }: any) {
       });
       const fetched = response.data.order;
 
-      // Claim the delivery if coming from "Take Delivery"
       if (params.claiming && !fetched.assignedDriverId) {
         setAssigning(true);
         await axios.patch(
@@ -59,7 +60,6 @@ export default function DeliveryCollectionScreen({ navigation: navProp }: any) {
         setAssigning(false);
       }
 
-      // Ensure status is 'collecting' while packages are being scanned
       if (fetched.status !== 'collecting') {
         await axios.patch(
           `${API_URL}/api/orders/${params.orderId}`,
@@ -82,7 +82,6 @@ export default function DeliveryCollectionScreen({ navigation: navProp }: any) {
     }
   };
 
-  // ── QR scan ───────────────────────────────────────────────────────────────
   const handleQRScanned = async ({ data }: any) => {
     if (!scanning || !order) return;
     setScanning(false);
@@ -123,7 +122,6 @@ export default function DeliveryCollectionScreen({ navigation: navProp }: any) {
       );
 
       if (newScanned.size === totalPackages) {
-        // All packages collected — move straight to out_for_delivery
         showModal({
           title: 'All Packages Collected!',
           message: `Order ${order.orderNumber} is ready. Start delivery now?`,
@@ -146,7 +144,6 @@ export default function DeliveryCollectionScreen({ navigation: navProp }: any) {
     }
   };
 
-  // ── Start delivery — status → out_for_delivery ─────────────────────────────
   const handleStartDelivery = async () => {
     try {
       const token = await AsyncStorage.getItem('auth_token');
@@ -166,7 +163,6 @@ export default function DeliveryCollectionScreen({ navigation: navProp }: any) {
     }
   };
 
-  // ── Loading / error ───────────────────────────────────────────────────────
   if (loading || assigning) return (
     <View style={styles.centered}>
       <ActivityIndicator size="large" color="#FF6B35" />
@@ -186,8 +182,14 @@ export default function DeliveryCollectionScreen({ navigation: navProp }: any) {
   const totalPackages      = order.packages?.length || 0;
   const collectionComplete = scannedPackages.size === totalPackages && totalPackages > 0;
 
+  // Dynamic bottom padding — respects Android gesture nav bar & iOS home indicator
+  const bottomPad = Math.max(insets.bottom, 16);
+
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={{ paddingBottom: bottomPad + 16 }}
+    >
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.headerBackButton} onPress={() => navigation.goBack()}>
