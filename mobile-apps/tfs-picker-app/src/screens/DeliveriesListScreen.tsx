@@ -1,9 +1,4 @@
 // src/screens/DeliveriesListScreen.tsx
-// - No status pill on cards (confusing purple "Ready for Pickup" removed)
-// - Available tab: "Take Delivery" navigates to collection scan (claim happens there)
-// - My Deliveries tab: button says "Start Delivery", not "Collect"
-// - Address snippet on every card
-
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
@@ -20,7 +15,6 @@ const API_URL = 'https://tfs-wholesalers-ifad.onrender.com';
 
 const DELIVERY_STATUSES = ['collecting', 'ready_for_delivery', 'out_for_delivery'];
 
-// Only used for "My Deliveries" cards — a simple progress label, no pill
 const STATUS_LABELS: Record<string, string> = {
   collecting:         'Collecting packages',
   ready_for_delivery: 'Ready to go',
@@ -111,6 +105,11 @@ export default function DeliveriesListScreen({ navigation }: any) {
   const availableOrders = allOrders.filter(o => !o.assignedDriverId);
   const displayOrders   = activeTab === 'mine' ? myOrders : availableOrders;
 
+  // Orders that are collected and ready but not yet out for delivery
+  const readyToDeliverCount = myOrders.filter(
+    o => o.status === 'collecting' || o.status === 'ready_for_delivery'
+  ).length;
+
   const renderOrder = ({ item }: { item: Order }) => {
     const addressLine  = getAddressSnippet(item);
     const packageCount = item.packages?.length || 0;
@@ -118,7 +117,6 @@ export default function DeliveriesListScreen({ navigation }: any) {
     const statusLabel  = STATUS_LABELS[item.status] || item.status;
 
     const handleStartDelivery = () => {
-      // Always go through collection scan first
       if (item.status === 'collecting' || item.status === 'ready_for_delivery') {
         navigation.navigate('DeliveryCollection', { orderId: item._id });
       } else {
@@ -127,7 +125,6 @@ export default function DeliveriesListScreen({ navigation }: any) {
     };
 
     const handleTakeDelivery = () => {
-      // Navigating to collection screen IS the claim — scan packages to take ownership
       navigation.navigate('DeliveryCollection', { orderId: item._id, claiming: true });
     };
 
@@ -141,10 +138,8 @@ export default function DeliveriesListScreen({ navigation }: any) {
         onPress={isMine ? handleStartDelivery : handleViewDetail}
         activeOpacity={0.75}
       >
-        {/* Header — order number only, no status pill */}
         <View style={styles.cardHeader}>
           <Text style={styles.orderNumber}>{item.orderNumber}</Text>
-          {/* For my deliveries show a subtle text status, not a coloured pill */}
           {isMine && (
             <Text style={styles.myStatusText}>{statusLabel}</Text>
           )}
@@ -192,13 +187,13 @@ export default function DeliveriesListScreen({ navigation }: any) {
           <Text style={styles.total}>R{item.total.toFixed(2)}</Text>
 
           {isMine ? (
-            // My deliveries — "Start Delivery"
             <TouchableOpacity style={styles.actionBtn} onPress={handleStartDelivery}>
               <Truck size={15} color="#fff" />
-              <Text style={styles.actionBtnText}>Start Delivery</Text>
+              <Text style={styles.actionBtnText}>
+                {item.status === 'out_for_delivery' ? 'Continue Delivery' : 'Continue Collection'}
+              </Text>
             </TouchableOpacity>
           ) : (
-            // Available — "View Details" + "Take Delivery"
             <View style={styles.btnGroup}>
               <TouchableOpacity style={styles.viewBtn} onPress={handleViewDetail}>
                 <Ionicons name="eye-outline" size={15} color="#FF6B35" />
@@ -225,9 +220,18 @@ export default function DeliveriesListScreen({ navigation }: any) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <View>
+        <View style={styles.headerLeft}>
           <Text style={styles.headerTitle}>Deliveries</Text>
           <Text style={styles.headerSubtitle}>{activeBranch?.name || ''}</Text>
+          {/* Pooling status — shows when driver has collected orders ready to go */}
+          {readyToDeliverCount > 0 && (
+            <View style={styles.poolBanner}>
+              <Package size={13} color="#92400e" />
+              <Text style={styles.poolBannerText}>
+                {readyToDeliverCount} order{readyToDeliverCount !== 1 ? 's' : ''} collected — pool more or start your run
+              </Text>
+            </View>
+          )}
         </View>
         <View style={styles.liveIndicator}>
           <View style={styles.liveDot} />
@@ -295,11 +299,22 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: '#fff', padding: 20, paddingTop: 60,
     borderBottomWidth: 1, borderBottomColor: '#e5e5e5',
-    flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between',
+    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
   },
+  headerLeft:     { flex: 1, marginRight: 12 },
   headerTitle:    { fontSize: 28, fontWeight: 'bold', color: '#1a1a1a' },
   headerSubtitle: { fontSize: 14, color: '#666', marginTop: 4 },
-  liveIndicator:  { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#fff3e0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginBottom: 4 },
+
+  // Pooling banner — visible when driver has collected orders waiting
+  poolBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginTop: 8, backgroundColor: '#fef3c7',
+    paddingHorizontal: 10, paddingVertical: 6,
+    borderRadius: 8, alignSelf: 'flex-start',
+  },
+  poolBannerText: { fontSize: 12, fontWeight: '600', color: '#92400e', flexShrink: 1 },
+
+  liveIndicator:  { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#fff3e0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginTop: 4 },
   liveDot:        { width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444' },
   liveText:       { fontSize: 12, fontWeight: '800', color: '#FF6B35' },
 
@@ -320,7 +335,6 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#e5e7eb',
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 6, elevation: 2,
   },
-  // My deliveries get a subtle green left border accent
   cardMine: { borderLeftWidth: 4, borderLeftColor: '#10b981' },
 
   cardHeader:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },

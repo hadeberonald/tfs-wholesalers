@@ -1,7 +1,4 @@
 // src/screens/DeliveryCollectionScreen.tsx
-// After all packages are scanned, order status → out_for_delivery (not collecting).
-// Fixed: Android safe area — useSafeAreaInsets() replaces hardcoded paddingBottom.
-
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
@@ -122,12 +119,20 @@ export default function DeliveryCollectionScreen({ navigation: navProp }: any) {
       );
 
       if (newScanned.size === totalPackages) {
+        // Pooling is PRIMARY — go back to list to collect more or start delivery
         showModal({
           title: 'All Packages Collected!',
-          message: `Order ${order.orderNumber} is ready. Start delivery now?`,
+          message: `Order ${order.orderNumber} is ready. Pool more orders or start your run.`,
           buttons: [
-            { text: 'Start Delivery', onPress: () => handleStartDelivery() },
-            { text: 'Collect More Orders', style: 'cancel', onPress: () => navigation.goBack() },
+            {
+              text: 'Collect More Orders',
+              onPress: () => navigation.goBack(),
+            },
+            {
+              text: 'Start Delivery Now',
+              style: 'cancel',
+              onPress: () => handleStartDelivery(),
+            },
           ],
         });
       } else {
@@ -150,8 +155,8 @@ export default function DeliveryCollectionScreen({ navigation: navProp }: any) {
       await axios.patch(
         `${API_URL}/api/orders/${order._id}`,
         {
-          status:             'out_for_delivery',
-          deliveryStartedAt:  new Date().toISOString(),
+          status:            'out_for_delivery',
+          deliveryStartedAt: new Date().toISOString(),
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -181,9 +186,7 @@ export default function DeliveryCollectionScreen({ navigation: navProp }: any) {
 
   const totalPackages      = order.packages?.length || 0;
   const collectionComplete = scannedPackages.size === totalPackages && totalPackages > 0;
-
-  // Dynamic bottom padding — respects Android gesture nav bar & iOS home indicator
-  const bottomPad = Math.max(insets.bottom, 16);
+  const bottomPad          = Math.max(insets.bottom, 16);
 
   return (
     <ScrollView
@@ -278,13 +281,14 @@ export default function DeliveryCollectionScreen({ navigation: navProp }: any) {
 
         {collectionComplete && (
           <>
+            {/* Collect more is PRIMARY */}
+            <TouchableOpacity style={styles.collectMoreButton} onPress={() => navigation.goBack()}>
+              <Package size={24} color="#FF6B35" />
+              <Text style={styles.collectMoreButtonText}>Collect More Orders</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={styles.deliveryButton} onPress={handleStartDelivery}>
               <Truck size={24} color="#fff" />
-              <Text style={styles.deliveryButtonText}>Start Delivery</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.continueButton} onPress={() => navigation.goBack()}>
-              <Package size={24} color="#FF6B35" />
-              <Text style={styles.continueButtonText}>Collect More Orders</Text>
+              <Text style={styles.deliveryButtonText}>Start Delivery Now</Text>
             </TouchableOpacity>
           </>
         )}
@@ -337,13 +341,15 @@ const styles = StyleSheet.create({
   scannerText:      { marginTop: 20, color: '#fff', fontSize: 18, fontWeight: '600' },
   cancelScanButton: { marginTop: 30, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8 },
   cancelScanText:   { color: '#fff', fontSize: 16, fontWeight: '600' },
-  actions:            { padding: 16, gap: 12 },
-  scanButton:         { backgroundColor: '#F59E0B', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, borderRadius: 12, gap: 8 },
-  scanButtonText:     { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  actions:              { padding: 16, gap: 12 },
+  scanButton:           { backgroundColor: '#F59E0B', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, borderRadius: 12, gap: 8 },
+  scanButtonText:       { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  // Primary: collect more
+  collectMoreButton:     { backgroundColor: '#fff', borderWidth: 2, borderColor: '#FF6B35', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, borderRadius: 12, gap: 8 },
+  collectMoreButtonText: { color: '#FF6B35', fontSize: 18, fontWeight: 'bold' },
+  // Secondary: start delivery
   deliveryButton:     { backgroundColor: '#10B981', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, borderRadius: 12, gap: 8 },
   deliveryButtonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  continueButton:     { backgroundColor: '#fff', borderWidth: 2, borderColor: '#FF6B35', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, borderRadius: 12, gap: 8 },
-  continueButtonText: { color: '#FF6B35', fontSize: 18, fontWeight: 'bold' },
   customerCard:  { backgroundColor: '#f8f8f8', padding: 16, borderRadius: 12 },
   customerName:  { fontSize: 18, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 4 },
   customerPhone: { fontSize: 14, color: '#666', marginBottom: 8 },
