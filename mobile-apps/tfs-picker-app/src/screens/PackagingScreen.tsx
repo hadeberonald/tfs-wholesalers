@@ -1,7 +1,4 @@
 // src/screens/PackagingScreen.tsx
-// All Alert.alert calls replaced with useAppModal() to prevent iOS stacking alerts.
-// Fixed: Android safe area — useSafeAreaInsets() replaces hardcoded paddingBottom.
-
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
@@ -19,6 +16,7 @@ import axios from 'axios';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import StatusStepper from '../components/StatusStepper';
 import { useAppModal } from '../components/AppModal';
+import { logHandlingEvent } from '../lib/handlingLog';
 
 const API_URL = 'https://tfs-wholesalers-ifad.onrender.com';
 
@@ -198,8 +196,15 @@ export default function PackagingScreen({ navigation: navProp }: any) {
       setPackages(prev => [...prev, newPackage]);
       setCurrentPackageItems(new Set());
 
+      // Accountability log — package sealed
+      logHandlingEvent(orderId!, {
+        eventType:  'package_sealed',
+        packageQr:  data,
+        packageNum: packageNum,
+      }, token);
+
       showModal({
-        title: '✓ Package Created',
+        title:   '✓ Package Created',
         message: `Package ${packageNum} of ${total} sealed.`,
         buttons: [{ text: 'OK' }],
       });
@@ -223,7 +228,7 @@ export default function PackagingScreen({ navigation: navProp }: any) {
       );
       await completeOrder(orderId!);
       showModal({
-        title: 'Order Packaged! 📦',
+        title:   'Order Packaged! 📦',
         message: 'Ready for driver collection.',
         buttons: [{ text: 'OK', onPress: () => navigation.navigate('Main', { screen: 'Orders' }) }],
       });
@@ -268,7 +273,6 @@ export default function PackagingScreen({ navigation: navProp }: any) {
   const comboCount   = order.items.filter((i: OrderItem) => i.isComboItem).length;
   const specialCount = order.items.filter((i: OrderItem) => i.specialType && !i.isComboItem && !i.isBonusItem).length;
 
-  // Dynamic bottom padding — respects Android gesture nav bar & iOS home indicator
   const bottomPad = Math.max(insets.bottom, 16);
 
   return (
@@ -450,7 +454,6 @@ const styles = StyleSheet.create({
   packageTitle:   { flex: 1, fontSize: 15, fontWeight: 'bold', color: '#1a1a1a' },
   packageQR:      { fontSize: 13, color: '#666', marginBottom: 2 },
   packageItems:   { fontSize: 13, fontWeight: '600', color: '#374151' },
-  // completeButton margin bottom intentionally 0 — ScrollView contentContainerStyle handles safe area
   completeButton:     { backgroundColor: '#10b981', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, margin: 16, marginBottom: 0, borderRadius: 12, gap: 8 },
   completeButtonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
 });

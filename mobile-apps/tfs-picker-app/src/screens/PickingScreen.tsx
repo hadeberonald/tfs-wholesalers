@@ -1,9 +1,4 @@
 // src/screens/PickingScreen.tsx
-// Fixed: patches assignedPickerId + assignedPickerName when starting picking
-// so OrdersListScreen can show who is picking and offer "Return to Pick".
-// Fixed: if ALL items are OOS, cancels the order instead of advancing to Packaging.
-// Fixed: Android safe area — useSafeAreaInsets() replaces hardcoded paddingBottom.
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
@@ -20,6 +15,7 @@ import { useAuthStore } from '../stores/authStore';
 import BarcodeScanner from '../components/BarcodeScanner';
 import StatusStepper from '../components/StatusStepper';
 import { useAppModal } from '../components/AppModal';
+import { logHandlingEvent } from '../lib/handlingLog';
 
 const API_URL = 'https://tfs-wholesalers-ifad.onrender.com';
 
@@ -272,8 +268,21 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
   const incrementPick = useCallback(async (key: string, item: OrderItem) => {
     setPickCounts(prev => ({ ...prev, [key]: (prev[key] ?? 0) + 1 }));
     try {
-      await axios.post(`${API_URL}/api/orders/${orderId}/scan-item`, { sku: item.sku, productId: item.productId, scanKey: key }, { headers: { Authorization: `Bearer ${token}` } });
-    } catch (err) { console.warn('[PickingScreen] scan-item failed (non-fatal):', err); }
+      await axios.post(
+        `${API_URL}/api/orders/${orderId}/scan-item`,
+        { sku: item.sku, productId: item.productId, scanKey: key },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch (err) {
+      console.warn('[PickingScreen] scan-item failed (non-fatal):', err);
+    }
+    // Accountability log — manual pick
+    logHandlingEvent(orderId, {
+      eventType: 'item_picked_manual',
+      itemSku:   item.sku,
+      itemName:  item.name,
+      scanKey:   key,
+    }, token);
   }, [orderId, token]);
 
   const handleBarcodeScanned = useCallback(async (scannedBarcode: string) => {
@@ -293,9 +302,29 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
       const newCount = (prev[bestKey] ?? 0) + 1;
       const isDone   = newCount >= bestItem.quantity;
       setTimeout(async () => {
-        try { await axios.post(`${API_URL}/api/orders/${orderId}/scan-item`, { sku: bestItem.sku, productId: bestItem.productId, scanKey: bestKey }, { headers: { Authorization: `Bearer ${token}` } }); }
-        catch (err) { console.warn('[PickingScreen] scan-item failed (non-fatal):', err); }
-        if (isDone) { showModal({ title: '✓ Item Picked', message: `${bestItem.name}${bestItem.variantName ? ` - ${bestItem.variantName}` : ''} — all ${bestItem.quantity} unit${bestItem.quantity !== 1 ? 's' : ''} picked!`, buttons: [{ text: 'OK' }] }); }
+        try {
+          await axios.post(
+            `${API_URL}/api/orders/${orderId}/scan-item`,
+            { sku: bestItem.sku, productId: bestItem.productId, scanKey: bestKey },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+        } catch (err) {
+          console.warn('[PickingScreen] scan-item failed (non-fatal):', err);
+        }
+        // Accountability log — barcode scan
+        logHandlingEvent(orderId, {
+          eventType: 'item_picked_barcode',
+          itemSku:   bestItem.sku,
+          itemName:  bestItem.name,
+          scanKey:   bestKey,
+        }, token);
+        if (isDone) {
+          showModal({
+            title:   '✓ Item Picked',
+            message: `${bestItem.name}${bestItem.variantName ? ` - ${bestItem.variantName}` : ''} — all ${bestItem.quantity} unit${bestItem.quantity !== 1 ? 's' : ''} picked!`,
+            buttons: [{ text: 'OK' }],
+          });
+        }
       }, 0);
       return { ...prev, [bestKey]: newCount };
     });
@@ -321,7 +350,10 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
     showModal({
       title: 'Confirm Pick (+1)',
       message: `${item.name}${item.variantName ? ` - ${item.variantName}` : ''}\nSKU: ${item.sku}\n\nPicked so far: ${current} / ${item.quantity} (${remaining} remaining)${extraInfo}`,
-      buttons: [{ text: 'Cancel', style: 'cancel' }, { text: 'Confirm +1', onPress: () => incrementPick(scanKey, item) }],
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Confirm +1', onPress: () => incrementPick(scanKey, item) },
+      ],
     });
   }, [pickCounts, incrementPick, showModal]);
 
@@ -331,14 +363,32 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
     showModal({
       title: '⚠ Item Out of Stock?',
       message: `Are you sure "${item.name}${item.variantName ? ` - ${item.variantName}` : ''}" is out of stock?\n\n${refundLine}\n\nA stock-count record will be created for admin verification.`,
-      buttons: [{ text: 'Cancel', style: 'cancel' }, { text: 'Yes, Out of Stock', style: 'destructive', onPress: () => confirmOOS(item, scanKey, refundAmount) }],
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Yes, Out of Stock', style: 'destructive', onPress: () => confirmOOS(item, scanKey, refundAmount) },
+      ],
     });
   }, [showModal]);
 
   const confirmOOS = useCallback(async (item: OrderItem, scanKey: string, refundAmount: number | null) => {
     setOos(prev => new Set([...prev, scanKey]));
-    try { await axios.post(`${API_URL}/api/orders/${orderId}/item-oos`, { sku: item.sku, productId: item.productId, variantId: item.variantId, scanKey, refundAmount, itemName: item.name }, { headers: { Authorization: `Bearer ${token}` } }); }
-    catch (err) { console.warn('[PickingScreen] item-oos failed (non-fatal):', err); }
+    try {
+      await axios.post(
+        `${API_URL}/api/orders/${orderId}/item-oos`,
+        { sku: item.sku, productId: item.productId, variantId: item.variantId, scanKey, refundAmount, itemName: item.name },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch (err) {
+      console.warn('[PickingScreen] item-oos failed (non-fatal):', err);
+    }
+    // Accountability log — OOS
+    logHandlingEvent(orderId, {
+      eventType: 'item_oos',
+      itemSku:   item.sku,
+      itemName:  item.name,
+      scanKey,
+      meta:      { refundAmount },
+    }, token);
   }, [orderId, token]);
 
   const getItem = (k: string) => { let gi = 0; for (const grp of groups) { for (const it of grp.items) { if (allScanKeys[gi] === k) return it; gi++; } } return null; };
@@ -361,11 +411,7 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
       });
     } catch (err: any) {
       console.error('Cancel order failed:', err.response?.data || err.message);
-      showModal({
-        title: 'Error',
-        message: 'Failed to cancel the order. Please try again.',
-        buttons: [{ text: 'OK' }],
-      });
+      showModal({ title: 'Error', message: 'Failed to cancel the order. Please try again.', buttons: [{ text: 'OK' }] });
     }
   }, [orderId, token, navigation, showModal]);
 
@@ -398,8 +444,15 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
   }, [order, allScanKeys, groups, pickCounts, oos, showModal, cancelOrder]);
 
   const advanceToPackaging = useCallback(async () => {
-    try { await axios.patch(`${API_URL}/api/orders/${orderId}`, { status: 'packaging', packagingStartedAt: new Date().toISOString() }, { headers: { Authorization: `Bearer ${token}` } }); }
-    catch (err: any) { console.error('Status update failed:', err.response?.data || err.message); }
+    try {
+      await axios.patch(
+        `${API_URL}/api/orders/${orderId}`,
+        { status: 'packaging', packagingStartedAt: new Date().toISOString() },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch (err: any) {
+      console.error('Status update failed:', err.response?.data || err.message);
+    }
     navigation.navigate('Packaging', { orderId, orderNumber: order ? order.orderNumber : '' });
   }, [orderId, token, order, navigation]);
 
@@ -409,17 +462,15 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
   const resolvedSlots = allScanKeys.filter(k => { if (oos.has(k)) return true; const item = getItem(k); return item ? (pickCounts[k] ?? 0) >= item.quantity : false; }).length;
   const progress = totalUnits > 0 ? pickedUnits / totalUnits : 0;
   const allDone  = resolvedSlots === allScanKeys.length;
-
   const allOOSResolved = allScanKeys.length > 0 && allScanKeys.every(k => oos.has(k));
 
   const groupScanKeys: string[][] = [];
   { let gi = 0; for (const grp of groups) { const keys: string[] = []; for (let i = 0; i < grp.items.length; i++) { keys.push(allScanKeys[gi]); gi++; } groupScanKeys.push(keys); } }
 
+  const footerBottomPad = Math.max(insets.bottom, 16);
+
   if (loading) return <View style={styles.centered}><ActivityIndicator size="large" color="#FF6B35" /><Text style={styles.loadingText}>Loading order...</Text></View>;
   if (!order)  return <View style={styles.centered}><Ionicons name="alert-circle-outline" size={64} color="#999" /><Text style={styles.errorText}>Order not found</Text><TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}><Text style={styles.backBtnText}>← Go Back</Text></TouchableOpacity></View>;
-
-  // Dynamic footer padding — respects Android gesture nav bar & iOS home indicator
-  const footerBottomPad = Math.max(insets.bottom, 16);
 
   return (
     <View style={styles.container}>
@@ -499,11 +550,7 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
 
       <View style={[styles.footer, { paddingBottom: footerBottomPad }]}>
         <TouchableOpacity
-          style={[
-            styles.completeBtn,
-            !allDone && styles.completeBtnDisabled,
-            allOOSResolved && styles.completeBtnCancel,
-          ]}
+          style={[styles.completeBtn, !allDone && styles.completeBtnDisabled, allOOSResolved && styles.completeBtnCancel]}
           onPress={handleComplete}
           disabled={!allDone}
         >
@@ -569,7 +616,6 @@ const styles = StyleSheet.create({
   refundBannerTextAllOOS: { color: '#fff' },
   savingsCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#fffbeb', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#fde68a', marginTop: 8 },
   savingsText: { flex: 1, fontSize: 13, color: '#92400e', lineHeight: 18 },
-  // Footer: no hardcoded paddingBottom — applied dynamically via insets
   footer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', paddingTop: 16, paddingHorizontal: 16, borderTopWidth: 1, borderTopColor: '#e5e7eb' },
   completeBtn: { backgroundColor: '#FF6B35', borderRadius: 14, height: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, shadowColor: '#FF6B35', shadowOpacity: 0.4, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 5 },
   completeBtnDisabled: { backgroundColor: '#9ca3af', shadowOpacity: 0 },

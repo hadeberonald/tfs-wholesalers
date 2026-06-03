@@ -1,9 +1,7 @@
-// lib/verify-mobile-token.ts
 import jwt from 'jsonwebtoken';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 
-// SECURITY: Consolidated to single env var. No fallback to empty string.
 const JWT_SECRET = process.env.NEXTAUTH_SECRET;
 if (!JWT_SECRET) throw new Error('[SECURITY] NEXTAUTH_SECRET environment variable is not set. Refusing to start.');
 
@@ -11,6 +9,7 @@ export interface MobileUser {
   id:              string;
   email:           string;
   role:            string;
+  name?:           string;
   activeBranchId?: string;
 }
 
@@ -32,15 +31,16 @@ export async function verifyMobileToken(token: string): Promise<MobileUser | nul
 
     const user = await db.collection('users').findOne(
       { _id: new ObjectId(decoded.id) },
-      { projection: { role: 1, email: 1, activeBranchId: 1 } }
+      { projection: { role: 1, email: 1, name: 1, activeBranchId: 1 } }
     );
 
     if (!user) return null;
 
     return {
       id:             decoded.id,
-      email:          user.email           || decoded.email,
-      role:           user.role            || decoded.role,
+      email:          user.email            || decoded.email,
+      role:           user.role             || decoded.role,
+      name:           user.name             || decoded.name  || undefined,
       activeBranchId: user.activeBranchId?.toString() || decoded.activeBranchId || undefined,
     };
   } catch {

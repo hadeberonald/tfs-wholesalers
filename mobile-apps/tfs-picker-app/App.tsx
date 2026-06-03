@@ -24,6 +24,7 @@ import {
   addNotificationListeners,
   registerForPushNotifications,
 } from './src/services/NotificationService';
+import { attachSyncListeners, flushQueue } from './src/services/offlineSync';
 
 import { AppModalProvider } from './src/components/AppModal';
 
@@ -140,16 +141,21 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     registerForPushNotifications().catch(() => {});
-    const cleanup = addNotificationListeners();
-    return cleanup;
+    const cleanupNotifications = addNotificationListeners();
+
+    // Attach offline sync listeners — NetInfo + AppState watchers.
+    // Also flush any queued actions that built up while the user was logged out.
+    const cleanupSync = attachSyncListeners();
+    flushQueue().catch(() => {});
+
+    return () => {
+      cleanupNotifications();
+      cleanupSync();
+    };
   }, [user]);
 
   return (
-    // SafeAreaProvider must be the outermost wrapper so that
-    // useSafeAreaInsets() works correctly on every screen, including Android.
     <SafeAreaProvider>
-      {/* AppModalProvider must wrap NavigationContainer so that screens
-          nested anywhere in the tree can call useAppModal() */}
       <AppModalProvider>
         <NavigationContainer ref={navigationRef}>
           <Stack.Navigator screenOptions={{ headerShown: false }}>

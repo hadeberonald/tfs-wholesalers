@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Search, Filter, Eye, Package, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import OrderHandlingLog from '@/components/admin/OrderHandlingLog';
 
 interface Order {
   _id: string;
@@ -69,40 +70,41 @@ export default function AdminOrdersPage() {
 
   const filteredOrders = orders
     .filter(order => {
-      const matchesSearch = 
+      const matchesSearch =
         order.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
         order.customerInfo.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         order.customerInfo.email.toLowerCase().includes(searchTerm.toLowerCase());
-      
+
       const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
-      
+
       return matchesSearch && matchesStatus;
     })
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'pending': return 'bg-yellow-100 text-yellow-800';
+      case 'pending':    return 'bg-yellow-100 text-yellow-800';
       case 'processing': return 'bg-blue-100 text-blue-800';
-      case 'shipped': return 'bg-purple-100 text-purple-800';
-      case 'delivered': return 'bg-green-100 text-green-800';
-      case 'cancelled': return 'bg-red-100 text-red-800';
-      default: return 'bg-gray-100 text-gray-800';
+      case 'shipped':    return 'bg-purple-100 text-purple-800';
+      case 'delivered':  return 'bg-green-100 text-green-800';
+      case 'cancelled':  return 'bg-red-100 text-red-800';
+      default:           return 'bg-gray-100 text-gray-800';
     }
   };
 
   const getPaymentStatusColor = (status: string) => {
     switch (status) {
-      case 'paid': return 'bg-green-100 text-green-800';
+      case 'paid':    return 'bg-green-100 text-green-800';
       case 'pending': return 'bg-yellow-100 text-yellow-800';
-      case 'failed': return 'bg-red-100 text-red-800';
-      default: return 'bg-gray-100 text-gray-800';
+      case 'failed':  return 'bg-red-100 text-red-800';
+      default:        return 'bg-gray-100 text-gray-800';
     }
   };
 
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 py-8">
+
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-brand-black mb-2">Orders</h1>
@@ -112,10 +114,10 @@ export default function AdminOrdersPage() {
         {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           {[
-            { label: 'Total Orders', value: orders.length, color: 'bg-blue-500' },
-            { label: 'Pending', value: orders.filter(o => o.status === 'pending').length, color: 'bg-yellow-500' },
-            { label: 'Processing', value: orders.filter(o => o.status === 'processing').length, color: 'bg-purple-500' },
-            { label: 'Delivered', value: orders.filter(o => o.status === 'delivered').length, color: 'bg-green-500' },
+            { label: 'Total Orders', value: orders.length,                                         color: 'bg-blue-500'   },
+            { label: 'Pending',      value: orders.filter(o => o.status === 'pending').length,     color: 'bg-yellow-500' },
+            { label: 'Processing',   value: orders.filter(o => o.status === 'processing').length,  color: 'bg-purple-500' },
+            { label: 'Delivered',    value: orders.filter(o => o.status === 'delivered').length,   color: 'bg-green-500'  },
           ].map((stat, index) => (
             <div key={index} className="bg-white rounded-2xl p-6 shadow-sm">
               <div className={`w-12 h-12 ${stat.color} rounded-xl flex items-center justify-center mb-4`}>
@@ -140,7 +142,6 @@ export default function AdminOrdersPage() {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-
             <div className="relative">
               <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <select
@@ -170,8 +171,8 @@ export default function AdminOrdersPage() {
             <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
             <h3 className="text-xl font-semibold text-gray-900 mb-2">No orders found</h3>
             <p className="text-gray-600">
-              {searchTerm || statusFilter !== 'all' 
-                ? 'Try adjusting your search or filters' 
+              {searchTerm || statusFilter !== 'all'
+                ? 'Try adjusting your search or filters'
                 : 'Orders will appear here once customers place them'}
             </p>
           </div>
@@ -230,7 +231,7 @@ export default function AdminOrdersPage() {
                       <td className="px-6 py-4 text-sm text-gray-600">
                         {new Date(order.createdAt).toLocaleDateString()}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-4 text-right">
                         <button
                           onClick={() => {
                             setSelectedOrder(order);
@@ -253,12 +254,14 @@ export default function AdminOrdersPage() {
         {showModal && selectedOrder && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
             <div className="bg-white rounded-2xl max-w-3xl w-full my-8 max-h-[90vh] overflow-y-auto">
-              <div className="p-6 border-b sticky top-0 bg-white">
+
+              {/* Modal Header */}
+              <div className="p-6 border-b sticky top-0 bg-white z-10">
                 <div className="flex items-center justify-between">
                   <h2 className="text-2xl font-bold text-brand-black">Order Details</h2>
                   <button
                     onClick={() => setShowModal(false)}
-                    className="p-2 hover:bg-gray-100 rounded-lg"
+                    className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-700"
                   >
                     ×
                   </button>
@@ -266,6 +269,7 @@ export default function AdminOrdersPage() {
               </div>
 
               <div className="p-6 space-y-6">
+
                 {/* Order Info */}
                 <div>
                   <h3 className="font-semibold text-brand-black mb-3">Order Information</h3>
@@ -329,10 +333,17 @@ export default function AdminOrdersPage() {
                     <span className="text-brand-orange">R{selectedOrder.total.toFixed(2)}</span>
                   </div>
                 </div>
+
+                {/* ── Accountability Log ── */}
+                <div className="border-t pt-2">
+                  <OrderHandlingLog orderId={selectedOrder._id} />
+                </div>
+
               </div>
             </div>
           </div>
         )}
+
       </div>
     </div>
   );
