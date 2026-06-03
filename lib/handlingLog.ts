@@ -1,8 +1,6 @@
-// src/lib/handlingLog.ts
+// lib/handlingLog.ts
 // Thin client utility used by PickingScreen, PackagingScreen, DeliveryCollectionScreen,
 // and DeliveryDetailScreen to post accountability events without touching the order API.
-
-import axios from 'axios';
 
 const API_URL = 'https://tfs-wholesalers-ifad.onrender.com';
 
@@ -32,14 +30,17 @@ export interface LogEventPayload {
 export async function logHandlingEvent(
   orderId: string,
   payload: LogEventPayload,
-  token: string | null
+  token: string | null,
 ): Promise<void> {
   try {
-    await axios.post(
-      `${API_URL}/api/orders/${orderId}/handling-log`,
-      payload,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
+    await fetch(`${API_URL}/api/orders/${orderId}/handling-log`, {
+      method:  'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
   } catch (err) {
     // Non-fatal — accountability log failure should never disrupt the picker/driver flow
     console.warn('[handlingLog] event post failed (non-fatal):', err);
