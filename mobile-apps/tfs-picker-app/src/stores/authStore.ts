@@ -1,11 +1,4 @@
 // src/stores/authStore.ts
-// Multibranch-aware auth store for the TFS Picker App.
-// Changes from original:
-//   - Added Branch type + activeBranch state
-//   - login() no longer auto-selects a branch
-//   - setActiveBranch() persists to AsyncStorage
-//   - expoPushToken stored here so notifications can be registered after login
-//   - loadUser() restores branch too
 
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -32,8 +25,6 @@ interface User {
   name: string;
   email: string;
   role: string;
-  // roles the user is allowed to see in this app
-  // picker | delivery | admin — all allowed, others rejected
 }
 
 interface AuthState {
@@ -42,6 +33,10 @@ interface AuthState {
   activeBranch: Branch | null;
   expoPushToken: string | null;
   loading: boolean;
+  // True once loadUser() has finished reading AsyncStorage.
+  // App.tsx gates the navigator behind this so we never render with stale
+  // (null) activeBranch when a branch was already persisted.
+  appReady: boolean;
 
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -51,7 +46,6 @@ interface AuthState {
   setExpoPushToken: (token: string) => void;
 }
 
-// Roles that are allowed to use this picker/delivery app
 const ALLOWED_ROLES = ['picker', 'delivery', 'admin'];
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -61,6 +55,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   activeBranch: null,
   expoPushToken: null,
   loading: false,
+  appReady: false,   // ← gates the navigator in App.tsx
 
   // ── Login ──────────────────────────────────────────────────────────────────
   login: async (email: string, password: string) => {
@@ -77,15 +72,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (!user)  throw new Error('No user data received from server');
 
       if (!ALLOWED_ROLES.includes(user.role)) {
-        throw new Error(
-          'Access denied. This app is for pickers and delivery staff only.'
-        );
+        throw new Error('Access denied. This app is for pickers and delivery staff only.');
       }
 
       await AsyncStorage.setItem('auth_token', token);
       await AsyncStorage.setItem('user', JSON.stringify(user));
 
-      // Register push token with server if we already have one
       const pushToken = get().expoPushToken;
       if (pushToken) {
         try {
@@ -95,7 +87,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             { headers: { Authorization: `Bearer ${token}` } }
           );
         } catch {
-          // Non-fatal — push token registration can be retried later
+          // non-fatal
         }
       }
 
@@ -117,28 +109,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ user: null, token: null, activeBranch: null });
   },
 
-  // ── Restore session on app start ───────────────────────────────────────────
+  // ── Restore session ────────────────────────────────────────────────────────
+  // Sets appReady=true when done so App.tsx can show the navigator.
   loadUser: async () => {
     try {
-      const [token, userStr, branchStr] = await AsyncStorage.multiGet([
+      const [tokenEntry, userEntry, branchEntry] = await AsyncStorage.multiGet([
         'auth_token',
         'user',
         'active_branch',
       ]);
 
-      const tokenVal  = token[1];
-      const userVal   = userStr[1];
-      const branchVal = branchStr[1];
+      const tokenVal  = tokenEntry[1];
+      const userVal   = userEntry[1];
+      const branchVal = branchEntry[1];
 
       if (tokenVal && userVal) {
         set({
-          token: tokenVal,
-          user: JSON.parse(userVal),
+          token:        tokenVal,
+          user:         JSON.parse(userVal),
           activeBranch: branchVal ? JSON.parse(branchVal) : null,
         });
       }
     } catch (error) {
       console.error('Failed to load user from storage:', error);
+    } finally {
+      // Always mark ready — even on error we need to unblock the navigator.
+      set({ appReady: true });
     }
   },
 
@@ -146,8 +142,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setActiveBranch: async (branch: Branch) => {
     await AsyncStorage.setItem('active_branch', JSON.stringify(branch));
 
-    // Tell the server which branch this picker is working at (so the server
-    // can scope order queries and push notifications correctly)
     const token = get().token;
     if (token) {
       try {
@@ -157,7 +151,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           { headers: { Authorization: `Bearer ${token}` } }
         );
       } catch {
-        // Non-fatal
+        // non-fatal
       }
     }
 
@@ -169,11 +163,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ activeBranch: null });
   },
 
-  // ── Push token (called by NotificationService after registration) ──────────
+  // ── Push token ─────────────────────────────────────────────────────────────
   setExpoPushToken: (token: string) => {
     set({ expoPushToken: token });
 
-    // If already logged in, register the token with the server now
     const authToken = useAuthStore.getState().token;
     if (authToken) {
       axios
@@ -182,9 +175,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           { token },
           { headers: { Authorization: `Bearer ${authToken}` } }
         )
-        .catch(() => {
-          // Non-fatal
-        });
+        .catch(() => {});
     }
   },
 }));

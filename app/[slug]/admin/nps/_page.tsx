@@ -201,7 +201,7 @@ export default function NPSResultsPage() {
               <Link href={`/${slug}/admin`} className="inline-flex items-center gap-1 text-sm text-gray-400 hover:text-gray-600 mb-2">
                 <ArrowLeft className="w-3.5 h-3.5" /> Dashboard
               </Link>
-              <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-1">Customer Feedback</h1>
+              <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-1">TFS Vryheid — Customer Satisfaction</h1>
               <p className="text-gray-500">In-store survey results & analytics</p>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
@@ -232,8 +232,8 @@ export default function NPSResultsPage() {
           <div className="hidden print:block mb-8 border-b pb-4">
             <div className="flex items-center justify-between">
               <div>
-                <h1 className="text-2xl font-black text-gray-900">Daily NPS & Customer Feedback Report</h1>
-                <p className="text-gray-500 text-sm">{today} · {PERIOD_OPTIONS.find(o => o.value === period)?.label}</p>
+                <h1 className="text-2xl font-black text-gray-900">TFS Vryheid — Daily Customer Satisfaction Report</h1>
+                <p className="text-gray-500 text-sm italic">We Put U First! &nbsp;·&nbsp; {today} · {PERIOD_OPTIONS.find(o => o.value === period)?.label}</p>
               </div>
               <div className="text-right">
                 <p className="font-black text-3xl text-gray-900">{stats.npsScore > 0 ? '+' : ''}{stats.npsScore}</p>
@@ -263,7 +263,7 @@ export default function NPSResultsPage() {
               {/* Top stats */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                 <div className={`col-span-2 lg:col-span-1 bg-gradient-to-br ${bg} rounded-2xl p-6 text-white shadow-lg`}>
-                  <p className="text-white/80 text-sm font-medium mb-1">NPS Score</p>
+                  <p className="text-white/80 text-sm font-medium mb-1">Recommendation Score</p>
                   <p className="text-6xl font-black leading-none mb-2">{stats.npsScore > 0 ? '+' : ''}{stats.npsScore}</p>
                   <div className="flex items-center gap-1 text-white/80 text-sm">
                     {stats.trend > 0 ? <TrendingUp className="w-4 h-4" /> : stats.trend < 0 ? <TrendingDown className="w-4 h-4" /> : <Minus className="w-4 h-4" />}
@@ -275,7 +275,7 @@ export default function NPSResultsPage() {
                 </div>
                 {[
                   { label: 'Responses', value: stats.totalResponses, sub: 'total collected', icon: <Users className="w-4 h-4 text-gray-600" />, bg: 'bg-gray-100' },
-                  { label: 'Avg Score', value: stats.averageScore.toFixed(1), sub: 'out of 10', icon: <Star className="w-4 h-4 text-yellow-600" />, bg: 'bg-yellow-100' },
+                  { label: 'Avg Score', value: stats.averageScore.toFixed(1), sub: 'out of 5', icon: <Star className="w-4 h-4 text-yellow-600" />, bg: 'bg-yellow-100' },
                   { label: 'Comments', value: stats.improvements.length + stats.productSuggestions.length, sub: 'written entries', icon: <MessageSquare className="w-4 h-4 text-blue-600" />, bg: 'bg-blue-100' },
                 ].map(({ label, value, sub, icon, bg: ibg }) => (
                   <div key={label} className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
@@ -292,12 +292,12 @@ export default function NPSResultsPage() {
               {/* Promoter breakdown + score distribution */}
               <div className="grid lg:grid-cols-2 gap-6 mb-8">
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-                  <h2 className="text-lg font-bold text-gray-900 mb-5">Likelihood to Recommend</h2>
+                  <h2 className="text-lg font-bold text-gray-900 mb-5">Likelihood to Recommend TFS Vryheid</h2>
                   <div className="space-y-4">
                     {[
-                      { label: 'Promoters',   sub: 'Extremely / Very Likely', count: stats.promoters,  color: 'bg-green-500', li: 'bg-green-50',  tx: 'text-green-700',  icon: <ThumbsUp className="w-4 h-4" /> },
-                      { label: 'Passives',    sub: 'Likely',                  count: stats.passives,   color: 'bg-yellow-400',li: 'bg-yellow-50', tx: 'text-yellow-700', icon: <Minus className="w-4 h-4" /> },
-                      { label: 'Detractors', sub: 'Unlikely / Very Unlikely', count: stats.detractors, color: 'bg-red-500',   li: 'bg-red-50',    tx: 'text-red-700',    icon: <ThumbsDown className="w-4 h-4" /> },
+                      { label: 'Promoters',  sub: 'Rated 4–5 (Extremely / Very Likely)', count: stats.promoters,  color: 'bg-green-500',  li: 'bg-green-50',  tx: 'text-green-700',  icon: <ThumbsUp className="w-4 h-4" /> },
+                      { label: 'Passives',   sub: 'Rated 3 (Likely)',                     count: stats.passives,   color: 'bg-yellow-400', li: 'bg-yellow-50', tx: 'text-yellow-700', icon: <Minus className="w-4 h-4" /> },
+                      { label: 'Detractors', sub: 'Rated 1–2 (Unlikely)',                 count: stats.detractors, color: 'bg-red-500',    li: 'bg-red-50',    tx: 'text-red-700',    icon: <ThumbsDown className="w-4 h-4" /> },
                     ].map(({ label, sub, count, color, li, tx, icon }) => {
                       const p = pct(count, n);
                       return (
@@ -323,17 +323,18 @@ export default function NPSResultsPage() {
 
                 {/* Score distribution */}
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-                  <h2 className="text-lg font-bold text-gray-900 mb-5">Score Distribution</h2>
+                  <h2 className="text-lg font-bold text-gray-900 mb-5">Rating Distribution (1–5)</h2>
                   <div className="flex items-end justify-between gap-1 h-36">
-                    {Array.from({ length: 11 }, (_, i) => {
-                      const count  = stats.scoreDistribution.find(d => d.score === i)?.count ?? 0;
+                    {Array.from({ length: 5 }, (_, i) => {
+                      const score  = i + 1;
+                      const count  = stats.scoreDistribution.find(d => d.score === score)?.count ?? 0;
                       const height = count > 0 ? Math.max((count / maxBar) * 100, 6) : 0;
-                      const col    = i <= 6 ? 'bg-red-400' : i <= 8 ? 'bg-yellow-400' : 'bg-green-500';
+                      const col    = score <= 2 ? 'bg-red-400' : score === 3 ? 'bg-yellow-400' : 'bg-green-500';
                       return (
-                        <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                        <div key={score} className="flex-1 flex flex-col items-center gap-1">
                           <span className="text-xs text-gray-400">{count > 0 ? count : ''}</span>
                           <div className={`w-full rounded-t-md ${col}`} style={{ height: `${height}%`, minHeight: count > 0 ? 4 : 0 }} />
-                          <span className="text-xs font-medium text-gray-500">{i}</span>
+                          <span className="text-xs font-medium text-gray-500">{score}</span>
                         </div>
                       );
                     })}
@@ -344,10 +345,10 @@ export default function NPSResultsPage() {
               {/* Snapshot cards for each section */}
               <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                 {[
-                  { label: 'Top Satisfaction',  value: topEntry(ss.overall.satisfaction || {}),       icon: Star,        color: 'text-yellow-500', bg: 'bg-yellow-50'  },
-                  { label: 'Store Cleanliness', value: topEntry(ss.store.cleanliness    || {}),       icon: Store,       color: 'text-blue-500',   bg: 'bg-blue-50'    },
-                  { label: 'Staff Friendliness',value: topEntry(ss.staff.friendliness   || {}),       icon: UserCheck,   color: 'text-purple-500', bg: 'bg-purple-50'  },
-                  { label: 'Product Quality',   value: topEntry(ss.products.quality     || {}),       icon: ShoppingCart,color: 'text-green-500',  bg: 'bg-green-50'   },
+                  { label: 'Product Variety',   value: topEntry(ss.overall.satisfaction      || {}), icon: Star,         color: 'text-yellow-500', bg: 'bg-yellow-50'  },
+                  { label: 'Store Cleanliness', value: topEntry(ss.store.cleanliness          || {}), icon: Store,        color: 'text-blue-500',   bg: 'bg-blue-50'    },
+                  { label: 'Staff Helpfulness', value: topEntry(ss.staff.friendliness         || {}), icon: UserCheck,    color: 'text-purple-500', bg: 'bg-purple-50'  },
+                  { label: 'Product Quality',   value: topEntry(ss.products.quality           || {}), icon: ShoppingCart, color: 'text-green-500',  bg: 'bg-green-50'   },
                 ].map(({ label, value, icon: Icon, color, bg: ibg }) => (
                   <div key={label} className={`rounded-2xl p-5 ${ibg} border border-gray-100`}>
                     <Icon className={`w-5 h-5 ${color} mb-2`} />
@@ -360,12 +361,13 @@ export default function NPSResultsPage() {
               {/* Three-words cloud */}
               {stats.threeWords.length > 0 && (
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 mb-8">
-                  <h2 className="text-lg font-bold text-gray-900 mb-4">How customers described their experience</h2>
-                  <div className="flex flex-wrap gap-2">
+                  <h2 className="text-lg font-bold text-gray-900 mb-4">Additional Comments</h2>
+                  <div className="space-y-2">
                     {stats.threeWords.map((w, i) => (
-                      <span key={i} className="bg-orange-50 text-brand-orange border border-orange-100 rounded-full px-3 py-1 text-sm font-medium">
-                        {w}
-                      </span>
+                      <div key={i} className="flex items-start gap-2 bg-orange-50 border border-orange-100 rounded-xl px-4 py-2.5">
+                        <span className="text-brand-orange mt-0.5">•</span>
+                        <p className="text-sm text-gray-700">{w}</p>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -376,7 +378,7 @@ export default function NPSResultsPage() {
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 mb-8">
                   <div className="flex items-center gap-2 mb-4">
                     <Lightbulb className="w-5 h-5 text-yellow-500" />
-                    <h2 className="text-lg font-bold text-gray-900">Suggested Improvements</h2>
+                    <h2 className="text-lg font-bold text-gray-900">Additional Comments</h2>
                   </div>
                   <div className="space-y-2">
                     {stats.improvements.slice(0, 10).map((text, i) => (
@@ -394,7 +396,7 @@ export default function NPSResultsPage() {
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
                   <div className="flex items-center gap-2 mb-4">
                     <ShoppingCart className="w-5 h-5 text-green-500" />
-                    <h2 className="text-lg font-bold text-gray-900">New Product Requests</h2>
+                    <h2 className="text-lg font-bold text-gray-900">Requested New Products & Features</h2>
                   </div>
                   <div className="space-y-2">
                     {stats.productSuggestions.slice(0, 10).map((text, i) => (
@@ -414,27 +416,25 @@ export default function NPSResultsPage() {
             <div className="grid lg:grid-cols-2 gap-6">
 
               <SectionCard title="Overall Satisfaction" icon={Star} iconColor="text-yellow-500">
-                <MetricGroup label="Overall Satisfaction" data={ss.overall.satisfaction || {}} total={n} color="bg-yellow-400" />
-                <MetricGroup label="Likelihood to Recommend" data={ss.overall.recommendLikelihood || {}} total={n} color="bg-orange-400" />
-                <MetricGroup label="Met Expectations?" data={ss.overall.metExpectations || {}} total={n} color="bg-amber-400" />
+                <MetricGroup label="Product Variety Rating" data={ss.overall.satisfaction || {}} total={n} color="bg-yellow-400" />
+                <MetricGroup label="Likelihood to Recommend TFS Vryheid" data={ss.overall.recommendLikelihood || {}} total={n} color="bg-orange-400" />
+                <MetricGroup label="Prices & Promotions Rating" data={ss.overall.metExpectations || {}} total={n} color="bg-amber-400" />
               </SectionCard>
 
               <SectionCard title="Store Experience & Environment" icon={Store} iconColor="text-blue-500">
+                <MetricGroup label="Store Cleanliness & Appearance" data={ss.store.cleanliness || {}} total={n} color="bg-blue-500" />
                 <MetricGroup label="Ease of Finding Items" data={ss.store.easyToFind || {}} total={n} color="bg-blue-400" />
-                <MetricGroup label="Store Cleanliness" data={ss.store.cleanliness || {}} total={n} color="bg-blue-500" />
-                <MetricGroup label="Checkout Wait Times" data={ss.store.checkoutWait || {}} total={n} color="bg-sky-400" />
               </SectionCard>
 
               <SectionCard title="Staff Performance & Service" icon={UserCheck} iconColor="text-purple-500">
+                <MetricGroup label="Staff Friendliness & Helpfulness" data={ss.staff.friendliness || {}} total={n} color="bg-purple-500" />
                 <MetricGroup label="Greeted by Staff" data={ss.staff.greeted || {}} total={n} color="bg-purple-400" />
-                <MetricGroup label="Staff Friendliness & Knowledge" data={ss.staff.friendliness || {}} total={n} color="bg-purple-500" />
-                <MetricGroup label="Staff Made a Recommendation" data={ss.staff.madeRecommendation || {}} total={n} color="bg-violet-400" />
               </SectionCard>
 
               <SectionCard title="Products & Purchase Feedback" icon={ShoppingCart} iconColor="text-green-500">
                 <MetricGroup label="Found All Items" data={ss.products.foundAllItems || {}} total={n} color="bg-green-400" />
                 <MetricGroup label="Product Quality Rating" data={ss.products.quality || {}} total={n} color="bg-emerald-500" />
-                <MetricGroup label="Drawn in by Promotions?" data={ss.products.promotionsDriven || {}} total={n} color="bg-teal-400" />
+                <MetricGroup label="Drawn in by Promotions / Specials" data={ss.products.promotionsDriven || {}} total={n} color="bg-teal-400" />
               </SectionCard>
             </div>
           )}
@@ -479,24 +479,22 @@ export default function NPSResultsPage() {
                     </div>
 
                     <div className="grid sm:grid-cols-2 gap-2 text-xs">
-                      {r.overall?.recommendLikelihood   && <span className="bg-orange-50 text-orange-700 rounded-lg px-2 py-1"><b>Recommend:</b> {r.overall.recommendLikelihood}</span>}
-                      {r.overall?.metExpectations       && <span className="bg-blue-50 text-blue-700 rounded-lg px-2 py-1"><b>Expectations:</b> {r.overall.metExpectations}</span>}
-                      {r.store?.easyToFind              && <span className="bg-sky-50 text-sky-700 rounded-lg px-2 py-1"><b>Navigation:</b> {r.store.easyToFind}</span>}
-                      {r.store?.cleanliness             && <span className="bg-teal-50 text-teal-700 rounded-lg px-2 py-1"><b>Cleanliness:</b> {r.store.cleanliness}</span>}
-                      {r.store?.checkoutWait            && <span className="bg-cyan-50 text-cyan-700 rounded-lg px-2 py-1"><b>Checkout:</b> {r.store.checkoutWait}</span>}
-                      {r.staff?.greeted                 && <span className="bg-purple-50 text-purple-700 rounded-lg px-2 py-1"><b>Greeted:</b> {r.staff.greeted}</span>}
-                      {r.staff?.friendliness            && <span className="bg-violet-50 text-violet-700 rounded-lg px-2 py-1"><b>Staff:</b> {r.staff.friendliness}</span>}
-                      {r.products?.foundAllItems        && <span className="bg-green-50 text-green-700 rounded-lg px-2 py-1"><b>Found items:</b> {r.products.foundAllItems}</span>}
-                      {r.products?.quality              && <span className="bg-emerald-50 text-emerald-700 rounded-lg px-2 py-1"><b>Quality:</b> {r.products.quality}</span>}
-                      {r.products?.promotionsDriven     && <span className="bg-lime-50 text-lime-700 rounded-lg px-2 py-1"><b>Promo visit:</b> {r.products.promotionsDriven}</span>}
+                      {r.overall?.satisfaction         && <span className="bg-yellow-50 text-yellow-700 rounded-lg px-2 py-1"><b>Product variety:</b> {r.overall.satisfaction}</span>}
+                      {r.overall?.recommendLikelihood  && <span className="bg-orange-50 text-orange-700 rounded-lg px-2 py-1"><b>Recommend:</b> {r.overall.recommendLikelihood}</span>}
+                      {r.overall?.metExpectations      && <span className="bg-amber-50 text-amber-700 rounded-lg px-2 py-1"><b>Prices & promos:</b> {r.overall.metExpectations}</span>}
+                      {r.store?.cleanliness            && <span className="bg-blue-50 text-blue-700 rounded-lg px-2 py-1"><b>Cleanliness:</b> {r.store.cleanliness}</span>}
+                      {r.store?.easyToFind             && <span className="bg-sky-50 text-sky-700 rounded-lg px-2 py-1"><b>Easy to find:</b> {r.store.easyToFind}</span>}
+                      {r.staff?.friendliness           && <span className="bg-purple-50 text-purple-700 rounded-lg px-2 py-1"><b>Staff:</b> {r.staff.friendliness}</span>}
+                      {r.staff?.greeted                && <span className="bg-violet-50 text-violet-700 rounded-lg px-2 py-1"><b>Greeted:</b> {r.staff.greeted}</span>}
+                      {r.products?.foundAllItems       && <span className="bg-green-50 text-green-700 rounded-lg px-2 py-1"><b>Found items:</b> {r.products.foundAllItems}</span>}
+                      {r.products?.quality             && <span className="bg-emerald-50 text-emerald-700 rounded-lg px-2 py-1"><b>Quality:</b> {r.products.quality}</span>}
+                      {r.products?.promotionsDriven    && <span className="bg-teal-50 text-teal-700 rounded-lg px-2 py-1"><b>Promo visit:</b> {r.products.promotionsDriven}</span>}
                     </div>
 
-                    {(r.overall?.oneImprovement || r.overall?.threeWords || r.products?.newProductSuggestions) && (
+                    {(r.overall?.oneImprovement || r.products?.newProductSuggestions) && (
                       <div className="mt-3 space-y-1.5">
-                        {r.overall?.threeWords              && <p className="text-xs text-gray-600 italic">Words: "{r.overall.threeWords}"</p>}
-                        {r.overall?.oneImprovement          && <p className="text-xs text-gray-600">💡 {r.overall.oneImprovement}</p>}
-                        {r.products?.newProductSuggestions  && <p className="text-xs text-gray-600">🛒 {r.products.newProductSuggestions}</p>}
-                        {r.staff?.recommendationDetails     && <p className="text-xs text-gray-600">👋 Rec: {r.staff.recommendationDetails}</p>}
+                        {r.overall?.oneImprovement         && <p className="text-xs text-gray-600">💬 {r.overall.oneImprovement}</p>}
+                        {r.products?.newProductSuggestions && <p className="text-xs text-gray-600">🛒 {r.products.newProductSuggestions}</p>}
                       </div>
                     )}
                   </div>

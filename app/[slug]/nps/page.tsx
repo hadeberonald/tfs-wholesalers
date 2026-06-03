@@ -38,15 +38,7 @@ interface ContactInfo {
 
 // ─── Option lists ─────────────────────────────────────────────────────────────
 
-const SATISFACTION_OPTIONS = ['Very Satisfied', 'Satisfied', 'Neutral', 'Dissatisfied', 'Very Dissatisfied'];
-const LIKELIHOOD_OPTIONS   = ['Extremely Likely', 'Very Likely', 'Likely', 'Unlikely', 'Very Unlikely'];
-const YES_NO               = ['Yes', 'No'];
-const YES_NO_PARTIAL       = ['Yes', 'Partially', 'No'];
-const RATING_5             = ['Excellent', 'Good', 'Average', 'Poor', 'Very Poor'];
-const CHECKOUT_OPTIONS     = ['Very Short (< 2 min)', 'Acceptable (2–5 min)', 'Long (5–10 min)', 'Too Long (> 10 min)'];
-const FINDABILITY_OPTIONS  = ['Very Easy', 'Easy', 'Somewhat Difficult', 'Difficult'];
-const QUALITY_OPTIONS      = ['Excellent', 'Good', 'Average', 'Below Average', 'Poor'];
-const EXPECTATIONS_OPTIONS = ['Exceeded Expectations', 'Met Expectations', 'Partially Met', 'Did Not Meet Expectations'];
+const RATING_1_5 = ['5 – Excellent', '4 – Good', '3 – Average', '2 – Poor', '1 – Very Poor'];
 
 const STEPS: Step[] = ['overall', 'store', 'staff', 'products', 'contact'];
 
@@ -288,8 +280,8 @@ export default function NPSSurveyPage() {
               <CheckCircle className="w-12 h-12 text-green-600" />
             </div>
             <h1 className="text-3xl font-black text-gray-900 mb-3">Thank you!</h1>
-            <p className="text-gray-500 text-lg mb-2">Your feedback means a lot to us.</p>
-            <p className="text-gray-400 text-sm">We use every response to improve your shopping experience.</p>
+            <p className="text-gray-500 text-lg mb-1">Thank you for shopping at TFS Vryheid.</p>
+            <p className="text-gray-400 text-sm italic">We Put U First!</p>
             <button
               type="button"
               onClick={resetForm}
@@ -319,9 +311,10 @@ export default function NPSSurveyPage() {
               <span className="text-white font-black text-2xl">TFS</span>
             </div>
             <h1 className="text-4xl font-black text-gray-900 leading-tight mb-2">
-              How was your<br />visit today?
+              TFS Vryheid<br />Customer Satisfaction Survey
             </h1>
-            <p className="text-gray-500">Your feedback helps us serve you better.</p>
+            <p className="text-gray-500">Help Us Serve You Better!</p>
+            <p className="text-gray-400 text-xs mt-2 italic">1 = Very Poor &nbsp;|&nbsp; 2 = Poor &nbsp;|&nbsp; 3 = Average &nbsp;|&nbsp; 4 = Good &nbsp;|&nbsp; 5 = Excellent</p>
           </div>
 
           {/* ── Section 1: Overall Satisfaction ── */}
@@ -331,46 +324,40 @@ export default function NPSSurveyPage() {
               <SectionBadge
                 icon={Star}
                 label="Overall Satisfaction"
-                subtitle="Tell us about your visit today"
+                subtitle="Please rate the following from 1 to 5"
                 iconColor="text-yellow-500"
                 bg="bg-yellow-50"
                 border="border-yellow-200"
               />
               <SelectField
-                label="How satisfied were you with your overall experience today?"
+                label="How satisfied are you with the variety of products available at TFS Vryheid?"
                 value={data.overallSatisfaction}
                 onChange={set('overallSatisfaction')}
-                options={SATISFACTION_OPTIONS}
+                options={RATING_1_5}
               />
               <SelectField
-                label="How likely are you to recommend our store to friends and family?"
+                label="How likely are you to recommend TFS Vryheid to family and friends?"
                 value={data.recommendLikelihood}
                 onChange={set('recommendLikelihood')}
-                options={LIKELIHOOD_OPTIONS}
+                options={RATING_1_5}
               />
               <SelectField
-                label="Did our products and services meet your expectations?"
+                label="How satisfied are you with our prices and promotions?"
                 value={data.metExpectations}
                 onChange={set('metExpectations')}
-                options={EXPECTATIONS_OPTIONS}
+                options={RATING_1_5}
               />
               <TextAreaField
-                label="What is one thing we could do to improve your experience?"
+                label="Additional Comments"
                 value={data.oneImprovement}
                 onChange={set('oneImprovement')}
-                placeholder="e.g. More parking, faster checkout, wider variety…"
-              />
-              <TextAreaField
-                label="How would you describe your experience in three words?"
-                value={data.threeWords}
-                onChange={set('threeWords')}
-                placeholder="e.g. Friendly, organised, affordable…"
-                rows={1}
+                placeholder="Share any thoughts or suggestions…"
               />
               <NextButton
                 label="Next — Store Experience"
                 onClick={() => setStep('store')}
                 disabled={!data.overallSatisfaction || !data.recommendLikelihood || !data.metExpectations}
+
               />
             </div>
           )}
@@ -382,33 +369,27 @@ export default function NPSSurveyPage() {
               <SectionBadge
                 icon={Store}
                 label="Store Experience & Environment"
-                subtitle="Help us keep the store great"
+                subtitle="Please rate the following from 1 to 5"
                 iconColor="text-blue-500"
                 bg="bg-blue-50"
                 border="border-blue-200"
               />
               <SelectField
+                label="How would you rate the cleanliness and appearance of our store?"
+                value={data.cleanliness}
+                onChange={set('cleanliness')}
+                options={RATING_1_5}
+              />
+              <SelectField
                 label="How easy was it to find what you were looking for?"
                 value={data.easyToFind}
                 onChange={set('easyToFind')}
-                options={FINDABILITY_OPTIONS}
-              />
-              <SelectField
-                label="How would you rate the cleanliness of our store?"
-                value={data.cleanliness}
-                onChange={set('cleanliness')}
-                options={RATING_5}
-              />
-              <SelectField
-                label="Were the checkout lines acceptable?"
-                value={data.checkoutWait}
-                onChange={set('checkoutWait')}
-                options={CHECKOUT_OPTIONS}
+                options={RATING_1_5}
               />
               <NextButton
                 label="Next — Staff & Service"
                 onClick={() => setStep('staff')}
-                disabled={!data.easyToFind || !data.cleanliness || !data.checkoutWait}
+                disabled={!data.easyToFind || !data.cleanliness}
               />
             </div>
           )}
@@ -420,42 +401,27 @@ export default function NPSSurveyPage() {
               <SectionBadge
                 icon={Users}
                 label="Staff Performance & Service"
-                subtitle="Our team wants to do better"
+                subtitle="Please rate the following from 1 to 5"
                 iconColor="text-purple-500"
                 bg="bg-purple-50"
                 border="border-purple-200"
               />
               <SelectField
+                label="How would you rate the friendliness and helpfulness of our staff?"
+                value={data.staffFriendliness}
+                onChange={set('staffFriendliness')}
+                options={RATING_1_5}
+              />
+              <SelectField
                 label="Were you greeted by a staff member in-store?"
                 value={data.greetedByStaff}
                 onChange={set('greetedByStaff')}
-                options={YES_NO}
+                options={['Yes', 'No']}
               />
-              <SelectField
-                label="How would you rate the friendliness and knowledge of our staff?"
-                value={data.staffFriendliness}
-                onChange={set('staffFriendliness')}
-                options={RATING_5}
-              />
-              <SelectField
-                label="Did any staff member make a product recommendation to you?"
-                value={data.staffRecommendation}
-                onChange={set('staffRecommendation')}
-                options={YES_NO}
-              />
-              {data.staffRecommendation === 'Yes' && (
-                <TextAreaField
-                  label="What product was recommended?"
-                  value={data.staffRecommendationDetails}
-                  onChange={set('staffRecommendationDetails')}
-                  placeholder="e.g. They suggested the bulk cooking oil deal…"
-                  optional
-                />
-              )}
               <NextButton
                 label="Next — Products & Purchases"
                 onClick={() => setStep('products')}
-                disabled={!data.greetedByStaff || !data.staffFriendliness || !data.staffRecommendation}
+                disabled={!data.greetedByStaff || !data.staffFriendliness}
               />
             </div>
           )}
@@ -467,7 +433,7 @@ export default function NPSSurveyPage() {
               <SectionBadge
                 icon={ShoppingCart}
                 label="Products & Purchase Feedback"
-                subtitle="Help us stock what you need"
+                subtitle="Please rate the following from 1 to 5"
                 iconColor="text-green-500"
                 bg="bg-green-50"
                 border="border-green-200"
@@ -476,19 +442,19 @@ export default function NPSSurveyPage() {
                 label="Did you find all the items you were looking for?"
                 value={data.foundAllItems}
                 onChange={set('foundAllItems')}
-                options={YES_NO_PARTIAL}
+                options={['Yes', 'Partially', 'No']}
               />
               <SelectField
                 label="How would you rate the quality of our products?"
                 value={data.productQuality}
                 onChange={set('productQuality')}
-                options={QUALITY_OPTIONS}
+                options={RATING_1_5}
               />
               <SelectField
                 label="Were you drawn in by any of our current promotions or specials?"
                 value={data.promotionsDriven}
                 onChange={set('promotionsDriven')}
-                options={YES_NO}
+                options={['Yes', 'No']}
               />
               <TextAreaField
                 label="What new products or features would you like to see in our store?"
