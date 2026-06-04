@@ -7,7 +7,7 @@ import dynamic from 'next/dynamic';
 import { useCartStore } from '@/lib/store';
 import { useAuth } from '@/lib/auth-context';
 import { useBranch } from '@/lib/branch-context';
-import { ShoppingBag, User, MapPin, CreditCard, Loader2, Plus, FileText } from 'lucide-react';
+import { ShoppingBag, User, MapPin, CreditCard, Loader2, Plus, FileText, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 // Dynamically import map component
@@ -40,11 +40,17 @@ export default function CheckoutPage() {
   const [loading, setLoading] = useState(false);
   const [deliverySettings, setDeliverySettings] = useState<any>(null);
   const [storeLocation, setStoreLocation] = useState({ lat: -27.763912, lng: 30.798969 });
-  const [deliveryFee, setDeliveryFee] = useState(35);
+  // Delivery fee is always R35 — all zones return 35 from the API
+  const deliveryFee = 35;
   const [savedCards, setSavedCards] = useState<SavedCard[]>([]);
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
   const [useNewCard, setUseNewCard] = useState(false);
   const [locationValid, setLocationValid] = useState(false);
+  // Track whether user has interacted with the map (so we only show error after they've tried)
+  const [locationTouched, setLocationTouched] = useState(false);
+  // Track the selected distance so we can show a helpful message
+  const [selectedDistance, setSelectedDistance] = useState<number | null>(null);
+  const maxDeliveryRadius = 60;
 
   const [formData, setFormData] = useState({
     name: user?.name || '',
@@ -124,17 +130,16 @@ export default function CheckoutPage() {
         const data = await res.json();
         if (data.settings) {
           setDeliverySettings(data.settings);
-          setDeliveryFee(data.settings.medium || 35);
+          // Note: deliveryFee is always 35 — ignore data.settings fee values
         }
         if (data.location) setStoreLocation(data.location);
       }
     } catch (error) {
       console.error('Failed to fetch settings:', error);
-      setDeliveryFee(35);
       setDeliverySettings({
-        local: 35, localRadius: 20,
+        local: 35, localRadius: 15,
         medium: 35, mediumRadius: 40,
-        far: 105, farRadius: 60,
+        far: 35, farRadius: 60,
       });
     }
   };
@@ -143,9 +148,10 @@ export default function CheckoutPage() {
     lat: number; lng: number; address: string;
     distance: number; deliveryFee: number;
   }) => {
+    setLocationTouched(true);
+    setSelectedDistance(locationData.distance);
     setFormData({ ...formData, address: locationData.address, lat: locationData.lat, lng: locationData.lng });
-    setDeliveryFee(locationData.deliveryFee);
-    setLocationValid(locationData.distance <= 60);
+    setLocationValid(locationData.distance <= maxDeliveryRadius);
   };
 
   const finalTotal = total + deliveryFee;
@@ -188,16 +194,18 @@ export default function CheckoutPage() {
         amount: Math.round(orderData.total * 100),
         currency: 'ZAR',
         ref: data.reference,
-        callback: async function (response: any) {
+        // IMPORTANT: must be a plain function, NOT async.
+        // Paystack validates typeof callback === 'function' and does not
+        // handle Promise return values — async breaks the internal check.
+        callback: function (response: any) {
           console.log('✅ Paystack callback received:', response.reference);
 
           if (user && useNewCard && response.authorization) {
             savePaymentMethod(response.authorization);
           }
 
-          // IMPORTANT: the callback fires BEFORE Paystack's redirect.
-          // We verify here so the DB is updated even if the redirect fails.
-          await verifyAndRedirect(response.reference, orderId);
+          // Fire async work without awaiting — callback must stay synchronous
+          verifyAndRedirect(response.reference, orderId);
         },
         onClose: function () {
           setLoading(false);
@@ -223,6 +231,10 @@ export default function CheckoutPage() {
    *   2. Sets paymentStatus: 'paid' and status: 'confirmed' in the DB
    *   3. Emits a socket event so the picker app sees the order immediately
    *   4. Sends picker push notifications
+   *
+   * The old `promoteOrderToPending` call has been removed — it was setting
+   * status: 'pending' AFTER verify had already set 'confirmed', which could
+   * race and overwrite the correct status.
    */
   const verifyAndRedirect = async (reference: string, orderId: string) => {
     console.log('🔍 Verifying payment:', reference);
@@ -418,6 +430,9 @@ export default function CheckoutPage() {
     );
   }
 
+  // Out-of-range: user picked a location but it's beyond 60km
+  const addressOutOfRange = locationTouched && selectedDistance !== null && selectedDistance > maxDeliveryRadius;
+
   return (
     <div className="min-h-screen bg-gray-50 pt-32 md:pt-28">
       <div className="max-w-7xl mx-auto px-4 py-8">
@@ -471,6 +486,20 @@ export default function CheckoutPage() {
                     deliverySettings={deliverySettings}
                   />
                 )}
+
+                {/* Out-of-range warning shown inline under the map */}
+                {addressOutOfRange && (
+                  <div className="mt-4 flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-4">
+                    <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-semibold text-red-700">Outside delivery zone</p>
+                      <p className="text-sm text-red-600 mt-0.5">
+                        Your address is {selectedDistance?.toFixed(1)} km away. We only deliver within {maxDeliveryRadius} km of our store. Please choose a closer address.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="mt-6 grid md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">City (Optional)</label>
@@ -572,13 +601,30 @@ export default function CheckoutPage() {
                 </div>
               </div>
 
-              <button type="submit" disabled={loading || !locationValid}
-                className="btn-primary w-full text-lg py-4 disabled:opacity-50 disabled:cursor-not-allowed">
+              {/* Out-of-range block above the button */}
+              {addressOutOfRange && (
+                <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-4">
+                  <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm font-medium text-red-700">
+                    Your delivery address is outside our service area. Please go back and select a closer location to continue.
+                  </p>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading || !locationValid}
+                className="btn-primary w-full text-lg py-4 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
                 {loading ? (
                   <span className="flex items-center justify-center space-x-2">
                     <Loader2 className="w-5 h-5 animate-spin" />
                     <span>Processing…</span>
                   </span>
+                ) : !locationTouched ? (
+                  'Select a delivery address to continue'
+                ) : addressOutOfRange ? (
+                  'Address outside delivery zone'
                 ) : (
                   `Continue to Payment (R${finalTotal.toFixed(2)})`
                 )}

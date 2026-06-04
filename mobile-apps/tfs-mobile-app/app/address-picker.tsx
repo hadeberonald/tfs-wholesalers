@@ -3,13 +3,13 @@
 import React, { useState, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
-  Alert, ActivityIndicator, Animated, Keyboard, ScrollView,
+  Alert, ActivityIndicator, Animated, Keyboard, ScrollView, Modal,
 } from 'react-native';
 import MapView, { Region, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MapPin, Navigation, Search, X, ChevronLeft, Check, Truck } from 'lucide-react-native';
+import { MapPin, Navigation, Search, X, ChevronLeft, Check, Truck, XCircle } from 'lucide-react-native';
 import { useStore } from '@/lib/store';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -55,18 +55,11 @@ const DEFAULT_STORE: { lat: number; lng: number } = {
 
 const DEFAULT_DELIVERY: DeliverySettings = {
   local: 35,
-  localRadius: 20,
+  localRadius: 15,
   medium: 35,
-  mediumRadius: 40,
+  mediumRadius: 15,
   far: 35,
-  farRadius: 60,
-};
-
-const INITIAL_REGION: Region = {
-  latitude: DEFAULT_STORE.lat,
-  longitude: DEFAULT_STORE.lng,
-  latitudeDelta: 0.05,
-  longitudeDelta: 0.05,
+  farRadius: 15,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -87,7 +80,7 @@ function haversineKm(
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// ── Flat R35 for everyone within the zone ─────────────────────────────────────
+// Flat R35 for everyone within zone
 function calcDelivery(
   distKm: number,
   settings: DeliverySettings,
@@ -165,6 +158,52 @@ function fallbackAddress(lat: number, lng: number): Omit<DeliveryAddress, 'deliv
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Out-of-range modal
+// ─────────────────────────────────────────────────────────────────────────────
+function OutOfRangeModal({
+  visible,
+  distance,
+  maxRadius,
+  onClose,
+}: {
+  visible: boolean;
+  distance: number;
+  maxRadius: number;
+  onClose: () => void;
+}) {
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalCard}>
+          <View style={styles.modalIconWrap}>
+            <XCircle color="#ef4444" size={44} />
+          </View>
+          <Text style={styles.modalTitle}>Outside Delivery Zone</Text>
+          <Text style={styles.modalBody}>
+            This address is{' '}
+            <Text style={styles.modalHighlight}>{distance.toFixed(1)} km</Text> away
+            from our store. We currently only deliver within{' '}
+            <Text style={styles.modalHighlight}>{maxRadius} km</Text>.
+          </Text>
+          <Text style={styles.modalSub}>
+            Please move the pin to a closer location to continue.
+          </Text>
+          <TouchableOpacity style={styles.modalBtn} onPress={onClose}>
+            <Text style={styles.modalBtnText}>Choose a Different Location</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 export default function AddressPickerScreen() {
@@ -178,7 +217,6 @@ export default function AddressPickerScreen() {
     lng: branch?.settings?.storeLocation?.lng ?? DEFAULT_STORE.lng,
   };
 
-  // Delivery settings — all tiers hardcoded to R35 for now
   const deliverySettings: DeliverySettings = {
     local:        35,
     localRadius:  (branch?.settings as any)?.deliveryPricing?.localRadius  ?? DEFAULT_DELIVERY.localRadius,
@@ -202,6 +240,8 @@ export default function AddressPickerScreen() {
   const [suggestions, setSuggestions]         = useState<SearchSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isDragging, setIsDragging]           = useState(false);
+  // Show the out-of-range modal when user taps Confirm on an OOZ address
+  const [showOutOfRange, setShowOutOfRange]   = useState(false);
 
   const mapRef      = useRef<MapView>(null);
   const pinAnim     = useRef(new Animated.Value(0)).current;
@@ -334,14 +374,13 @@ export default function AddressPickerScreen() {
 
   const onConfirm = () => {
     if (!address) return;
+
+    // Show the modal instead of an Alert — keeps UX consistent with checkout
     if (address.outsideZone) {
-      Alert.alert(
-        'Outside Delivery Zone',
-        `Sorry, your location is ${address.distance.toFixed(1)} km away — we only deliver within ${deliverySettings.farRadius} km. Please choose a closer address.`,
-        [{ text: 'OK' }],
-      );
+      setShowOutOfRange(true);
       return;
     }
+
     suppress.current = true;
     Keyboard.dismiss();
     setPendingDeliveryAddress(address);
@@ -376,6 +415,14 @@ export default function AddressPickerScreen() {
 
   return (
     <View style={styles.container}>
+      {/* Out-of-range modal — shown when user tries to confirm an OOZ address */}
+      <OutOfRangeModal
+        visible={showOutOfRange}
+        distance={address?.distance ?? 0}
+        maxRadius={deliverySettings.farRadius}
+        onClose={() => setShowOutOfRange(false)}
+      />
+
       <MapView
         ref={mapRef}
         provider={PROVIDER_GOOGLE}
@@ -514,7 +561,7 @@ export default function AddressPickerScreen() {
             (!address || address.outsideZone) && styles.confirmDisabled,
           ]}
           onPress={onConfirm}
-          disabled={!address || address.outsideZone}
+          disabled={!address}
           activeOpacity={0.85}
         >
           <Check color="#fff" size={20} />
@@ -610,10 +657,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff7f3', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8,
     borderWidth: 1, borderColor: '#fed7aa', marginBottom: 12,
   },
-  feeRowError: { backgroundColor: '#fef2f2', borderColor: '#fca5a5' },
-  feeText:     { fontSize: 13, color: '#92400e' },
+  feeRowError:  { backgroundColor: '#fef2f2', borderColor: '#fca5a5' },
+  feeText:      { fontSize: 13, color: '#92400e' },
   feeTextError: { fontSize: 13, color: '#b91c1c', fontWeight: '600' },
-  feeAmount:   { fontWeight: '700', color: '#FF6B35' },
+  feeAmount:    { fontWeight: '700', color: '#FF6B35' },
 
   hint: { fontSize: 14, color: '#9ca3af', textAlign: 'center', marginBottom: 16, paddingVertical: 8 },
 
@@ -633,4 +680,30 @@ const styles = StyleSheet.create({
   },
   confirmDisabled: { backgroundColor: '#d1d5db', shadowOpacity: 0 },
   confirmText:     { color: '#fff', fontSize: 16, fontWeight: '700' },
+
+  // ── Out-of-range modal ────────────────────────────────────────────────────
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28,
+  },
+  modalCard: {
+    backgroundColor: '#fff', borderRadius: 24, padding: 28,
+    width: '100%', alignItems: 'center',
+    shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 20, elevation: 12,
+  },
+  modalIconWrap: {
+    width: 80, height: 80, borderRadius: 40, backgroundColor: '#fee2e2',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 18,
+  },
+  modalTitle:     { fontSize: 20, fontWeight: '800', color: '#1f2937', marginBottom: 10, textAlign: 'center' },
+  modalBody:      { fontSize: 14, color: '#4b5563', textAlign: 'center', lineHeight: 22, marginBottom: 8 },
+  modalHighlight: { fontWeight: '700', color: '#ef4444' },
+  modalSub:       { fontSize: 13, color: '#9ca3af', textAlign: 'center', lineHeight: 20, marginBottom: 24 },
+  modalBtn: {
+    backgroundColor: '#FF6B35', borderRadius: 14, height: 50,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    width: '100%',
+    shadowColor: '#FF6B35', shadowOpacity: 0.35, shadowRadius: 8, elevation: 4,
+  },
+  modalBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 });

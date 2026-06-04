@@ -109,9 +109,12 @@ export default function CheckoutScreen() {
   const [phoneError, setPhoneError]           = useState<string>('');
   const [showOutOfRange, setShowOutOfRange]   = useState(false);
 
-  // Pull the max delivery radius from branch settings (mirrors address-picker logic)
+  // Pull the max delivery radius from branch settings
   const maxDeliveryRadius: number =
     (branch?.settings as any)?.deliveryPricing?.farRadius ?? 60;
+
+  // Delivery fee is always R35 regardless of distance (within zone)
+  const deliveryFee = 35;
 
   useFocusEffect(
     useCallback(() => {
@@ -121,16 +124,15 @@ export default function CheckoutScreen() {
         setPendingDeliveryAddress(null);
 
         // Immediately show the modal if the returned address is out of range
-        if (addr.outsideZone) {
+        if (addr.outsideZone || (addr.distance ?? 0) > maxDeliveryRadius) {
           setShowOutOfRange(true);
         }
       }
-    }, [pendingDeliveryAddress])
+    }, [pendingDeliveryAddress, maxDeliveryRadius])
   );
 
-  const subtotal    = getTotal();
-  const deliveryFee = deliveryAddress?.deliveryFee ?? 35;
-  const total       = subtotal + deliveryFee;
+  const subtotal = getTotal();
+  const total    = subtotal + deliveryFee;
 
   const totalSavings = items.reduce(
     (s, i) => s + ((i.specialDiscount || 0) * i.quantity), 0,
@@ -139,6 +141,11 @@ export default function CheckoutScreen() {
   const regularItems = items.filter(i => !i.isBonusItem && !i.isFreeItem && !i.isMultibuyBonus && !i.isComboItem);
   const bonusItems   = items.filter(i => i.isBonusItem || i.isFreeItem || i.isMultibuyBonus);
   const comboItems   = items.filter(i => i.isComboItem);
+
+  // An address is out of range if either the flag is set OR distance exceeds max
+  const addressOutOfRange =
+    !!deliveryAddress &&
+    (deliveryAddress.outsideZone || (deliveryAddress.distance ?? 0) > maxDeliveryRadius);
 
   const handlePhoneChange = (text: string) => {
     setPhone(text);
@@ -164,7 +171,7 @@ export default function CheckoutScreen() {
     }
 
     // ── Out-of-range gate — show modal instead of an Alert ─────────────────
-    if (deliveryAddress.outsideZone) {
+    if (addressOutOfRange) {
       setShowOutOfRange(true);
       return;
     }
@@ -319,8 +326,14 @@ export default function CheckoutScreen() {
     );
   }
 
-  const phoneValid  = isValidPhone(phone.trim());
-  const canCheckout = !!deliveryAddress && !deliveryAddress.outsideZone && !placingOrder && phoneValid;
+  const phoneValid = isValidPhone(phone.trim());
+
+  // Button is disabled if: no address, address out of range, phone invalid, or order in progress
+  const canCheckout =
+    !!deliveryAddress &&
+    !addressOutOfRange &&
+    !placingOrder &&
+    phoneValid;
 
   const footerHeight = 80 + insets.bottom;
 
@@ -391,11 +404,11 @@ export default function CheckoutScreen() {
             <Text style={styles.sectionTitle}>Delivery Address</Text>
             {deliveryAddress ? (
               <TouchableOpacity
-                style={[styles.addressSelected, deliveryAddress.outsideZone && styles.addressSelectedError]}
+                style={[styles.addressSelected, addressOutOfRange && styles.addressSelectedError]}
                 onPress={() => router.push('/address-picker')}
               >
                 <View style={styles.addressIconWrap}>
-                  <MapPin color={deliveryAddress.outsideZone ? '#ef4444' : '#FF6B35'} size={18} />
+                  <MapPin color={addressOutOfRange ? '#ef4444' : '#FF6B35'} size={18} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.addressStreet} numberOfLines={1}>
@@ -404,7 +417,7 @@ export default function CheckoutScreen() {
                   <Text style={styles.addressCity} numberOfLines={1}>
                     {[deliveryAddress.city, deliveryAddress.province, deliveryAddress.postalCode].filter(Boolean).join(', ')}
                   </Text>
-                  {deliveryAddress.outsideZone ? (
+                  {addressOutOfRange ? (
                     <TouchableOpacity
                       onPress={() => setShowOutOfRange(true)}
                       style={styles.outsideZoneTap}
@@ -486,11 +499,7 @@ export default function CheckoutScreen() {
             )}
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Delivery</Text>
-              <Text style={styles.summaryValue}>
-                {!deliveryAddress
-                  ? <Text style={{ color: '#9ca3af' }}>Select address</Text>
-                  : `R${deliveryFee.toFixed(2)}`}
-              </Text>
+              <Text style={styles.summaryValue}>R{deliveryFee.toFixed(2)}</Text>
             </View>
             <View style={[styles.summaryRow, styles.summaryTotal]}>
               <Text style={styles.summaryTotalLabel}>Total</Text>
@@ -527,7 +536,7 @@ export default function CheckoutScreen() {
               <Text style={styles.footerWarningText}>Select a delivery address to continue</Text>
             </View>
           )}
-          {deliveryAddress?.outsideZone && (
+          {addressOutOfRange && (
             <TouchableOpacity
               style={styles.footerWarning}
               onPress={() => setShowOutOfRange(true)}

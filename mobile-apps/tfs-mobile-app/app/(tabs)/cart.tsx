@@ -60,7 +60,7 @@ export default function CartScreen() {
   }, 0);
 
   const cartTotal   = subtotal;
-  const deliveryFee = 85;
+  const deliveryFee = 35;
   const total       = cartTotal + deliveryFee;
 
   const totalDisplaySavings = totalSavings + freeItemSavings;
@@ -658,7 +658,6 @@ const styles = StyleSheet.create({
   infoText:             { flex: 1, fontSize: 12, color: '#1e40af', lineHeight: 16 },
 
   // ── Summary ──────────────────────────────────────────────────────────────
-  // NOTE: paddingBottom is applied inline using insets.bottom + 16
   summary: {
     backgroundColor: '#fff',
     padding: 16,
