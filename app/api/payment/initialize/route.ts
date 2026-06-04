@@ -1,11 +1,10 @@
-// app/api/payment/initialize/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { paystackService, generatePaymentReference, formatAmountForPayment } from '@/lib/payment';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 import { getIO } from '@/lib/socket';
 
-// ─── Helper: notify the picker app that a new order is ready ─────────────────
+// ─── Helper: notify picker app that a new order is ready ─────────────────────
 function emitNewOrder(order: any) {
   try {
     const io = getIO();
@@ -126,12 +125,15 @@ export async function POST(request: NextRequest) {
     }
 
     // ── New card: initialize payment (webhook will fire on success) ───────────
+    // callback_url points to the shared non-slug callback page so it works
+    // for all branches on this multi-tenant site. The verify route returns
+    // branchSlug in its response so the callback page can redirect correctly.
     const paymentData = {
       email,
       amount:       formatAmountForPayment(amount),
       currency:     'ZAR',
       reference,
-      callback_url: `${process.env.NEXTAUTH_URL}/api/payment/callback`,
+      callback_url: `${process.env.NEXTAUTH_URL}/checkout/callback`,
       metadata: {
         orderId,
         custom_fields: [{ display_name: 'Order ID', variable_name: 'order_id', value: orderId }],

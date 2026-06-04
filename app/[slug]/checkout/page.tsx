@@ -34,7 +34,7 @@ export default function CheckoutPage() {
   const router = useRouter();
   const { user } = useAuth();
   const { branch, loading: branchLoading } = useBranch();
-  const { items, getTotal } = useCartStore();
+  const { items, getTotal, clearCart } = useCartStore();
   const total = getTotal();
   const [checkoutAs, setCheckoutAs] = useState<'guest' | 'user' | null>(null);
   const [loading, setLoading] = useState(false);
@@ -45,7 +45,7 @@ export default function CheckoutPage() {
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
   const [useNewCard, setUseNewCard] = useState(false);
   const [locationValid, setLocationValid] = useState(false);
-  
+
   const [formData, setFormData] = useState({
     name: user?.name || '',
     email: user?.email || '',
@@ -64,19 +64,19 @@ export default function CheckoutPage() {
     if (items.length === 0) {
       router.push('/cart');
     }
-    
+
     // Load Paystack script
     const script = document.createElement('script');
     script.src = 'https://js.paystack.co/v1/inline.js';
     script.async = true;
     document.body.appendChild(script);
-    
+
     // Load Leaflet CSS
     const link = document.createElement('link');
     link.rel = 'stylesheet';
     link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
     document.head.appendChild(link);
-    
+
     return () => {
       if (document.body.contains(script)) document.body.removeChild(script);
       if (document.head.contains(link)) document.head.removeChild(link);
@@ -103,17 +103,13 @@ export default function CheckoutPage() {
 
   const fetchSavedCards = async () => {
     if (!user?.id) return;
-    
     try {
       const res = await fetch(`/api/payment-methods?userId=${user.id}`);
       if (res.ok) {
         const data = await res.json();
         setSavedCards(data.paymentMethods || []);
-        
         const defaultCard = data.paymentMethods?.find((c: SavedCard) => c.isDefault);
-        if (defaultCard) {
-          setSelectedCard(defaultCard.id);
-        }
+        if (defaultCard) setSelectedCard(defaultCard.id);
       }
     } catch (error) {
       console.error('Failed to fetch saved cards:', error);
@@ -122,7 +118,6 @@ export default function CheckoutPage() {
 
   const fetchSettings = async () => {
     if (!branch) return;
-
     try {
       const res = await fetch(`/api/settings?branchId=${branch.id}`);
       if (res.ok) {
@@ -131,65 +126,34 @@ export default function CheckoutPage() {
           setDeliverySettings(data.settings);
           setDeliveryFee(data.settings.medium || 85);
         }
-        if (data.location) {
-          setStoreLocation(data.location);
-        }
+        if (data.location) setStoreLocation(data.location);
       }
     } catch (error) {
       console.error('Failed to fetch settings:', error);
       setDeliveryFee(85);
       setDeliverySettings({
-        local: 35,
-        localRadius: 20,
-        medium: 85,
-        mediumRadius: 40,
-        far: 105,
-        farRadius: 60,
+        local: 35, localRadius: 20,
+        medium: 85, mediumRadius: 40,
+        far: 105, farRadius: 60,
       });
     }
   };
 
   const handleLocationSelect = (locationData: {
-    lat: number;
-    lng: number;
-    address: string;
-    distance: number;
-    deliveryFee: number;
+    lat: number; lng: number; address: string;
+    distance: number; deliveryFee: number;
   }) => {
-    setFormData({
-      ...formData,
-      address: locationData.address,
-      lat: locationData.lat,
-      lng: locationData.lng,
-    });
+    setFormData({ ...formData, address: locationData.address, lat: locationData.lat, lng: locationData.lng });
     setDeliveryFee(locationData.deliveryFee);
     setLocationValid(locationData.distance <= 60);
   };
 
   const finalTotal = total + deliveryFee;
 
-  const promoteOrderToPending = async (orderId: string) => {
-    try {
-      const res = await fetch(`/api/orders/${orderId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'pending' }),
-      });
-      if (!res.ok) {
-        console.error('❌ Failed to promote order to pending:', await res.json());
-      } else {
-        console.log('✅ Order promoted to pending — now visible to pickers');
-      }
-    } catch (error) {
-      console.error('❌ Error promoting order:', error);
-    }
-  };
-
   const handlePaystackPayment = async (orderId: string, orderData: any) => {
-    console.log('💳 Initializing Paystack payment...');
-    
+    console.log('💳 Initializing Paystack payment…');
     try {
-      const savedCardData = selectedCard && !useNewCard 
+      const savedCardData = selectedCard && !useNewCard
         ? savedCards.find(c => c.id === selectedCard)
         : null;
 
@@ -197,7 +161,7 @@ export default function CheckoutPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          orderId: orderId,
+          orderId,
           email: orderData.customerInfo.email,
           amount: orderData.total,
           authorizationCode: savedCardData?.authorizationCode,
@@ -205,22 +169,18 @@ export default function CheckoutPage() {
       });
 
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to initialize payment');
-      }
+      if (!res.ok) throw new Error(data.error || 'Failed to initialize payment');
 
       console.log('✅ Payment initialized:', data.reference);
 
+      // Saved card charged immediately — verify and redirect
       if (savedCardData?.authorizationCode && data.charged) {
         console.log('✅ Charged with saved card');
-        await verifyPayment(data.reference, orderId);
+        await verifyAndRedirect(data.reference, orderId);
         return;
       }
 
-      if (!(window as any).PaystackPop) {
-        throw new Error('Paystack not loaded');
-      }
+      if (!(window as any).PaystackPop) throw new Error('Paystack not loaded');
 
       const handler = (window as any).PaystackPop.setup({
         key: data.publicKey,
@@ -228,16 +188,18 @@ export default function CheckoutPage() {
         amount: Math.round(orderData.total * 100),
         currency: 'ZAR',
         ref: data.reference,
-        callback: function(response: any) {
-          console.log('✅ Payment successful:', response.reference);
-          
+        callback: async function (response: any) {
+          console.log('✅ Paystack callback received:', response.reference);
+
           if (user && useNewCard && response.authorization) {
             savePaymentMethod(response.authorization);
           }
-          
-          verifyPayment(response.reference, orderId);
+
+          // IMPORTANT: the callback fires BEFORE Paystack's redirect.
+          // We verify here so the DB is updated even if the redirect fails.
+          await verifyAndRedirect(response.reference, orderId);
         },
-        onClose: function() {
+        onClose: function () {
           setLoading(false);
           toast.error('Payment cancelled');
           console.log('❌ Payment popup closed');
@@ -250,6 +212,46 @@ export default function CheckoutPage() {
       console.error('❌ Payment error:', error);
       setLoading(false);
       toast.error(error.message || 'Payment failed to start');
+    }
+  };
+
+  /**
+   * verifyAndRedirect
+   *
+   * Calls /api/payment/verify which:
+   *   1. Confirms the charge with Paystack
+   *   2. Sets paymentStatus: 'paid' and status: 'confirmed' in the DB
+   *   3. Emits a socket event so the picker app sees the order immediately
+   *   4. Sends picker push notifications
+   *
+   * The old `promoteOrderToPending` call has been removed — it was redundant
+   * and was setting status: 'pending' AFTER verify had already set 'confirmed',
+   * which could race and overwrite the correct status.
+   */
+  const verifyAndRedirect = async (reference: string, orderId: string) => {
+    console.log('🔍 Verifying payment:', reference);
+    try {
+      const res = await fetch('/api/payment/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.verified) {
+        console.log('✅ Payment verified — order confirmed');
+        clearCart();
+        toast.success('Payment successful!');
+        router.push(`/${branch?.slug}/checkout/success/${orderId}`);
+      } else {
+        console.error('❌ Verification failed:', data);
+        throw new Error(data.error || 'Payment verification failed');
+      }
+    } catch (error: any) {
+      console.error('❌ Verification error:', error);
+      setLoading(false);
+      toast.error(error.message || 'Payment verification failed. Please contact support.');
     }
   };
 
@@ -277,58 +279,21 @@ export default function CheckoutPage() {
     }
   };
 
-  const verifyPayment = async (reference: string, orderId: string) => {
-    console.log('🔍 Verifying payment:', reference);
-    
-    try {
-      const res = await fetch('/api/payment/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reference }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok && data.verified) {
-        console.log('✅ Payment verified successfully');
-        await promoteOrderToPending(orderId);
-        toast.success('Payment successful!');
-        router.push(`/${branch?.slug}/checkout/success/${orderId}`);
-      } else {
-        console.error('❌ Verification failed:', data);
-        throw new Error('Payment verification failed');
-      }
-    } catch (error) {
-      console.error('❌ Verification error:', error);
-      setLoading(false);
-      toast.error('Payment verification failed');
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!branch) {
-      toast.error('Branch information not loaded');
-      return;
-    }
-    
-    if (!locationValid) {
-      toast.error('Please select a delivery location within our service area');
-      return;
-    }
-    
+
+    if (!branch) { toast.error('Branch information not loaded'); return; }
+    if (!locationValid) { toast.error('Please select a delivery location within our service area'); return; }
     if (formData.paymentMethod === 'card' && user && savedCards.length > 0 && !selectedCard && !useNewCard) {
-      toast.error('Please select a payment method');
-      return;
+      toast.error('Please select a payment method'); return;
     }
-    
+
     setLoading(true);
     console.log('📦 Creating order for branch:', branch.displayName);
 
     try {
       const orderData = {
-        branchId: branch.id, // ✅ Include branch ID
+        branchId: branch.id,
         userId: user?.id || null,
         customerInfo: {
           name: formData.name,
@@ -355,7 +320,7 @@ export default function CheckoutPage() {
           appliedSpecialId: item.appliedSpecialId,
         })),
         subtotal: total,
-        deliveryFee: deliveryFee,
+        deliveryFee,
         total: finalTotal,
         deliveryNotes: formData.deliveryNotes,
         paymentMethod: formData.paymentMethod,
@@ -374,9 +339,7 @@ export default function CheckoutPage() {
         console.log('✅ Order created (payment_pending):', data.orderId);
 
         if (formData.paymentMethod === 'card') {
-          setTimeout(() => {
-            handlePaystackPayment(data.orderId, orderData);
-          }, 500);
+          setTimeout(() => handlePaystackPayment(data.orderId, orderData), 500);
         } else if (formData.paymentMethod === 'eft') {
           setLoading(false);
           toast.error('EFT payment coming soon');
@@ -412,9 +375,7 @@ export default function CheckoutPage() {
     );
   }
 
-  if (items.length === 0) {
-    return null;
-  }
+  if (items.length === 0) return null;
 
   if (!checkoutAs) {
     return (
@@ -438,7 +399,7 @@ export default function CheckoutPage() {
 
             {!user ? (
               <Link
-  href={`/${branch.slug}/login?redirect=checkout`}
+                href={`/${branch.slug}/login?redirect=checkout`}
                 className="bg-white rounded-2xl p-8 border-2 border-gray-200 hover:border-brand-orange transition-colors text-left group"
               >
                 <User className="w-12 h-12 text-gray-400 group-hover:text-brand-orange mb-4" />
@@ -478,60 +439,35 @@ export default function CheckoutPage() {
                   <User className="w-6 h-6 text-brand-orange" />
                   <h2 className="text-xl font-semibold text-brand-black">Customer Information</h2>
                 </div>
-
                 <div className="grid md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Full Name *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      className="input-field"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    />
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
+                    <input type="text" required className="input-field" value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })} />
                   </div>
-
-                 <div>
-  <label className="block text-sm font-medium text-gray-700 mb-2">
-    Email *
-  </label>
-  <input
-    type="email"
-    required
-    className="input-field"
-    value={formData.email}
-    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-  />
-  <p className="text-xs text-gray-400 mt-1.5">
-    Your order confirmation will be sent here. Please check your spam or junk folder if you don&apos;t see it.
-  </p>
-</div>
-
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Email *</label>
+                    <input type="email" required className="input-field" value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })} />
+                    <p className="text-xs text-gray-400 mt-1.5">
+                      Your order confirmation will be sent here. Please check your spam or junk folder if you don&apos;t see it.
+                    </p>
+                  </div>
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Phone Number *
-                    </label>
-                    <input
-                      type="tel"
-                      required
-                      className="input-field"
-                      value={formData.phone}
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number *</label>
+                    <input type="tel" required className="input-field" value={formData.phone}
                       onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      placeholder="e.g., 082 123 4567"
-                    />
+                      placeholder="e.g., 082 123 4567" />
                   </div>
                 </div>
               </div>
 
-              {/* Shipping Address with Map */}
+              {/* Delivery Location */}
               <div className="bg-white rounded-2xl p-6">
                 <div className="flex items-center space-x-3 mb-6">
                   <MapPin className="w-6 h-6 text-brand-orange" />
                   <h2 className="text-xl font-semibold text-brand-black">Delivery Location</h2>
                 </div>
-
                 {deliverySettings && (
                   <AddressMapPicker
                     onLocationSelect={handleLocationSelect}
@@ -539,32 +475,16 @@ export default function CheckoutPage() {
                     deliverySettings={deliverySettings}
                   />
                 )}
-
                 <div className="mt-6 grid md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      City (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      className="input-field"
-                      value={formData.city}
-                      onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                      placeholder="Durban"
-                    />
+                    <label className="block text-sm font-medium text-gray-700 mb-2">City (Optional)</label>
+                    <input type="text" className="input-field" value={formData.city}
+                      onChange={(e) => setFormData({ ...formData, city: e.target.value })} placeholder="Durban" />
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Postal Code (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      className="input-field"
-                      value={formData.postalCode}
-                      onChange={(e) => setFormData({ ...formData, postalCode: e.target.value })}
-                      placeholder="4001"
-                    />
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Postal Code (Optional)</label>
+                    <input type="text" className="input-field" value={formData.postalCode}
+                      onChange={(e) => setFormData({ ...formData, postalCode: e.target.value })} placeholder="4001" />
                   </div>
                 </div>
               </div>
@@ -575,18 +495,11 @@ export default function CheckoutPage() {
                   <FileText className="w-6 h-6 text-brand-orange" />
                   <h2 className="text-xl font-semibold text-brand-black">Delivery Instructions</h2>
                 </div>
-
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Delivery Notes (Optional)
-                  </label>
-                  <textarea
-                    rows={4}
-                    className="input-field"
-                    value={formData.deliveryNotes}
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Delivery Notes (Optional)</label>
+                  <textarea rows={4} className="input-field" value={formData.deliveryNotes}
                     onChange={(e) => setFormData({ ...formData, deliveryNotes: e.target.value })}
-                    placeholder="Please give us any delivery instructions or specific directions to find you easily..."
-                  />
+                    placeholder="Please give us any delivery instructions or specific directions to find you easily…" />
                   <p className="text-xs text-gray-500 mt-2">
                     Example: "Ring the intercom at gate 5" or "Leave with security at main entrance"
                   </p>
@@ -606,30 +519,20 @@ export default function CheckoutPage() {
                     </Link>
                   )}
                 </div>
-
                 <div className="space-y-3">
                   {user && savedCards.length > 0 && (
                     <>
                       {savedCards.map((card) => (
-                        <label
-                          key={card.id}
+                        <label key={card.id}
                           className={`flex items-center space-x-3 p-4 border-2 rounded-xl cursor-pointer transition-colors ${
                             selectedCard === card.id && !useNewCard
                               ? 'border-brand-orange bg-brand-orange/5'
                               : 'border-gray-200 hover:border-brand-orange'
                           }`}
                         >
-                          <input
-                            type="radio"
-                            name="savedCard"
-                            checked={selectedCard === card.id && !useNewCard}
-                            onChange={() => {
-                              setSelectedCard(card.id);
-                              setUseNewCard(false);
-                              setFormData({ ...formData, paymentMethod: 'card' });
-                            }}
-                            className="w-5 h-5 text-brand-orange"
-                          />
+                          <input type="radio" name="savedCard" checked={selectedCard === card.id && !useNewCard}
+                            onChange={() => { setSelectedCard(card.id); setUseNewCard(false); setFormData({ ...formData, paymentMethod: 'card' }); }}
+                            className="w-5 h-5 text-brand-orange" />
                           <div className="flex items-center space-x-3 flex-1">
                             <CreditCard className="w-8 h-8 text-gray-600" />
                             <div>
@@ -637,32 +540,17 @@ export default function CheckoutPage() {
                               <p className="text-sm text-gray-600">Expires {card.expiryDate}</p>
                             </div>
                             {card.isDefault && (
-                              <span className="ml-auto bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">
-                                Default
-                              </span>
+                              <span className="ml-auto bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Default</span>
                             )}
                           </div>
                         </label>
                       ))}
-
-                      <label
-                        className={`flex items-center space-x-3 p-4 border-2 rounded-xl cursor-pointer transition-colors ${
-                          useNewCard
-                            ? 'border-brand-orange bg-brand-orange/5'
-                            : 'border-gray-200 hover:border-brand-orange'
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="savedCard"
-                          checked={useNewCard}
-                          onChange={() => {
-                            setUseNewCard(true);
-                            setSelectedCard(null);
-                            setFormData({ ...formData, paymentMethod: 'card' });
-                          }}
-                          className="w-5 h-5 text-brand-orange"
-                        />
+                      <label className={`flex items-center space-x-3 p-4 border-2 rounded-xl cursor-pointer transition-colors ${
+                        useNewCard ? 'border-brand-orange bg-brand-orange/5' : 'border-gray-200 hover:border-brand-orange'
+                      }`}>
+                        <input type="radio" name="savedCard" checked={useNewCard}
+                          onChange={() => { setUseNewCard(true); setSelectedCard(null); setFormData({ ...formData, paymentMethod: 'card' }); }}
+                          className="w-5 h-5 text-brand-orange" />
                         <div className="flex items-center space-x-3">
                           <Plus className="w-8 h-8 text-brand-orange" />
                           <div>
@@ -676,46 +564,24 @@ export default function CheckoutPage() {
 
                   {(!user || savedCards.length === 0) && (
                     <label className="flex items-center space-x-3 p-4 border-2 border-brand-orange rounded-xl cursor-pointer bg-brand-orange/5">
-                      <input
-                        type="radio"
-                        name="payment"
-                        value="card"
-                        checked={formData.paymentMethod === 'card'}
+                      <input type="radio" name="payment" value="card" checked={formData.paymentMethod === 'card'}
                         onChange={(e) => setFormData({ ...formData, paymentMethod: e.target.value })}
-                        className="w-5 h-5 text-brand-orange"
-                      />
+                        className="w-5 h-5 text-brand-orange" />
                       <div className="flex-1">
                         <p className="font-semibold text-brand-black">Credit / Debit Card (Paystack)</p>
                         <p className="text-sm text-gray-600">Pay securely with your card</p>
                       </div>
                     </label>
                   )}
-
-                  {/*<label className="flex items-center space-x-3 p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand-orange transition-colors opacity-50">
-                    <input
-                      type="radio"
-                      name="payment"
-                      value="eft"
-                      disabled
-                      className="w-5 h-5 text-brand-orange"
-                    />
-                    <div className="flex-1">
-                      <p className="font-semibold text-brand-black">EFT / Bank Transfer</p>
-                      <p className="text-sm text-gray-600">Coming Soon</p>
-                    </div>
-                  </label>*/}
                 </div>
               </div>
 
-              <button
-                type="submit"
-                disabled={loading || !locationValid}
-                className="btn-primary w-full text-lg py-4 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
+              <button type="submit" disabled={loading || !locationValid}
+                className="btn-primary w-full text-lg py-4 disabled:opacity-50 disabled:cursor-not-allowed">
                 {loading ? (
                   <span className="flex items-center justify-center space-x-2">
                     <Loader2 className="w-5 h-5 animate-spin" />
-                    <span>Processing...</span>
+                    <span>Processing…</span>
                   </span>
                 ) : (
                   `Continue to Payment (R${finalTotal.toFixed(2)})`
@@ -728,16 +594,11 @@ export default function CheckoutPage() {
           <div className="lg:col-span-1">
             <div className="bg-white rounded-2xl p-6 sticky top-24">
               <h2 className="text-xl font-semibold text-brand-black mb-6">Order Summary</h2>
-
               <div className="space-y-4 mb-6">
                 {items.map((item) => (
                   <div key={`${item.id}-${item.variantId || ''}`} className="flex items-center space-x-3">
                     <div className="w-16 h-16 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
-                      <img
-                        src={item.image}
-                        alt={item.name}
-                        className="w-full h-full object-cover"
-                      />
+                      <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
                     </div>
                     <div className="flex-1">
                       <p className="font-semibold text-sm text-brand-black line-clamp-1">
@@ -746,13 +607,10 @@ export default function CheckoutPage() {
                       </p>
                       <p className="text-sm text-gray-600">Qty: {item.quantity} × R{item.price.toFixed(2)}</p>
                     </div>
-                    <p className="font-semibold text-brand-black">
-                      R{(item.price * item.quantity).toFixed(2)}
-                    </p>
+                    <p className="font-semibold text-brand-black">R{(item.price * item.quantity).toFixed(2)}</p>
                   </div>
                 ))}
               </div>
-
               <div className="border-t pt-4 space-y-3">
                 <div className="flex justify-between text-gray-600">
                   <span>Subtotal</span>

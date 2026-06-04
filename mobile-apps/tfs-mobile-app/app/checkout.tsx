@@ -1,14 +1,15 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Alert, Image, TextInput, KeyboardAvoidingView, Platform,
+  ActivityIndicator, Alert, Image, TextInput, KeyboardAvoidingView,
+  Platform, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
   MapPin, ChevronLeft, ChevronRight, Package, ShoppingBag,
-  Truck, AlertCircle, CheckCircle, Tag, Phone,
+  Truck, AlertCircle, CheckCircle, Tag, Phone, XCircle,
 } from 'lucide-react-native';
 import { useStore } from '@/lib/store';
 import api from '@/lib/api';
@@ -36,10 +37,62 @@ function specialTypeBadge(type?: string) {
   );
 }
 
-// Validate SA mobile: 10 digits starting with 0, or +27 followed by 9 digits
 function isValidPhone(phone: string): boolean {
   const cleaned = phone.replace(/[\s\-()]/g, '');
   return /^(0\d{9}|\+27\d{9})$/.test(cleaned);
+}
+
+// ─── Out-of-range modal ───────────────────────────────────────────────────────
+function OutOfRangeModal({
+  visible,
+  distance,
+  maxRadius,
+  onClose,
+  onChangeAddress,
+}: {
+  visible: boolean;
+  distance: number;
+  maxRadius: number;
+  onClose: () => void;
+  onChangeAddress: () => void;
+}) {
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalCard}>
+          <View style={styles.modalIconWrap}>
+            <XCircle color="#ef4444" size={44} />
+          </View>
+
+          <Text style={styles.modalTitle}>Outside Delivery Zone</Text>
+          <Text style={styles.modalBody}>
+            Your selected address is{' '}
+            <Text style={styles.modalHighlight}>{distance.toFixed(1)} km</Text> away
+            from our store. We currently only deliver within{' '}
+            <Text style={styles.modalHighlight}>{maxRadius} km</Text>.
+          </Text>
+          <Text style={styles.modalSub}>
+            Please choose a closer address to continue with your order.
+          </Text>
+
+          <TouchableOpacity style={styles.modalPrimaryBtn} onPress={onChangeAddress}>
+            <MapPin color="#fff" size={16} />
+            <Text style={styles.modalPrimaryBtnText}>Choose a Different Address</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.modalSecondaryBtn} onPress={onClose}>
+            <Text style={styles.modalSecondaryBtnText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
 }
 
 export default function CheckoutScreen() {
@@ -51,15 +104,26 @@ export default function CheckoutScreen() {
   } = useStore();
 
   const [deliveryAddress, setDeliveryAddress] = useState<DeliveryAddress | null>(null);
-  const [placingOrder, setPlacingOrder]         = useState(false);
-  const [phone, setPhone]                       = useState<string>((user as any)?.phone || '');
-  const [phoneError, setPhoneError]             = useState<string>('');
+  const [placingOrder, setPlacingOrder]       = useState(false);
+  const [phone, setPhone]                     = useState<string>((user as any)?.phone || '');
+  const [phoneError, setPhoneError]           = useState<string>('');
+  const [showOutOfRange, setShowOutOfRange]   = useState(false);
+
+  // Pull the max delivery radius from branch settings (mirrors address-picker logic)
+  const maxDeliveryRadius: number =
+    (branch?.settings as any)?.deliveryPricing?.farRadius ?? 60;
 
   useFocusEffect(
     useCallback(() => {
       if (pendingDeliveryAddress) {
-        setDeliveryAddress(pendingDeliveryAddress as DeliveryAddress);
+        const addr = pendingDeliveryAddress as DeliveryAddress;
+        setDeliveryAddress(addr);
         setPendingDeliveryAddress(null);
+
+        // Immediately show the modal if the returned address is out of range
+        if (addr.outsideZone) {
+          setShowOutOfRange(true);
+        }
       }
     }, [pendingDeliveryAddress])
   );
@@ -98,10 +162,13 @@ export default function CheckoutScreen() {
       Alert.alert('Delivery Address Required', 'Please select a delivery address before continuing.');
       return;
     }
+
+    // ── Out-of-range gate — show modal instead of an Alert ─────────────────
     if (deliveryAddress.outsideZone) {
-      Alert.alert('Outside Delivery Zone', 'Your address is outside our delivery area. Please choose a different address.');
+      setShowOutOfRange(true);
       return;
     }
+
     if (!user) {
       Alert.alert('Sign In Required', 'Please sign in to place an order.');
       return;
@@ -154,7 +221,7 @@ export default function CheckoutScreen() {
         customerInfo: {
           name:  user.name,
           email: user.email,
-          phone: trimmedPhone,         // ← always use the validated input value
+          phone: trimmedPhone,
         },
         items: orderItems,
         shippingAddress: {
@@ -259,6 +326,18 @@ export default function CheckoutScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      {/* ── Out-of-range modal ─────────────────────────────────────────────── */}
+      <OutOfRangeModal
+        visible={showOutOfRange}
+        distance={deliveryAddress?.distance ?? 0}
+        maxRadius={maxDeliveryRadius}
+        onClose={() => setShowOutOfRange(false)}
+        onChangeAddress={() => {
+          setShowOutOfRange(false);
+          router.push('/address-picker');
+        }}
+      />
+
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -280,7 +359,10 @@ export default function CheckoutScreen() {
             <Text style={styles.phoneSubtitle}>
               We'll use this to contact you about your delivery.
             </Text>
-            <View style={[styles.phoneInputWrap, phoneError ? styles.phoneInputWrapError : phoneValid && phone.trim() ? styles.phoneInputWrapValid : null]}>
+            <View style={[
+              styles.phoneInputWrap,
+              phoneError ? styles.phoneInputWrapError : phoneValid && phone.trim() ? styles.phoneInputWrapValid : null,
+            ]}>
               <Phone size={18} color={phoneError ? '#ef4444' : phoneValid && phone.trim() ? '#10b981' : '#9ca3af'} />
               <TextInput
                 style={styles.phoneInput}
@@ -323,9 +405,15 @@ export default function CheckoutScreen() {
                     {[deliveryAddress.city, deliveryAddress.province, deliveryAddress.postalCode].filter(Boolean).join(', ')}
                   </Text>
                   {deliveryAddress.outsideZone ? (
-                    <Text style={styles.outsideZoneText}>
-                      ⚠️ {deliveryAddress.distance.toFixed(1)} km – outside delivery area
-                    </Text>
+                    <TouchableOpacity
+                      onPress={() => setShowOutOfRange(true)}
+                      style={styles.outsideZoneTap}
+                    >
+                      <AlertCircle size={12} color="#ef4444" />
+                      <Text style={styles.outsideZoneText}>
+                        {deliveryAddress.distance.toFixed(1)} km – outside delivery area · Tap for info
+                      </Text>
+                    </TouchableOpacity>
                   ) : (
                     <Text style={styles.deliveryFeeInline}>
                       {deliveryAddress.distance.toFixed(1)} km · Delivery: R{deliveryFee.toFixed(2)}
@@ -440,12 +528,15 @@ export default function CheckoutScreen() {
             </View>
           )}
           {deliveryAddress?.outsideZone && (
-            <View style={styles.footerWarning}>
+            <TouchableOpacity
+              style={styles.footerWarning}
+              onPress={() => setShowOutOfRange(true)}
+            >
               <AlertCircle color="#ef4444" size={14} />
               <Text style={[styles.footerWarningText, { color: '#ef4444' }]}>
-                Address is outside our delivery zone
+                Address is outside our delivery zone · Tap for info
               </Text>
-            </View>
+            </TouchableOpacity>
           )}
           <TouchableOpacity
             style={[styles.placeOrderBtn, !canCheckout && styles.placeOrderBtnDisabled]}
@@ -519,7 +610,8 @@ const styles = StyleSheet.create({
   addressStreet:     { fontSize: 14, fontWeight: '700', color: '#1f2937' },
   addressCity:       { fontSize: 12, color: '#6b7280', marginTop: 2 },
   deliveryFeeInline: { fontSize: 12, color: '#FF6B35', fontWeight: '600', marginTop: 3 },
-  outsideZoneText:   { fontSize: 12, color: '#ef4444', fontWeight: '600', marginTop: 3 },
+  outsideZoneTap:    { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
+  outsideZoneText:   { fontSize: 12, color: '#ef4444', fontWeight: '600' },
   addressEmpty: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     borderWidth: 2, borderColor: '#FF6B35', borderStyle: 'dashed',
@@ -595,4 +687,44 @@ const styles = StyleSheet.create({
   },
   placeOrderBtnDisabled: { backgroundColor: '#d1d5db', shadowOpacity: 0 },
   placeOrderBtnText:     { color: '#fff', fontSize: 17, fontWeight: '800' },
+
+  // ── Out-of-range modal ─────────────────────────────────────────────────────
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  modalCard: {
+    backgroundColor: '#fff', borderRadius: 24, padding: 28,
+    width: '100%', alignItems: 'center',
+    shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 20, elevation: 12,
+  },
+  modalIconWrap: {
+    width: 80, height: 80, borderRadius: 40, backgroundColor: '#fee2e2',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 18,
+  },
+  modalTitle: {
+    fontSize: 20, fontWeight: '800', color: '#1f2937',
+    marginBottom: 10, textAlign: 'center',
+  },
+  modalBody: {
+    fontSize: 14, color: '#4b5563', textAlign: 'center',
+    lineHeight: 22, marginBottom: 8,
+  },
+  modalHighlight: { fontWeight: '700', color: '#ef4444' },
+  modalSub: {
+    fontSize: 13, color: '#9ca3af', textAlign: 'center',
+    lineHeight: 20, marginBottom: 24,
+  },
+  modalPrimaryBtn: {
+    backgroundColor: '#FF6B35', borderRadius: 14, height: 50,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, width: '100%', marginBottom: 12,
+    shadowColor: '#FF6B35', shadowOpacity: 0.35, shadowRadius: 8, elevation: 4,
+  },
+  modalPrimaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  modalSecondaryBtn: {
+    paddingVertical: 12, width: '100%', alignItems: 'center',
+  },
+  modalSecondaryBtnText: { color: '#6b7280', fontSize: 14, fontWeight: '600' },
 });

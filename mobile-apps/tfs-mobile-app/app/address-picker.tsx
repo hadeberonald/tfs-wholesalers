@@ -1,11 +1,4 @@
 // app/address-picker.tsx
-//
-// ─── What changed ────────────────────────────────────────────────────────────
-// 1. Distance-based delivery fee calculation matching web logic
-//    (local / medium / far tiers pulled from branch settings)
-// 2. Reliable "Use My Location" – retries with lower accuracy if Balanced fails
-// 3. Delivery fee + distance surfaced to checkout via store
-// 4. No Leaflet – uses react-native-maps (Google) same as before
 
 import React, { useState, useRef, useCallback } from 'react';
 import {
@@ -32,10 +25,9 @@ export interface DeliveryAddress {
   lat: number;
   lng: number;
   formattedAddress: string;
-  // ✅ NEW – delivery calculation result
   deliveryFee: number;
-  distance: number;          // km
-  outsideZone: boolean;      // true = beyond farRadius → cannot deliver
+  distance: number;
+  outsideZone: boolean;
 }
 
 export interface DeliverySettings {
@@ -56,13 +48,11 @@ interface SearchSuggestion {
 
 const KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY ?? '';
 
-// Default store location (Vryheid area) – overridden by branch settings
 const DEFAULT_STORE: { lat: number; lng: number } = {
   lat: -27.763912,
   lng: 30.798969,
 };
 
-// Default delivery pricing (overridden by branch settings)
 const DEFAULT_DELIVERY: DeliverySettings = {
   local: 35,
   localRadius: 20,
@@ -80,10 +70,8 @@ const INITIAL_REGION: Region = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Distance & delivery fee helpers (mirrors web AddressMapPicker logic)
+// Distance helper
 // ─────────────────────────────────────────────────────────────────────────────
-
-/** Haversine distance in km between two lat/lng points */
 function haversineKm(
   lat1: number, lng1: number,
   lat2: number, lng2: number,
@@ -99,14 +87,13 @@ function haversineKm(
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// ── Only local radius is offered — anything beyond is outside the zone ────────
 function calcDelivery(
   distKm: number,
   settings: DeliverySettings,
 ): { fee: number; outsideZone: boolean } {
-  if (distKm <= settings.localRadius)  return { fee: settings.local,  outsideZone: false };
-  if (distKm <= settings.mediumRadius) return { fee: settings.medium, outsideZone: false };
-  if (distKm <= settings.farRadius)    return { fee: settings.far,    outsideZone: false };
-  return { fee: settings.far, outsideZone: true };
+  if (distKm <= settings.localRadius) return { fee: settings.local, outsideZone: false };
+  return { fee: settings.local, outsideZone: true };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -186,13 +173,11 @@ export default function AddressPickerScreen() {
   const branch  = useStore((s) => s.branch);
   const setPendingDeliveryAddress = useStore((s) => s.setPendingDeliveryAddress);
 
-  // Pull delivery settings from branch or use defaults
   const storeLocation: { lat: number; lng: number } = {
     lat: branch?.settings?.storeLocation?.lat ?? DEFAULT_STORE.lat,
     lng: branch?.settings?.storeLocation?.lng ?? DEFAULT_STORE.lng,
   };
 
-  // ✅ Cast branch settings to DeliverySettings shape
   const deliverySettings: DeliverySettings = {
     local:        (branch?.settings as any)?.deliveryPricing?.local        ?? DEFAULT_DELIVERY.local,
     localRadius:  (branch?.settings as any)?.deliveryPricing?.localRadius  ?? DEFAULT_DELIVERY.localRadius,
@@ -223,7 +208,6 @@ export default function AddressPickerScreen() {
   const suppress    = useRef(false);
   const reqId       = useRef(0);
 
-  // ── Pin bounce ────────────────────────────────────────────────────────────
   const animatePin = useCallback((dragging: boolean) => {
     Animated.spring(pinAnim, {
       toValue: dragging ? -14 : 0,
@@ -231,7 +215,6 @@ export default function AddressPickerScreen() {
     }).start();
   }, [pinAnim]);
 
-  // ── Build full DeliveryAddress with fee ───────────────────────────────────
   const buildAddress = useCallback(
     (base: Omit<DeliveryAddress, 'deliveryFee' | 'distance' | 'outsideZone'>): DeliveryAddress => {
       const distKm  = haversineKm(storeLocation.lat, storeLocation.lng, base.lat, base.lng);
@@ -241,7 +224,6 @@ export default function AddressPickerScreen() {
     [storeLocation, deliverySettings],
   );
 
-  // ── Geocode ───────────────────────────────────────────────────────────────
   const geocode = useCallback(async (lat: number, lng: number) => {
     const id = ++reqId.current;
     setGeocoding(true);
@@ -250,10 +232,6 @@ export default function AddressPickerScreen() {
     const base = result ?? fallbackAddress(lat, lng);
     const full = buildAddress(base);
     setAddress(full);
-    if (!full.formattedAddress.includes(',')) {
-      setGeocoding(false);
-      return;
-    }
     setShowSuggestions((open) => {
       if (!open) setSearchQuery(full.formattedAddress);
       return open;
@@ -261,7 +239,6 @@ export default function AddressPickerScreen() {
     setGeocoding(false);
   }, [buildAddress]);
 
-  // ── Fly to coords ─────────────────────────────────────────────────────────
   const flyTo = useCallback((lat: number, lng: number, delta = 0.008) => {
     suppress.current = true;
     const r: Region = { latitude: lat, longitude: lng, latitudeDelta: delta, longitudeDelta: delta };
@@ -270,7 +247,6 @@ export default function AddressPickerScreen() {
     setTimeout(() => { suppress.current = false; }, 1200);
   }, [geocode]);
 
-  // ── Map events ────────────────────────────────────────────────────────────
   const onRegionChange = useCallback(() => {
     if (!suppress.current) {
       setIsDragging(true);
@@ -285,8 +261,6 @@ export default function AddressPickerScreen() {
     geocode(r.latitude, r.longitude);
   }, [geocode, animatePin]);
 
-  // ── Use My Location ───────────────────────────────────────────────────────
-  // Tries Balanced accuracy first; falls back to Low if it times out or fails.
   const handleUseMyLocation = useCallback(async () => {
     setLocating(true);
     try {
@@ -301,26 +275,18 @@ export default function AddressPickerScreen() {
       }
 
       let loc: Location.LocationObject | null = null;
-
-      // First try: Balanced (fast + decent accuracy)
       try {
         loc = await Promise.race([
           Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('timeout')), 8000)
-          ),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000)),
         ]) as Location.LocationObject;
       } catch {
-        // Second try: Low accuracy (uses cell towers / WiFi – always fast)
         try {
           loc = await Promise.race([
             Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low }),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('timeout')), 6000)
-            ),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 6000)),
           ]) as Location.LocationObject;
         } catch {
-          // Last resort: last known position
           loc = await Location.getLastKnownPositionAsync();
         }
       }
@@ -335,7 +301,7 @@ export default function AddressPickerScreen() {
       }
 
       flyTo(loc.coords.latitude, loc.coords.longitude);
-    } catch (err) {
+    } catch {
       Alert.alert(
         'Location Error',
         'Something went wrong. Please search for your delivery address instead.',
@@ -346,7 +312,6 @@ export default function AddressPickerScreen() {
     }
   }, [flyTo]);
 
-  // ── Search ────────────────────────────────────────────────────────────────
   const onSearchChange = (text: string) => {
     setSearchQuery(text);
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -366,13 +331,12 @@ export default function AddressPickerScreen() {
     if (coords) flyTo(coords.lat, coords.lng);
   };
 
-  // ── Confirm ───────────────────────────────────────────────────────────────
   const onConfirm = () => {
     if (!address) return;
     if (address.outsideZone) {
       Alert.alert(
         'Outside Delivery Zone',
-        `Sorry, your location is ${address.distance.toFixed(1)} km away — beyond our ${deliverySettings.farRadius} km delivery area. Please choose a closer address.`,
+        `Sorry, your location is ${address.distance.toFixed(1)} km away — we only deliver within ${deliverySettings.localRadius} km. Please choose a closer address.`,
         [{ text: 'OK' }],
       );
       return;
@@ -383,14 +347,13 @@ export default function AddressPickerScreen() {
     router.back();
   };
 
-  // ── Delivery fee label ─────────────────────────────────────────────────────
   const deliveryLabel = () => {
     if (!address) return null;
     if (address.outsideZone) {
       return (
         <View style={[styles.feeRow, styles.feeRowError]}>
           <Text style={styles.feeTextError}>
-            ⚠️ {address.distance.toFixed(1)} km – outside delivery zone ({deliverySettings.farRadius} km max)
+            ⚠️ {address.distance.toFixed(1)} km – outside delivery zone ({deliverySettings.localRadius} km max)
           </Text>
         </View>
       );
@@ -399,13 +362,13 @@ export default function AddressPickerScreen() {
       <View style={styles.feeRow}>
         <Truck color="#FF6B35" size={14} />
         <Text style={styles.feeText}>
-          {address.distance.toFixed(1)} km away · Delivery fee: <Text style={styles.feeAmount}>R{address.deliveryFee.toFixed(2)}</Text>
+          {address.distance.toFixed(1)} km away · Delivery fee:{' '}
+          <Text style={styles.feeAmount}>R{address.deliveryFee.toFixed(2)}</Text>
         </Text>
       </View>
     );
   };
 
-  // ── Layout ────────────────────────────────────────────────────────────────
   const topBarTop  = insets.top + 12;
   const suggestTop = insets.top + 72;
   const bottomPad  = insets.bottom + 16;
@@ -529,7 +492,6 @@ export default function AddressPickerScreen() {
           </Text>
         )}
 
-        {/* Use My Location button */}
         <TouchableOpacity
           style={styles.useLocationBtn}
           onPress={handleUseMyLocation}
@@ -545,7 +507,6 @@ export default function AddressPickerScreen() {
           </Text>
         </TouchableOpacity>
 
-        {/* Confirm button */}
         <TouchableOpacity
           style={[
             styles.confirmBtn,
@@ -565,9 +526,6 @@ export default function AddressPickerScreen() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Styles
-// ─────────────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1 },
 

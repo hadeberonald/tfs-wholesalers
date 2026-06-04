@@ -47,7 +47,7 @@ We do not sell, rent, or share your personal information with third parties for 
 - Request deletion of your account and associated data.
 - Object to or restrict certain types of processing.
 
-To exercise any of these rights, please contact us at support@tfswholesalers.co.za or call 034 981 3210.`,
+To exercise any of these rights, please contact us at enquiries@tfswholesalers.co.za or call 034 981 3210.`,
   },
   {
     title: '7. Security',
@@ -63,7 +63,7 @@ To exercise any of these rights, please contact us at support@tfswholesalers.co.
   },
   {
     title: '10. Contact Us',
-    body: `If you have any questions or concerns about this Privacy Policy, please contact:\n\n**TFS Wholesalers**\nPhone: 034 981 3210\nEmail: support@tfswholesalers.com\nSupport hours: Monday–Saturday, 8am–5pm`,
+    body: `If you have any questions or concerns about this Privacy Policy, please contact:\n\n**TFS Wholesalers**\nPhone: 034 981 3210\nEmail: e@tfswholesalers.com\nSupport hours: Monday–Saturday, 8am–5pm`,
   },
 ];
 

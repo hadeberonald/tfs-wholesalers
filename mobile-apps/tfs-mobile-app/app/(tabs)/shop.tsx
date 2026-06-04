@@ -279,9 +279,10 @@ export default function ShopScreen() {
 
   // ── Specials — stock check now mirrors the API's hasAnyStock logic ────────
   const hasAnyStock = (product: any): boolean => {
-    if ((product.stockLevel ?? 0) > 0) return true;
+    const threshold = product.lowStockThreshold ?? 0;
+    if ((product.stockLevel ?? 0) > threshold) return true;
     if (Array.isArray(product.variants)) {
-      return product.variants.some((v: any) => v.active && v.stockLevel > 0);
+      return product.variants.some((v: any) => v.active && (v.stockLevel ?? 0) > threshold);
     }
     return false;
   };

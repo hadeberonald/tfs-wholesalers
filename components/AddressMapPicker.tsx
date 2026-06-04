@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { MapPin, Crosshair, AlertCircle, CheckCircle, Search, Loader2, X } from 'lucide-react';
 
-// Dynamically import map components (Leaflet doesn't work with SSR)
 const MapContainer = dynamic(
   () => import('react-leaflet').then((mod) => mod.MapContainer),
   { ssr: false }
@@ -49,9 +48,8 @@ interface SearchResult {
   boundingbox: string[];
 }
 
-// Helper function to calculate distance between two coordinates (Haversine formula)
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371; // Earth's radius in kilometers
+  const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
   const a =
@@ -64,11 +62,8 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c;
 }
 
-// Map click handler component (must be used inside MapContainer)
 function MapClickHandler({ onLocationChange }: { onLocationChange: (lat: number, lng: number) => void }) {
-  // Import useMapEvents directly in the component (not dynamically)
   const { useMapEvents } = require('react-leaflet');
-  
   useMapEvents({
     click(e: any) {
       onLocationChange(e.latlng.lat, e.latlng.lng);
@@ -96,40 +91,25 @@ export default function AddressMapPicker({
   const [showMap, setShowMap] = useState(false);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
-  // Search addresses as user types
   const handleSearch = async (query: string) => {
     setSearchQuery(query);
-    
     if (query.length < 3) {
       setSearchResults([]);
       setShowResults(false);
       return;
     }
-
-    // Debounce search
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
-
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     searchTimeoutRef.current = setTimeout(async () => {
       setSearching(true);
       setShowResults(true);
-      
       try {
-        // Search within South Africa, prioritizing KwaZulu-Natal
         const response = await fetch(
           `https://nominatim.openstreetmap.org/search?` +
-          `q=${encodeURIComponent(query)}&` +
-          `countrycodes=za&` +
-          `format=json&` +
-          `limit=5&` +
-          `addressdetails=1`
+          `q=${encodeURIComponent(query)}&countrycodes=za&format=json&limit=5&addressdetails=1`
         );
-        
         const data = await response.json();
         setSearchResults(data);
-      } catch (error) {
-        console.error('Search error:', error);
+      } catch {
         setSearchResults([]);
       } finally {
         setSearching(false);
@@ -140,7 +120,6 @@ export default function AddressMapPicker({
   const selectSearchResult = (result: SearchResult) => {
     const lat = parseFloat(result.lat);
     const lng = parseFloat(result.lon);
-    
     setSearchQuery(result.display_name);
     setShowResults(false);
     handleLocationChange(lat, lng);
@@ -149,59 +128,44 @@ export default function AddressMapPicker({
   const getCurrentLocation = () => {
     setLoading(true);
     setError('');
-    
     if (!navigator.geolocation) {
       setError('Geolocation is not supported by your browser');
       setLoading(false);
       return;
     }
-
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        handleLocationChange(latitude, longitude);
+      (pos) => {
+        handleLocationChange(pos.coords.latitude, pos.coords.longitude);
         setLoading(false);
       },
-      (error) => {
-        setError('Unable to get your location. GPS might be inaccurate. Please search for your address instead.');
+      () => {
+        setError('Unable to get your location. Please search for your address instead.');
         setLoading(false);
-        setShowMap(true); // Show map as fallback
+        setShowMap(true);
       },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0
-      }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   };
 
   const handleLocationChange = useCallback(async (lat: number, lng: number) => {
     setPosition({ lat, lng });
-
-    // Calculate distance from store
     const dist = calculateDistance(storeLocation.lat, storeLocation.lng, lat, lng);
     setDistance(dist);
 
-    // Check if within service area (60km)
-    if (dist > 60) {
+    // ── Only local radius is allowed — medium and far are not offered ──────
+    if (dist > deliverySettings.localRadius) {
       setIsWithinRange(false);
-      setError('Sorry, this location is outside our 60km delivery range.');
+      setError(`Sorry, we only deliver within ${deliverySettings.localRadius} km of our store.`);
+      setDeliveryFee(0);
+      onLocationSelect({ lat, lng, address: searchQuery || address, distance: dist, deliveryFee: 0 });
       return;
-    } else {
-      setIsWithinRange(true);
-      setError('');
     }
 
-    // Calculate delivery fee based on distance
-    let fee = deliverySettings.far;
-    if (dist <= deliverySettings.localRadius) {
-      fee = deliverySettings.local;
-    } else if (dist <= deliverySettings.mediumRadius) {
-      fee = deliverySettings.medium;
-    }
+    setIsWithinRange(true);
+    setError('');
+    const fee = deliverySettings.local;
     setDeliveryFee(fee);
 
-    // Reverse geocode to get address (only if we don't have one from search)
     if (!searchQuery || searchQuery.length < 3) {
       try {
         const response = await fetch(
@@ -211,26 +175,17 @@ export default function AddressMapPicker({
         const formattedAddress = data.display_name || `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
         setAddress(formattedAddress);
         setSearchQuery(formattedAddress);
-      } catch (error) {
-        console.error('Geocoding error:', error);
+      } catch {
         setAddress(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
       }
     } else {
       setAddress(searchQuery);
     }
 
-    // Send data to parent
-    onLocationSelect({
-      lat,
-      lng,
-      address: searchQuery || address,
-      distance: dist,
-      deliveryFee: fee,
-    });
+    onLocationSelect({ lat, lng, address: searchQuery || address, distance: dist, deliveryFee: fee });
   }, [storeLocation, deliverySettings, onLocationSelect, searchQuery, address]);
 
   useEffect(() => {
-    // Set default position to store location
     setPosition(storeLocation);
   }, [storeLocation]);
 
@@ -248,7 +203,7 @@ export default function AddressMapPicker({
           <input
             type="text"
             className="input-field pl-10 pr-10"
-            placeholder="Type your street address, suburb, or town (e.g., 'Vryheid', 'Nquthu', 'Blood River')"
+            placeholder="Type your street address, suburb, or town"
             value={searchQuery}
             onChange={(e) => handleSearch(e.target.value)}
             onFocus={() => searchResults.length > 0 && setShowResults(true)}
@@ -261,11 +216,7 @@ export default function AddressMapPicker({
           {searchQuery && !searching && (
             <button
               type="button"
-              onClick={() => {
-                setSearchQuery('');
-                setSearchResults([]);
-                setShowResults(false);
-              }}
+              onClick={() => { setSearchQuery(''); setSearchResults([]); setShowResults(false); }}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
             >
               <X className="w-5 h-5" />
@@ -273,7 +224,6 @@ export default function AddressMapPicker({
           )}
         </div>
 
-        {/* Search Results Dropdown */}
         {showResults && searchResults.length > 0 && (
           <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
             {searchResults.map((result) => (
@@ -289,9 +239,7 @@ export default function AddressMapPicker({
                     <p className="text-sm font-medium text-gray-900 truncate">
                       {result.display_name.split(',')[0]}
                     </p>
-                    <p className="text-xs text-gray-500 line-clamp-2">
-                      {result.display_name}
-                    </p>
+                    <p className="text-xs text-gray-500 line-clamp-2">{result.display_name}</p>
                   </div>
                 </div>
               </button>
@@ -328,7 +276,7 @@ export default function AddressMapPicker({
         </button>
       </div>
 
-      {/* Map (shown on demand or as fallback) */}
+      {/* Map */}
       {showMap && position && (
         <div className="relative h-80 rounded-xl overflow-hidden border-2 border-gray-200 mt-4">
           <MapContainer
@@ -341,33 +289,13 @@ export default function AddressMapPicker({
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
-            
-            {/* Store location marker */}
             <Marker position={[storeLocation.lat, storeLocation.lng]} />
-            
-            {/* Service area circles */}
+            {/* Only show the local delivery circle */}
             <Circle
               center={[storeLocation.lat, storeLocation.lng]}
               radius={deliverySettings.localRadius * 1000}
-              pathOptions={{ color: 'green', fillColor: 'green', fillOpacity: 0.1 }}
+              pathOptions={{ color: '#FF6B35', fillColor: '#FF6B35', fillOpacity: 0.1 }}
             />
-            <Circle
-              center={[storeLocation.lat, storeLocation.lng]}
-              radius={deliverySettings.mediumRadius * 1000}
-              pathOptions={{ color: 'orange', fillColor: 'orange', fillOpacity: 0.1 }}
-            />
-            <Circle
-              center={[storeLocation.lat, storeLocation.lng]}
-              radius={deliverySettings.farRadius * 1000}
-              pathOptions={{ color: 'red', fillColor: 'red', fillOpacity: 0.1 }}
-            />
-            <Circle
-              center={[storeLocation.lat, storeLocation.lng]}
-              radius={60000}
-              pathOptions={{ color: 'gray', fillColor: 'gray', fillOpacity: 0.05, dashArray: '5, 5' }}
-            />
-            
-            {/* Delivery location marker */}
             {position && (
               <Marker
                 position={[position.lat, position.lng]}
@@ -375,16 +303,14 @@ export default function AddressMapPicker({
                 eventHandlers={{
                   dragend: (e) => {
                     const marker = e.target;
-                    const position = marker.getLatLng();
-                    handleLocationChange(position.lat, position.lng);
+                    const pos = marker.getLatLng();
+                    handleLocationChange(pos.lat, pos.lng);
                   },
                 }}
               />
             )}
-            
             <MapClickHandler onLocationChange={handleLocationChange} />
           </MapContainer>
-          
           <div className="absolute top-4 left-4 bg-white rounded-lg shadow-lg p-3 z-10 max-w-xs">
             <p className="text-xs text-gray-600 mb-1">Click on map or drag marker to fine-tune location</p>
             <div className="flex items-center space-x-2">
@@ -407,30 +333,19 @@ export default function AddressMapPicker({
             <div className="flex-1">
               <div className="flex items-center justify-between mb-2">
                 <p className={`text-sm font-medium ${isWithinRange ? 'text-green-900' : 'text-red-900'}`}>
-                  Distance: {distance.toFixed(1)} km from store
+                  {distance.toFixed(1)} km from store
                 </p>
                 {isWithinRange && (
-                  <p className="text-lg font-bold text-brand-orange">
-                    R{deliveryFee.toFixed(2)}
-                  </p>
+                  <p className="text-lg font-bold text-brand-orange">R{deliveryFee.toFixed(2)}</p>
                 )}
               </div>
               {isWithinRange ? (
-                <div className="text-xs text-green-700 space-y-1">
-                  <p>✓ Within delivery range</p>
-                  {distance <= deliverySettings.localRadius && (
-                    <p>✓ Local delivery zone (up to {deliverySettings.localRadius}km) - R{deliverySettings.local}</p>
-                  )}
-                  {distance > deliverySettings.localRadius && distance <= deliverySettings.mediumRadius && (
-                    <p>✓ Medium distance zone ({deliverySettings.localRadius}-{deliverySettings.mediumRadius}km) - R{deliverySettings.medium}</p>
-                  )}
-                  {distance > deliverySettings.mediumRadius && (
-                    <p>✓ Far distance zone ({deliverySettings.mediumRadius}-60km) - R{deliverySettings.far}</p>
-                  )}
-                </div>
+                <p className="text-xs text-green-700">
+                  ✓ Within delivery range (up to {deliverySettings.localRadius} km) — R{deliverySettings.local} flat fee
+                </p>
               ) : (
                 <p className="text-xs text-red-700">
-                  We only deliver within 60km of our store location. Please select a closer address.
+                  We only deliver within {deliverySettings.localRadius} km of our store. Please select a closer address.
                 </p>
               )}
             </div>
@@ -439,7 +354,7 @@ export default function AddressMapPicker({
       )}
 
       {error && !isWithinRange && (
-        <div className="flex items-center space-x-2 text-amber-600 text-sm bg-amber-50 border border-amber-200 rounded-lg p-3">
+        <div className="flex items-center space-x-2 text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg p-3">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           <span>{error}</span>
         </div>

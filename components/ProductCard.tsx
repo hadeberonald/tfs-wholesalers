@@ -63,10 +63,6 @@ interface ProductCardProps {
   product: ProductCardProduct;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// VariantPicker — trigger stays inline, dropdown portals to body as fixed overlay
-// ─────────────────────────────────────────────────────────────────────────────
-
 interface VariantOption {
   value: string;
   label: string;
@@ -88,31 +84,22 @@ function VariantPicker({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Position the portal dropdown relative to the trigger button
   const positionDropdown = () => {
     if (!triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
     const spaceAbove = rect.top;
     const dropdownH = Math.min(280, options.length * 52);
-
-    // Open upward if not enough space below
     if (spaceBelow < dropdownH && spaceAbove > spaceBelow) {
       setDropdownStyle({
-        position: 'fixed',
-        left: rect.left,
-        width: rect.width,
-        bottom: window.innerHeight - rect.top,
-        zIndex: 9999,
+        position: 'fixed', left: rect.left, width: rect.width,
+        bottom: window.innerHeight - rect.top, zIndex: 9999,
         maxHeight: Math.min(spaceAbove - 8, 280),
       });
     } else {
       setDropdownStyle({
-        position: 'fixed',
-        left: rect.left,
-        width: rect.width,
-        top: rect.bottom + 4,
-        zIndex: 9999,
+        position: 'fixed', left: rect.left, width: rect.width,
+        top: rect.bottom + 4, zIndex: 9999,
         maxHeight: Math.min(spaceBelow - 8, 280),
       });
     }
@@ -125,7 +112,6 @@ function VariantPicker({
     setOpen(o => !o);
   };
 
-  // Close on outside click or scroll
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => {
@@ -205,7 +191,6 @@ function VariantPicker({
 
   return (
     <>
-      {/* Compact inline trigger — single row, no height impact */}
       <button
         ref={triggerRef}
         type="button"
@@ -214,40 +199,28 @@ function VariantPicker({
           w-full flex items-center justify-between gap-1.5
           px-2.5 py-1.5 rounded-lg border text-left text-xs
           bg-white transition-all duration-150
-          ${open
-            ? 'border-orange-400 ring-1 ring-orange-200'
-            : 'border-gray-200 hover:border-orange-300'
-          }
+          ${open ? 'border-orange-400 ring-1 ring-orange-200' : 'border-gray-200 hover:border-orange-300'}
         `}
       >
         <span className={`truncate font-medium ${selected.outOfStock ? 'text-gray-400' : 'text-gray-700'}`}>
           {selected.label}
         </span>
-        <ChevronDown
-          className={`w-3 h-3 flex-shrink-0 text-gray-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
-        />
+        <ChevronDown className={`w-3 h-3 flex-shrink-0 text-gray-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
       </button>
-
-      {/* Portal the dropdown so it escapes overflow:hidden on the card */}
-      {typeof document !== 'undefined' && dropdown
-        ? createPortal(dropdown, document.body)
-        : null
-      }
+      {typeof document !== 'undefined' && dropdown ? createPortal(dropdown, document.body) : null}
     </>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ProductCard
-// ─────────────────────────────────────────────────────────────────────────────
-
 export default function ProductCard({ product }: ProductCardProps) {
   const { branch } = useBranch();
 
+  const threshold = product.lowStockThreshold ?? 0;
+
   const getDefaultVariant = (): ProductVariant | undefined => {
     if (!product.hasVariants || !product.variants?.length) return undefined;
-    if (product.stockLevel > 0) return undefined;
-    return product.variants.find(v => v.active && v.stockLevel > 0) ?? undefined;
+    if (product.stockLevel > threshold) return undefined;
+    return product.variants.find(v => v.active && v.stockLevel > threshold) ?? undefined;
   };
 
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | undefined>(getDefaultVariant);
@@ -321,8 +294,9 @@ export default function ProductCard({ product }: ProductCardProps) {
     : (product.images?.[0] || '');
 
   const stock    = selectedVariant ? selectedVariant.stockLevel : product.stockLevel;
-  const inStock  = stock > 0;
-  const lowStock = stock > 0 && stock <= 10;
+  // inStock and lowStock both respect the threshold
+  const inStock  = stock > threshold;
+  const lowStock = stock > threshold && stock <= (threshold + 10);
 
   const displayUnit   = selectedVariant?.unit || product.unit;
   const displayWeight = selectedVariant?.weight;
@@ -382,14 +356,14 @@ export default function ProductCard({ product }: ProductCardProps) {
     {
       value: '',
       label: product.name,
-      sublabel: `R${product.price.toFixed(2)}${product.stockLevel === 0 ? ' · Out of stock' : ''}`,
-      outOfStock: product.stockLevel === 0,
+      sublabel: `R${product.price.toFixed(2)}${product.stockLevel <= threshold ? ' · Out of stock' : ''}`,
+      outOfStock: product.stockLevel <= threshold,
     },
     ...activeVariants.map(v => ({
       value: v._id ?? v.sku,
       label: v.name,
       sublabel: v.price ? `R${(v.specialPrice || v.price).toFixed(2)}` : undefined,
-      outOfStock: v.stockLevel === 0,
+      outOfStock: v.stockLevel <= threshold,
     })),
   ];
 
@@ -402,7 +376,6 @@ export default function ProductCard({ product }: ProductCardProps) {
   const specialBadge = getSpecialBadge();
   const productUrl   = branch ? `/${branch.slug}/shop/${product.slug}` : `/shop/${product.slug}`;
 
-  // Description: more chars when no picker, fewer when picker takes space
   const descMaxChars  = hasVariantPicker ? 55 : 100;
   const truncatedDesc = displayDescription
     ? displayDescription.length > descMaxChars
@@ -424,7 +397,6 @@ export default function ProductCard({ product }: ProductCardProps) {
         </div>
       )}
 
-      {/* Image */}
       <div className="relative aspect-[4/3] overflow-hidden bg-gray-100 flex-shrink-0">
         {primaryImage && !imgError ? (
           <img
@@ -443,7 +415,6 @@ export default function ProductCard({ product }: ProductCardProps) {
           </div>
         )}
 
-        {/* Badges */}
         <div className="absolute top-2 left-2 flex flex-col space-y-1">
           {specialBadge && (
             <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg flex items-center space-x-1">
@@ -474,23 +445,18 @@ export default function ProductCard({ product }: ProductCardProps) {
         )}
       </div>
 
-      {/* Content */}
       <div className="p-3 md:p-4 flex flex-col flex-grow">
-
-        {/* Name */}
         <h3 className="text-sm md:text-base font-semibold text-brand-black line-clamp-2 group-hover:text-brand-orange transition-colors mb-0.5">
           {displayName}
         </h3>
         {displaySize && <p className="text-xs text-gray-400 mb-1">{displaySize}</p>}
 
-        {/* Description — flows naturally, more text when no picker */}
         {truncatedDesc && (
           <p className="text-xs text-gray-500 mb-2 leading-relaxed">
             {truncatedDesc}
           </p>
         )}
 
-        {/* Variant picker — compact single-row trigger, dropdown portals out */}
         {hasVariantPicker && (
           <div className="mb-2" onClick={e => e.preventDefault()}>
             <VariantPicker
@@ -501,10 +467,8 @@ export default function ProductCard({ product }: ProductCardProps) {
           </div>
         )}
 
-        {/* Spacer pushes price + cart to bottom */}
         <div className="flex-grow" />
 
-        {/* Price */}
         <div className="mb-2">
           <div className="flex items-baseline gap-1.5 flex-wrap">
             <span className="text-lg md:text-xl font-bold text-brand-orange whitespace-nowrap">
@@ -528,7 +492,6 @@ export default function ProductCard({ product }: ProductCardProps) {
           )}
         </div>
 
-        {/* Special banners */}
         {special?.type === 'buy_x_get_y' && (
           <div className="mb-2 bg-blue-50 border border-blue-200 rounded-lg p-2">
             <p className="text-xs text-blue-900 font-semibold">
@@ -545,7 +508,6 @@ export default function ProductCard({ product }: ProductCardProps) {
           </div>
         )}
 
-        {/* Add to cart */}
         {inStock ? (
           <div className="flex items-center gap-2 mt-auto" onClick={e => e.preventDefault()}>
             <div className="flex items-center border border-gray-200 rounded-lg">

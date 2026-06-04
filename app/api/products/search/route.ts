@@ -39,14 +39,43 @@ export async function GET(request: NextRequest) {
       branchId: new ObjectId(branchId),
       active: true,
       isLinkedVariant: { $ne: true },
-      // Only show products that have stock at the parent level OR have at least
-      // one active variant with stock — handles both simple and variant products.
+      // Hide products at or below their lowStockThreshold (defaults to 0).
       $and: [
         {
-          $or: [
-            { stockLevel: { $gt: 0 } },
-            { variants: { $elemMatch: { active: true, stockLevel: { $gt: 0 } } } },
-          ],
+          $expr: {
+            $or: [
+              {
+                $gt: [
+                  '$stockLevel',
+                  { $ifNull: ['$lowStockThreshold', 0] },
+                ],
+              },
+              {
+                $gt: [
+                  {
+                    $size: {
+                      $filter: {
+                        input: { $ifNull: ['$variants', []] },
+                        as: 'v',
+                        cond: {
+                          $and: [
+                            { $eq: ['$$v.active', true] },
+                            {
+                              $gt: [
+                                '$$v.stockLevel',
+                                { $ifNull: ['$lowStockThreshold', 0] },
+                              ],
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                  0,
+                ],
+              },
+            ],
+          },
         },
         {
           $or: [

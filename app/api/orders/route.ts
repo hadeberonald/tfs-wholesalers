@@ -83,6 +83,7 @@ export async function POST(request: NextRequest) {
     const customerEmail   = body.customerEmail || body.customerInfo?.email || null;
     const customerPhone   = body.phone         || body.customerInfo?.phone || null;
     const deliveryAddress = body.deliveryAddress || body.shippingAddress?.address || null;
+    const deliveryFee     = body.deliveryFee ?? 0;
 
     const enrichedItems = await Promise.all(
       body.items.map(async (item: any) => {
@@ -141,24 +142,47 @@ export async function POST(request: NextRequest) {
       branchName = branchDoc?.displayName || branchDoc?.name || undefined;
     } catch { /* non-critical */ }
 
+    // ── Look up till account number by customer email + branch ────────────
+    // Matches records in the online_customers collection created via the
+    // Online Customers admin page. Stored on the order document at creation
+    // time so it travels with the order permanently.
+    let tillAccountNumber: string | null = null;
+    if (customerEmail) {
+      try {
+        const branchOid = new ObjectId(body.branchId);
+        const customerRecord = await db.collection('online_customers').findOne({
+          email: customerEmail.toLowerCase(),
+          $or: [
+            { branchId: branchOid },
+            { branchId: body.branchId.toString() },
+          ],
+        });
+        tillAccountNumber = customerRecord?.tillAccountNumber ?? null;
+      } catch (e) {
+        console.warn('[Orders] Till account lookup failed (non-critical):', e);
+      }
+    }
+
     const orderNumber = `ORD-${Date.now()}`;
     const order = {
       ...body,
-      items:         enrichedItems,
-      branchId:      new ObjectId(body.branchId),
+      items:             enrichedItems,
+      branchId:          new ObjectId(body.branchId),
       orderNumber,
-      status:        body.status ?? 'pending',
-      createdAt:     new Date(),
-      updatedAt:     new Date(),
+      status:            body.status ?? 'pending',
+      deliveryFee,
+      tillAccountNumber,
+      createdAt:         new Date(),
+      updatedAt:         new Date(),
       customerName,
       customerEmail,
-      phone:         customerPhone,
+      phone:             customerPhone,
       deliveryAddress,
     };
 
     const result  = await db.collection('orders').insertOne(order);
     const orderId = result.insertedId.toString();
-    console.log('✅ Order created:', orderId, '| customer:', customerEmail ?? 'guest');
+    console.log('✅ Order created:', orderId, '| customer:', customerEmail ?? 'guest', '| till:', tillAccountNumber ?? 'none');
 
     // ── Notify branch pickers (staff app only) ────────────────────────────
     notifyBranchPickers(body.branchId, {
@@ -171,11 +195,13 @@ export async function POST(request: NextRequest) {
     if (customerEmail) {
       const customerEmailPayload = buildOrderConfirmationEmail({
         orderNumber,
-        customerName:    customerName ?? 'Customer',
+        customerName:      customerName ?? 'Customer',
         customerEmail,
-        items:           enrichedItems,
-        total:           body.total ?? 0,
-        deliveryAddress: deliveryAddress ?? undefined,
+        items:             enrichedItems,
+        total:             body.total ?? 0,
+        deliveryFee,
+        deliveryAddress:   deliveryAddress ?? undefined,
+        tillAccountNumber: tillAccountNumber ?? undefined,
       });
       sendTransactionalEmail(customerEmailPayload).catch(() => {});
     }
@@ -184,13 +210,15 @@ export async function POST(request: NextRequest) {
     // Allows staff to ring the order up on the POS system.
     const internalReceiptPayload = buildInternalReceiptEmail({
       orderNumber,
-      customerName:    customerName  ?? 'Unknown Customer',
-      customerEmail:   customerEmail ?? '(no email provided)',
-      phone:           customerPhone  ?? undefined,
-      items:           enrichedItems,
-      total:           body.total ?? 0,
-      deliveryAddress: deliveryAddress ?? undefined,
+      customerName:      customerName  ?? 'Unknown Customer',
+      customerEmail:     customerEmail ?? '(no email provided)',
+      phone:             customerPhone  ?? undefined,
+      items:             enrichedItems,
+      total:             body.total ?? 0,
+      deliveryFee,
+      deliveryAddress:   deliveryAddress ?? undefined,
       branchName,
+      tillAccountNumber: tillAccountNumber ?? undefined,
     });
     sendTransactionalEmail(internalReceiptPayload).catch(() => {});
 

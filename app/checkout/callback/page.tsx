@@ -4,53 +4,53 @@ import { useEffect, useState, Suspense, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { CheckCircle, XCircle, Loader2 } from 'lucide-react';
 
-function CheckoutPaymentCallbackContent() {
+function CheckoutCallbackContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [status, setStatus] = useState<'loading' | 'verifying' | 'success' | 'failed'>('loading');
   const [message, setMessage] = useState('');
-  const [orderId, setOrderId] = useState<string | null>(null);
+  const [reference, setReference] = useState('');
   const hasRun = useRef(false);
 
   useEffect(() => {
-    // Guard against double-invocation in React strict mode
     if (hasRun.current) return;
     hasRun.current = true;
 
-    const reference = searchParams.get('reference') || searchParams.get('trxref');
+    const ref = searchParams.get('reference') || searchParams.get('trxref');
     const paystackStatus = searchParams.get('status');
 
-    // Paystack redirects here with ?status=cancelled when the user closes the popup.
-    // We must NOT call verify in that case — the charge never went through.
-    if (paystackStatus === 'cancelled' || paystackStatus === 'failed' || !reference) {
+    if (ref) setReference(ref);
+
+    if (paystackStatus === 'cancelled' || paystackStatus === 'failed' || !ref) {
       setStatus('failed');
       setMessage('Payment was cancelled or did not complete. Please try again.');
       return;
     }
 
-    verifyPayment(reference);
+    verifyPayment(ref);
   }, [searchParams]);
 
-  const verifyPayment = async (reference: string) => {
+  const verifyPayment = async (ref: string) => {
     setStatus('verifying');
     try {
       const res = await fetch('/api/payment/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reference }),
+        body: JSON.stringify({ reference: ref }),
       });
 
       const data = await res.json();
 
       if (res.ok && data.verified) {
-        setOrderId(data.orderId);
         setStatus('success');
         setMessage('Payment verified! Your order is confirmed and being prepared.');
 
-        // Give the user a moment to see the success state, then redirect
+        // Use branchSlug from verify response to redirect to the correct branch
+        // success page. Fall back to a generic path if not available.
         setTimeout(() => {
-          if (data.orderId) {
-            // Try to find the branch slug from the order, fall back to a generic path
+          if (data.branchSlug && data.orderId) {
+            router.push(`/${data.branchSlug}/checkout/success/${data.orderId}`);
+          } else if (data.orderId) {
             router.push(`/checkout/success/${data.orderId}`);
           } else {
             router.push('/');
@@ -104,9 +104,9 @@ function CheckoutPaymentCallbackContent() {
             <XCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Payment Failed</h2>
             <p className="text-gray-600 mb-2">{message}</p>
-            {searchParams.get('reference') && (
+            {reference && (
               <p className="text-xs text-gray-400 mb-6 font-mono break-all">
-                Reference: {searchParams.get('reference')}
+                Reference: {reference}
               </p>
             )}
             <button
@@ -122,7 +122,7 @@ function CheckoutPaymentCallbackContent() {
   );
 }
 
-export default function CheckoutPaymentCallback() {
+export default function CheckoutCallback() {
   return (
     <Suspense
       fallback={
@@ -131,7 +131,7 @@ export default function CheckoutPaymentCallback() {
         </div>
       }
     >
-      <CheckoutPaymentCallbackContent />
+      <CheckoutCallbackContent />
     </Suspense>
   );
 }

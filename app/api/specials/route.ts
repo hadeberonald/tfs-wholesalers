@@ -121,13 +121,15 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Returns true if a product has stock at the parent level OR has at least one
- * active variant with stock. Mirrors the $or query used in the products API.
+ * Returns true if a product has stock above its lowStockThreshold (defaults to
+ * 0 when unset) at the parent level OR via at least one active variant.
+ * Mirrors the $expr query used in the products API so hiding is consistent.
  */
 function hasAnyStock(product: any): boolean {
-  if (product.stockLevel > 0) return true;
+  const threshold = product.lowStockThreshold ?? 0;
+  if ((product.stockLevel ?? 0) > threshold) return true;
   if (Array.isArray(product.variants)) {
-    return product.variants.some((v: any) => v.active && v.stockLevel > 0);
+    return product.variants.some((v: any) => v.active && (v.stockLevel ?? 0) > threshold);
   }
   return false;
 }

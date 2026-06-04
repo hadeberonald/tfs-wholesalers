@@ -96,7 +96,7 @@ export default function SupportPage() {
               </div>
               <div>
                 <p className="text-xs text-gray-400 mb-0.5">Email Support</p>
-                <p className="text-sm font-medium text-brand-black">support@tfswholesalers.com</p>
+                <p className="text-sm font-medium text-brand-black">enquiries@tfswholesalers.com</p>
               </div>
             </div>
             <div className="flex items-center gap-3 p-4">

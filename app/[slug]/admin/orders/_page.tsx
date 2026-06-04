@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Search, Filter, Eye, Package, Loader2 } from 'lucide-react';
+import { Search, Filter, Eye, Package, Loader2, Hash } from 'lucide-react';
 import toast from 'react-hot-toast';
 import OrderHandlingLog from '@/components/admin/OrderHandlingLog';
 
@@ -15,8 +15,11 @@ interface Order {
   };
   items: any[];
   total: number;
+  subtotal?: number;
+  deliveryFee?: number;
   status: string;
   paymentStatus: string;
+  tillAccountNumber?: string | null;
   createdAt: string;
 }
 
@@ -73,7 +76,8 @@ export default function AdminOrdersPage() {
       const matchesSearch =
         order.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
         order.customerInfo.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.customerInfo.email.toLowerCase().includes(searchTerm.toLowerCase());
+        order.customerInfo.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (order.tillAccountNumber ?? '').toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
 
@@ -136,7 +140,7 @@ export default function AdminOrdersPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search by order number, customer name or email..."
+                placeholder="Search by order number, customer, email, or till account…"
                 className="input-field pl-10"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -184,6 +188,7 @@ export default function AdminOrdersPage() {
                   <tr>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Order</th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Customer</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900 hidden md:table-cell">Till Acc #</th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Items</th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Total</th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Payment</th>
@@ -203,6 +208,18 @@ export default function AdminOrdersPage() {
                           <p className="font-semibold text-gray-900">{order.customerInfo.name}</p>
                           <p className="text-sm text-gray-600">{order.customerInfo.email}</p>
                         </div>
+                      </td>
+                      <td className="px-6 py-4 hidden md:table-cell">
+                        {order.tillAccountNumber ? (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-green-50 border border-green-200 rounded-lg">
+                            <Hash className="w-3 h-3 text-green-600 flex-shrink-0" />
+                            <span className="font-mono text-xs font-semibold text-green-700">
+                              {order.tillAccountNumber}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400 italic">—</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600">
                         {order.items.length} item{order.items.length > 1 ? 's' : ''}
@@ -270,6 +287,24 @@ export default function AdminOrdersPage() {
 
               <div className="p-6 space-y-6">
 
+                {/* Till Account Number — prominent banner when present */}
+                {selectedOrder.tillAccountNumber && (
+                  <div className="flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-xl">
+                    <div className="w-9 h-9 bg-green-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                      <Hash className="w-5 h-5 text-green-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-green-600 font-medium">Till Account Number</p>
+                      <p className="font-mono font-bold text-green-800 text-lg leading-tight">
+                        {selectedOrder.tillAccountNumber}
+                      </p>
+                    </div>
+                    <p className="text-xs text-green-600 ml-auto hidden sm:block">
+                      Use this to ring up on the POS till
+                    </p>
+                  </div>
+                )}
+
                 {/* Order Info */}
                 <div>
                   <h3 className="font-semibold text-brand-black mb-3">Order Information</h3>
@@ -304,6 +339,14 @@ export default function AdminOrdersPage() {
                     <p><strong>Name:</strong> {selectedOrder.customerInfo.name}</p>
                     <p><strong>Email:</strong> {selectedOrder.customerInfo.email}</p>
                     <p><strong>Phone:</strong> {selectedOrder.customerInfo.phone}</p>
+                    {selectedOrder.tillAccountNumber && (
+                      <p>
+                        <strong>Till Account #:</strong>{' '}
+                        <span className="font-mono font-semibold text-green-700">
+                          {selectedOrder.tillAccountNumber}
+                        </span>
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -318,6 +361,9 @@ export default function AdminOrdersPage() {
                         </div>
                         <div className="flex-1">
                           <p className="font-semibold text-sm">{item.name}</p>
+                          {item.variantName && (
+                            <p className="text-xs text-gray-500">{item.variantName}</p>
+                          )}
                           <p className="text-sm text-gray-600">Qty: {item.quantity} × R{item.price.toFixed(2)}</p>
                         </div>
                         <p className="font-semibold">R{(item.price * item.quantity).toFixed(2)}</p>
@@ -326,15 +372,31 @@ export default function AdminOrdersPage() {
                   </div>
                 </div>
 
-                {/* Total */}
-                <div className="border-t pt-4">
-                  <div className="flex justify-between text-xl font-bold text-brand-black">
+                {/* Totals breakdown */}
+                <div className="border-t pt-4 space-y-2">
+                  {/* Subtotal (items only) */}
+                  {selectedOrder.subtotal != null ? (
+                    <div className="flex justify-between text-sm text-gray-600">
+                      <span>Subtotal</span>
+                      <span>R{selectedOrder.subtotal.toFixed(2)}</span>
+                    </div>
+                  ) : null}
+
+                  {/* Delivery fee as its own line */}
+                  {(selectedOrder.deliveryFee ?? 0) > 0 && (
+                    <div className="flex justify-between text-sm text-gray-600">
+                      <span>Delivery Fee</span>
+                      <span>R{(selectedOrder.deliveryFee ?? 0).toFixed(2)}</span>
+                    </div>
+                  )}
+
+                  <div className="flex justify-between text-xl font-bold text-brand-black border-t pt-2 mt-2">
                     <span>Total</span>
                     <span className="text-brand-orange">R{selectedOrder.total.toFixed(2)}</span>
                   </div>
                 </div>
 
-                {/* ── Accountability Log ── */}
+                {/* Accountability Log */}
                 <div className="border-t pt-2">
                   <OrderHandlingLog orderId={selectedOrder._id} />
                 </div>

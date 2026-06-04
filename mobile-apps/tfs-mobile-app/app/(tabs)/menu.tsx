@@ -127,7 +127,7 @@ export default function MenuScreen() {
           icon="❓"
           title="Help Center"
           subtitle="Get help and support"
-          onPress={() => Alert.alert('Help', 'Contact support at support@tfswholesalers.com')}
+          onPress={() => Alert.alert('Help', 'Contact support at suppo@tfswholesalers.com')}
         />
         <MenuItem
           icon="ℹ️"

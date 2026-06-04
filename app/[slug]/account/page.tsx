@@ -247,7 +247,7 @@ export default function AccountPage() {
                 Our customer support team is here to assist you with any questions or concerns.
               </p>
               <div className="flex flex-col sm:flex-row gap-4">
-                <a href="mailto:support@tfswholesalers.com" className="bg-white text-brand-orange px-6 py-3 rounded-xl font-semibold hover:bg-gray-100 transition-colors text-center">
+                <a href="mailto:enquiries@tfswholesalers.com" className="bg-white text-brand-orange px-6 py-3 rounded-xl font-semibold hover:bg-gray-100 transition-colors text-center">
                   Email Support
                 </a>
                 <a href="tel:0349813210" className="bg-white/20 backdrop-blur-sm text-white px-6 py-3 rounded-xl font-semibold hover:bg-white/30 transition-colors text-center">

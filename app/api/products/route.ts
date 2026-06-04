@@ -34,12 +34,47 @@ export async function GET(request: NextRequest) {
     } else {
       query.active = true;
       query.isLinkedVariant = { $ne: true };
-      // Only show products that have stock at the parent level OR have at least
-      // one active variant with stock — handles both simple and variant products.
-      query.$or = [
-        { stockLevel: { $gt: 0 } },
-        { variants: { $elemMatch: { active: true, stockLevel: { $gt: 0 } } } },
-      ];
+      // Hide products at or below their lowStockThreshold (defaults to 0) so
+      // the storefront self-hides before the API sync catches up with reality.
+      // A product is visible only if stockLevel > lowStockThreshold (or > 0
+      // when no threshold is set), and the same logic applies to variants.
+      query.$expr = {
+        $or: [
+          // Simple product: stockLevel > (lowStockThreshold ?? 0)
+          {
+            $gt: [
+              '$stockLevel',
+              { $ifNull: ['$lowStockThreshold', 0] },
+            ],
+          },
+          // Variant product: at least one active variant above its threshold
+          // (variants don't carry their own threshold, so use the parent's)
+          {
+            $gt: [
+              {
+                $size: {
+                  $filter: {
+                    input: { $ifNull: ['$variants', []] },
+                    as: 'v',
+                    cond: {
+                      $and: [
+                        { $eq: ['$$v.active', true] },
+                        {
+                          $gt: [
+                            '$$v.stockLevel',
+                            { $ifNull: ['$lowStockThreshold', 0] },
+                          ],
+                        },
+                      ],
+                    },
+                  },
+                },
+              },
+              0,
+            ],
+          },
+        ],
+      };
       if (branchId) query.branchId = new ObjectId(branchId);
     }
 

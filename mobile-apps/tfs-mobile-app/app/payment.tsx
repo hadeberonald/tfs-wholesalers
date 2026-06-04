@@ -6,14 +6,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  Shield, XCircle, ChevronLeft, Lock, Package, RefreshCw, Zap,
+  Shield, XCircle, ChevronLeft, Lock, Package, RefreshCw,
 } from 'lucide-react-native';
 import { WebView } from 'react-native-webview';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useStore } from '@/lib/store';
 import api from '@/lib/api';
 
-type PaymentStatus = 'idle' | 'initializing' | 'webview' | 'verifying' | 'failed' | 'refunding';
+type PaymentStatus = 'initializing' | 'webview' | 'verifying' | 'failed' | 'refunding';
 
 interface OrderSummaryItem {
   name: string; quantity: number; price: number;
@@ -25,30 +25,54 @@ function buildPaystackHTML(publicKey: string, email: string, amountKobo: number,
 <!DOCTYPE html>
 <html>
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <script src="https://js.paystack.co/v1/inline.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #f9fafb;
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; font-family: -apple-system, sans-serif;
+    }
+    .loading {
+      text-align: center; padding: 32px;
+    }
+    .loading-title { font-size: 17px; font-weight: 600; color: #1f2937; margin-bottom: 8px; }
+    .loading-sub   { font-size: 13px; color: #6b7280; }
+    .spinner {
+      width: 40px; height: 40px; border: 3px solid #f3f4f6;
+      border-top-color: #FF6B35; border-radius: 50%;
+      animation: spin 0.8s linear infinite; margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
 </head>
-<body style="background:#f9fafb;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">
-  <div id="loading" style="text-align:center;font-family:sans-serif;">
-    <div style="font-size:18px;color:#1f2937;margin-bottom:8px;">Opening secure payment…</div>
-    <div style="color:#6b7280;font-size:14px;">Please wait</div>
+<body>
+  <div class="loading">
+    <div class="spinner"></div>
+    <div class="loading-title">Opening secure payment…</div>
+    <div class="loading-sub">Please do not close this screen</div>
   </div>
   <script>
     window.onload = function() {
-      var handler = PaystackPop.setup({
-        key: '${publicKey}',
-        email: '${email}',
-        amount: ${amountKobo},
-        currency: 'ZAR',
-        ref: '${reference}',
-        onClose: function() {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ event: 'closed' }));
-        },
-        callback: function(response) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ event: 'success', reference: response.reference }));
-        }
-      });
-      handler.openIframe();
+      try {
+        var handler = PaystackPop.setup({
+          key: '${publicKey}',
+          email: '${email}',
+          amount: ${amountKobo},
+          currency: 'ZAR',
+          ref: '${reference}',
+          onClose: function() {
+            window.ReactNativeWebView.postMessage(JSON.stringify({ event: 'closed' }));
+          },
+          callback: function(response) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({ event: 'success', reference: response.reference }));
+          }
+        });
+        handler.openIframe();
+      } catch(e) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ event: 'error', message: e.message }));
+      }
     };
   </script>
 </body>
@@ -58,14 +82,13 @@ function buildPaystackHTML(publicKey: string, email: string, amountKobo: number,
 
 function StatusBadge({ status }: { status: PaymentStatus }) {
   const map: Record<string, { color: string; bg: string; label: string }> = {
-    idle:         { color: '#6b7280', bg: '#f3f4f6', label: 'Ready' },
     initializing: { color: '#f59e0b', bg: '#fef3c7', label: 'Preparing…' },
     webview:      { color: '#3b82f6', bg: '#dbeafe', label: 'In Progress' },
     verifying:    { color: '#8b5cf6', bg: '#ede9fe', label: 'Verifying…' },
     failed:       { color: '#ef4444', bg: '#fee2e2', label: 'Failed' },
     refunding:    { color: '#f59e0b', bg: '#fef3c7', label: 'Refunding…' },
   };
-  const s = map[status] || map.idle;
+  const s = map[status] || map.initializing;
   return (
     <View style={[styles.badge, { backgroundColor: s.bg }]}>
       <View style={[styles.badgeDot, { backgroundColor: s.color }]} />
@@ -82,31 +105,29 @@ export default function PaymentScreen() {
   const user      = useStore((s) => s.user);
   const clearCart = useStore((s) => s.clearCart);
 
-  const [status, setStatus]             = useState<PaymentStatus>('idle');
+  const [status, setStatus]             = useState<PaymentStatus>('initializing');
   const [paystackHtml, setPaystackHtml] = useState<string | null>(null);
   const [reference, setReference]       = useState('');
   const [orderItems, setOrderItems]     = useState<OrderSummaryItem[]>([]);
   const [errorMessage, setErrorMessage] = useState('');
-  const [pulseAnim] = useState(new Animated.Value(1));
+  const hasInitialized                  = useRef(false);
 
   const orderId     = params?.orderId     || '';
   const amount      = parseFloat(params?.amount || '0');
   const orderNumber = params?.orderNumber || '';
 
+  // Load order items for the summary card
   useEffect(() => {
-    if (status === 'idle') {
-      const loop = Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, { toValue: 1.03, duration: 900, useNativeDriver: true }),
-          Animated.timing(pulseAnim, { toValue: 1,    duration: 900, useNativeDriver: true }),
-        ])
-      );
-      loop.start();
-      return () => loop.stop();
-    }
-  }, [status]);
+    if (orderId) loadOrderItems();
+  }, [orderId]);
 
-  useEffect(() => { if (orderId) loadOrderItems(); }, [orderId]);
+  // Auto-initialize payment as soon as the screen mounts — no extra tap needed
+  useEffect(() => {
+    if (!hasInitialized.current && orderId && user?.email) {
+      hasInitialized.current = true;
+      initPayment();
+    }
+  }, [orderId, user?.email]);
 
   const loadOrderItems = async () => {
     try {
@@ -122,23 +143,31 @@ export default function PaymentScreen() {
   const initPayment = async () => {
     if (!user?.email) {
       Alert.alert('Sign In Required', 'Please sign in to complete your payment.');
+      router.back();
       return;
     }
     setStatus('initializing');
     try {
       const res = await api.post('/api/payment/initialize', { orderId, email: user.email, amount });
-      if (res.data.success) {
-        setReference(res.data.reference);
-        if (res.data.charged) {
-          await handleVerify(res.data.reference);
-          return;
-        }
-        const html = buildPaystackHTML(res.data.publicKey, user.email, Math.round(amount * 100), res.data.reference);
-        setPaystackHtml(html);
-        setStatus('webview');
-      } else {
-        throw new Error(res.data.error || 'Initialization failed');
+      if (!res.data.success) throw new Error(res.data.error || 'Initialization failed');
+
+      setReference(res.data.reference);
+
+      // Saved-card charge: skip the WebView entirely
+      if (res.data.charged) {
+        await handleVerify(res.data.reference);
+        return;
       }
+
+      // New card: show the Paystack WebView
+      const html = buildPaystackHTML(
+        res.data.publicKey,
+        user.email,
+        Math.round(amount * 100),
+        res.data.reference,
+      );
+      setPaystackHtml(html);
+      setStatus('webview');
     } catch (e: any) {
       setStatus('failed');
       setErrorMessage(e?.message || 'Could not start payment. Please try again.');
@@ -148,8 +177,19 @@ export default function PaymentScreen() {
   const onWebViewMessage = async (event: any) => {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
-      if (msg.event === 'closed') { setStatus('idle'); setPaystackHtml(null); }
-      else if (msg.event === 'success') { setPaystackHtml(null); setStatus('verifying'); await handleVerify(msg.reference); }
+      if (msg.event === 'closed') {
+        // User closed the Paystack popup — go back to checkout rather than
+        // sitting on a blank screen
+        router.back();
+      } else if (msg.event === 'success') {
+        setPaystackHtml(null);
+        setStatus('verifying');
+        await handleVerify(msg.reference);
+      } else if (msg.event === 'error') {
+        setStatus('failed');
+        setErrorMessage(msg.message || 'Payment encountered an error.');
+        setPaystackHtml(null);
+      }
     } catch {}
   };
 
@@ -209,31 +249,86 @@ export default function PaymentScreen() {
     }
   };
 
-  // WebView payment page
+  // ── WebView (Paystack payment iframe) ────────────────────────────────────
   if (status === 'webview' && paystackHtml) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top']}>
         <View style={styles.webViewHeader}>
-          <TouchableOpacity onPress={() => { setStatus('idle'); setPaystackHtml(null); }} style={styles.webViewBack}>
+          <TouchableOpacity
+            onPress={() => {
+              // Going back here means the user cancelled — return to checkout
+              router.back();
+            }}
+            style={styles.webViewBack}
+          >
             <ChevronLeft color="#1f2937" size={24} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={styles.webViewTitle}>Secure Payment</Text>
-            <Text style={styles.webViewSub}>Powered by Paystack</Text>
+            <Text style={styles.webViewSub}>Powered by Paystack · Order {orderNumber}</Text>
           </View>
           <View style={styles.lockBadge}>
             <Lock color="#10b981" size={14} />
             <Text style={styles.lockText}>SSL</Text>
           </View>
         </View>
+
         <WebView
           source={{ html: paystackHtml }}
           onMessage={onWebViewMessage}
-          javaScriptEnabled domStorageEnabled startInLoadingState
+          javaScriptEnabled
+          domStorageEnabled
+          startInLoadingState
+          setSupportMultipleWindows={false}
+          // Intercept Paystack's internal redirect to standard.paystack.co/close
+          // so it never opens an external browser. The reference lives in the
+          // query string: ?trxref=xxx&reference=xxx
+          onShouldStartLoadWithRequest={(req) => {
+            const url = req.url || '';
+
+            // Allow the initial blank/about page and paystack JS to load
+            if (
+              url === 'about:blank' ||
+              url.startsWith('data:') ||
+              url.includes('paystack.co/assets') ||
+              url.includes('paystack.co/v1') ||
+              url.includes('js.paystack.co')
+            ) {
+              return true;
+            }
+
+            // Catch the post-payment redirect — extract reference and fire success
+            if (url.includes('paystack.co/close') || url.includes('paystack.co/charge')) {
+              try {
+                const qs      = url.split('?')[1] || '';
+                const params  = Object.fromEntries(qs.split('&').map(p => p.split('=')));
+                const ref     = params.reference || params.trxref || reference;
+                if (ref) {
+                  setPaystackHtml(null);
+                  setStatus('verifying');
+                  handleVerify(ref);
+                } else {
+                  // Reference missing — treat as closed
+                  router.back();
+                }
+              } catch {
+                router.back();
+              }
+              return false; // Block the navigation
+            }
+
+            // Block any other external navigation (e.g. bank 3DS pages that
+            // Paystack inline handles internally via its own iframe)
+            if (url.startsWith('http') && !url.includes('paystack.co')) {
+              return false;
+            }
+
+            return true;
+          }}
           renderLoading={() => (
             <View style={styles.webViewLoading}>
               <ActivityIndicator size="large" color="#FF6B35" />
-              <Text style={{ color: '#6b7280', marginTop: 12 }}>Loading secure checkout…</Text>
+              <Text style={styles.webViewLoadingText}>Loading secure checkout…</Text>
             </View>
           )}
         />
@@ -241,13 +336,18 @@ export default function PaymentScreen() {
     );
   }
 
+  // ── Failed ────────────────────────────────────────────────────────────────
   if (status === 'failed') {
     return (
       <SafeAreaView style={styles.resultContainer} edges={['top']}>
         <View style={styles.failCircle}><XCircle color="#ef4444" size={72} /></View>
         <Text style={styles.resultTitle}>Payment Failed</Text>
         <Text style={styles.resultSub}>{errorMessage || 'Something went wrong. Please try again.'}</Text>
-        <TouchableOpacity style={styles.retryBtn} onPress={() => setStatus('idle')}>
+        <TouchableOpacity style={styles.retryBtn} onPress={() => {
+          hasInitialized.current = false;
+          setErrorMessage('');
+          initPayment();
+        }}>
           <RefreshCw color="#fff" size={20} />
           <Text style={styles.retryText}>Try Again</Text>
         </TouchableOpacity>
@@ -258,19 +358,29 @@ export default function PaymentScreen() {
     );
   }
 
-  const isProcessing = status === 'initializing' || status === 'verifying' || status === 'refunding';
+  // ── Initializing / Verifying / Refunding ──────────────────────────────────
+  const processingLabel =
+    status === 'initializing' ? 'Preparing your payment…' :
+    status === 'verifying'    ? 'Verifying payment…' :
+    'Processing refund…';
+
+  const processingSubLabel =
+    status === 'refunding'
+      ? 'Some items were out of stock. We\'re issuing an automatic refund.'
+      : 'Please do not close this screen.';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <ChevronLeft color="#1f2937" size={24} />
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} disabled={status === 'verifying' || status === 'refunding'}>
+          <ChevronLeft color={status === 'verifying' || status === 'refunding' ? '#d1d5db' : '#1f2937'} size={24} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Checkout</Text>
         <StatusBadge status={status} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        {/* Order summary card */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Package color="#FF6B35" size={20} />
@@ -294,13 +404,13 @@ export default function PaymentScreen() {
           </View>
         </View>
 
+        {/* Security badges */}
         <View style={styles.securityRow}>
           <Shield color="#10b981" size={16} />
           <Text style={styles.securityText}>
             Payments are processed securely by Paystack. Your card details are never stored.
           </Text>
         </View>
-
         <View style={styles.trustRow}>
           {['256-bit SSL', 'PCI-DSS', 'ZAR Secured'].map((label) => (
             <View key={label} style={styles.trustBadge}>
@@ -310,36 +420,13 @@ export default function PaymentScreen() {
           ))}
         </View>
 
-        {isProcessing && (
-          <View style={styles.processingCard}>
-            <ActivityIndicator color="#FF6B35" size="large" />
-            <Text style={styles.processingTitle}>
-              {status === 'initializing' ? 'Preparing Payment…' :
-               status === 'verifying'    ? 'Verifying Payment…' :
-               'Processing Refund…'}
-            </Text>
-            <Text style={styles.processingText}>
-              {status === 'refunding'
-                ? "Some items were out of stock. We're issuing an automatic refund."
-                : 'Please do not close this screen.'}
-            </Text>
-          </View>
-        )}
-      </ScrollView>
-
-      {/* NOTE: paddingBottom uses insets.bottom so it clears the Android nav bar on all devices */}
-      {!isProcessing && (
-        <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
-          <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-            <TouchableOpacity style={styles.payBtn} onPress={initPayment}>
-              <Zap color="#fff" size={22} fill="#fff" />
-              <Text style={styles.payBtnText}>Pay R{amount.toFixed(2)}</Text>
-              <Lock color="rgba(255,255,255,0.7)" size={16} />
-            </TouchableOpacity>
-          </Animated.View>
-          <Text style={styles.footerNote}>You will be redirected to Paystack's secure gateway</Text>
+        {/* Processing state */}
+        <View style={styles.processingCard}>
+          <ActivityIndicator color="#FF6B35" size="large" />
+          <Text style={styles.processingTitle}>{processingLabel}</Text>
+          <Text style={styles.processingText}>{processingSubLabel}</Text>
         </View>
-      )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -359,7 +446,7 @@ const styles = StyleSheet.create({
   badgeDot:  { width: 7, height: 7, borderRadius: 4 },
   badgeText: { fontSize: 11, fontWeight: '700' },
 
-  scroll: { padding: 16, paddingBottom: 140 },
+  scroll: { padding: 16, paddingBottom: 40 },
 
   card: {
     backgroundColor: '#fff', borderRadius: 18, padding: 18, marginBottom: 14,
@@ -401,29 +488,15 @@ const styles = StyleSheet.create({
   processingTitle: { fontSize: 18, fontWeight: '700', color: '#1f2937', textAlign: 'center' },
   processingText:  { fontSize: 13, color: '#6b7280', textAlign: 'center', lineHeight: 20 },
 
-  // NOTE: paddingBottom is applied inline using insets.bottom + 16
-  footer: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: '#fff', padding: 20,
-    borderTopWidth: 1, borderTopColor: '#f3f4f6',
-  },
-  payBtn: {
-    backgroundColor: '#FF6B35', borderRadius: 18, height: 60,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
-    shadowColor: '#FF6B35', shadowOpacity: 0.45, shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 }, elevation: 8,
-  },
-  payBtnText:  { fontSize: 18, fontWeight: '800', color: '#fff' },
-  footerNote:  { textAlign: 'center', fontSize: 11, color: '#9ca3af', marginTop: 10 },
-
+  // WebView
   webViewHeader: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
     paddingTop: 12, paddingBottom: 14, paddingHorizontal: 16,
     borderBottomWidth: 1, borderBottomColor: '#f3f4f6', gap: 12,
   },
-  webViewBack:  { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  webViewTitle: { fontSize: 16, fontWeight: '700', color: '#1f2937' },
-  webViewSub:   { fontSize: 12, color: '#9ca3af' },
+  webViewBack:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  webViewTitle:     { fontSize: 16, fontWeight: '700', color: '#1f2937' },
+  webViewSub:       { fontSize: 12, color: '#9ca3af' },
   lockBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: '#d1fae5', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
@@ -433,7 +506,9 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     alignItems: 'center', justifyContent: 'center', backgroundColor: '#f9fafb',
   },
+  webViewLoadingText: { color: '#6b7280', marginTop: 12, fontSize: 14 },
 
+  // Failed
   resultContainer: {
     flex: 1, backgroundColor: '#f9fafb',
     alignItems: 'center', justifyContent: 'center', padding: 32,

@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
           </div>
           <div style="background:#f5f5f5;padding:20px 32px;text-align:center;font-size:12px;color:#999;border-top:1px solid #eee">
             © ${new Date().getFullYear()} TFS Wholesalers &nbsp;·&nbsp;
-            <a href="mailto:support@tfswholesalers.com" style="color:#999">support@tfswholesalers.com</a>
+            <a href="mailto:enquiries@tfswholesalers.com" style="color:#999">enquiries@tfswholesalers.com</a>
           </div>
         </div>
       `,

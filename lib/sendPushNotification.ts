@@ -81,7 +81,7 @@ export async function sendTransactionalEmail(payload: EmailPayload): Promise<voi
   }
 }
 
-// ─── Email templates ──────────────────────────────────────────────────────────
+// ─── Email wrapper ────────────────────────────────────────────────────────────
 
 function emailWrapper(content: string): string {
   return `
@@ -92,22 +92,29 @@ function emailWrapper(content: string): string {
     <div style="padding:32px">${content}</div>
     <div style="background:#f5f5f5;padding:20px 32px;text-align:center;font-size:12px;color:#999;border-top:1px solid #eee">
       © ${new Date().getFullYear()} TFS Wholesalers &nbsp;·&nbsp;
-      <a href="mailto:support@tfswholesalers.com" style="color:#999">support@tfswholesalers.com</a>
+      <a href="mailto:enquiries@tfswholesalers.com" style="color:#999">enquiries@tfswholesalers.com</a>
     </div>
   </div>`;
 }
 
-// ─── Customer confirmation email ──────────────────────────────────────────────
+// ─── Customer order confirmation email ───────────────────────────────────────
 
 export function buildOrderConfirmationEmail(order: {
-  orderNumber:      string;
-  customerName:     string;
-  customerEmail:    string;
-  items:            { name: string; variantName?: string; quantity: number; price: number }[];
-  total:            number;
-  deliveryAddress?: string;
-  phone?:           string;
+  orderNumber:       string;
+  customerName:      string;
+  customerEmail:     string;
+  items:             { name: string; variantName?: string; quantity: number; price: number }[];
+  total:             number;
+  /** Delivery fee shown as its own line item. Pass 0 or omit to hide. */
+  deliveryFee?:      number;
+  deliveryAddress?:  string;
+  phone?:            string;
+  /** Till account number from the online_customers collection. */
+  tillAccountNumber?: string;
 }): EmailPayload {
+  const fee      = order.deliveryFee ?? 0;
+  const subtotal = order.items.reduce((s, i) => s + i.price * i.quantity, 0);
+
   const rows = order.items.map(i => `
     <tr>
       <td style="padding:10px 8px;border-bottom:1px solid #f0f0f0">
@@ -117,6 +124,26 @@ export function buildOrderConfirmationEmail(order: {
       <td style="padding:10px 8px;border-bottom:1px solid #f0f0f0;text-align:right">R${(i.price * i.quantity).toFixed(2)}</td>
     </tr>`).join('');
 
+  // Subtotal + delivery rows — only rendered when there is a delivery fee to break out
+  const subtotalRow = fee > 0 ? `
+    <tr>
+      <td colspan="2" style="padding:8px 8px;text-align:right;font-size:13px;color:#888">Subtotal</td>
+      <td style="padding:8px 8px;text-align:right;font-size:13px;color:#555">R${subtotal.toFixed(2)}</td>
+    </tr>` : '';
+
+  const deliveryRow = fee > 0 ? `
+    <tr>
+      <td colspan="2" style="padding:8px 8px;text-align:right;font-size:13px;color:#888">Delivery Fee</td>
+      <td style="padding:8px 8px;text-align:right;font-size:13px;color:#555">R${fee.toFixed(2)}</td>
+    </tr>` : '';
+
+  // Till account banner — only shown when the customer has a linked account
+  const tillBanner = order.tillAccountNumber ? `
+    <div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:14px 18px;margin-bottom:24px">
+      <p style="margin:0 0 4px;font-size:11px;color:#16a34a;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">🏷️ Your Till Account Number</p>
+      <p style="margin:0;font-size:20px;font-weight:800;color:#15803d;font-family:monospace">${order.tillAccountNumber}</p>
+    </div>` : '';
+
   const html = emailWrapper(`
     <h2 style="margin:0 0 8px;font-size:20px">Order Confirmed ✅</h2>
     <p style="color:#555;margin:0 0 24px">Hi ${order.customerName}, we've received your order and it's being prepared.</p>
@@ -124,6 +151,7 @@ export function buildOrderConfirmationEmail(order: {
       <p style="margin:0;font-size:12px;color:#aaa;text-transform:uppercase;letter-spacing:0.5px">Order Number</p>
       <p style="margin:4px 0 0;font-size:22px;font-weight:700;color:#FF6B35">${order.orderNumber}</p>
     </div>
+    ${tillBanner}
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
       <thead>
         <tr style="background:#f9f9f9">
@@ -134,6 +162,8 @@ export function buildOrderConfirmationEmail(order: {
       </thead>
       <tbody>${rows}</tbody>
       <tfoot>
+        ${subtotalRow}
+        ${deliveryRow}
         <tr>
           <td colspan="2" style="padding:12px 8px;font-weight:700;text-align:right;font-size:15px">Total</td>
           <td style="padding:12px 8px;font-weight:700;text-align:right;font-size:15px;color:#FF6B35">R${order.total.toFixed(2)}</td>
@@ -154,19 +184,26 @@ export function buildOrderConfirmationEmail(order: {
 
 // ─── Internal POS receipt email ───────────────────────────────────────────────
 // Sent to the store's online-orders inbox so staff can ring the order up on the
-// POS system. Formatted for quick scanning: order number prominent, itemised
-// list with quantities, customer contact details, delivery address.
+// POS system. Formatted for quick scanning: till account prominent at top,
+// itemised list with quantities, delivery fee line item, customer contact details.
 
 export function buildInternalReceiptEmail(order: {
-  orderNumber:      string;
-  customerName:     string;
-  customerEmail:    string;
-  phone?:           string;
-  items:            { name: string; variantName?: string; quantity: number; price: number; sku?: string }[];
-  total:            number;
-  deliveryAddress?: string;
-  branchName?:      string;
+  orderNumber:       string;
+  customerName:      string;
+  customerEmail:     string;
+  phone?:            string;
+  items:             { name: string; variantName?: string; quantity: number; price: number; sku?: string }[];
+  total:             number;
+  /** Delivery fee shown as its own line item. Pass 0 or omit to hide. */
+  deliveryFee?:      number;
+  deliveryAddress?:  string;
+  branchName?:       string;
+  /** Till account number from the online_customers collection. */
+  tillAccountNumber?: string;
 }): EmailPayload {
+  const fee      = order.deliveryFee ?? 0;
+  const subtotal = order.items.reduce((s, i) => s + i.price * i.quantity, 0);
+
   const rows = order.items.map(i => `
     <tr>
       <td style="padding:10px 8px;border-bottom:1px solid #f0f0f0;font-size:14px">
@@ -178,12 +215,39 @@ export function buildInternalReceiptEmail(order: {
       <td style="padding:10px 8px;border-bottom:1px solid #f0f0f0;text-align:right;font-size:14px;font-weight:600">R${(i.price * i.quantity).toFixed(2)}</td>
     </tr>`).join('');
 
+  // Subtotal + delivery footer rows — only rendered when there is a delivery fee
+  const deliveryFooterRows = fee > 0 ? `
+    <tr>
+      <td colspan="3" style="padding:8px 8px;text-align:right;font-size:13px;color:#888">Subtotal</td>
+      <td style="padding:8px 8px;text-align:right;font-size:13px;color:#555">R${subtotal.toFixed(2)}</td>
+    </tr>
+    <tr>
+      <td colspan="3" style="padding:8px 8px;text-align:right;font-size:13px;color:#888">Delivery Fee</td>
+      <td style="padding:8px 8px;text-align:right;font-size:13px;color:#555">R${fee.toFixed(2)}</td>
+    </tr>` : '';
+
+  // Till account banner — large and prominent for quick POS lookup.
+  // Shows a yellow warning if no account is linked yet.
+  const tillBanner = order.tillAccountNumber
+    ? `<div style="background:#f0fdf4;border:2px solid #86efac;border-radius:10px;padding:16px 20px;margin-bottom:24px">
+        <p style="margin:0 0 4px;font-size:11px;color:#16a34a;font-weight:700;text-transform:uppercase;letter-spacing:1px">🏷️ Till Account Number — Use this on POS</p>
+        <p style="margin:0;font-size:32px;font-weight:800;color:#15803d;font-family:'Courier New',monospace;letter-spacing:2px">${order.tillAccountNumber}</p>
+       </div>`
+    : `<div style="background:#fef9c3;border:1.5px solid #fde047;border-radius:10px;padding:14px 18px;margin-bottom:24px">
+        <p style="margin:0;font-size:13px;color:#854d0e">
+          ⚠️ <strong>No till account linked</strong> — visit the Online Customers page to add one for
+          <strong>${order.customerEmail}</strong>.
+        </p>
+       </div>`;
+
   const html = emailWrapper(`
     <div style="background:#1a1a1a;color:#fff;border-radius:10px;padding:20px 24px;margin-bottom:24px">
       <p style="margin:0 0 4px;font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:1px">🛒 New Online Order — Ring Up on POS</p>
       <p style="margin:0;font-size:28px;font-weight:700;letter-spacing:-1px;color:#FF6B35">${order.orderNumber}</p>
       ${order.branchName ? `<p style="margin:6px 0 0;font-size:12px;color:#888">Branch: ${order.branchName}</p>` : ''}
     </div>
+
+    ${tillBanner}
 
     <h3 style="margin:0 0 12px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:0.5px">Customer Details</h3>
     <table style="width:100%;margin-bottom:24px;border-collapse:collapse">
@@ -211,6 +275,7 @@ export function buildInternalReceiptEmail(order: {
       </thead>
       <tbody>${rows}</tbody>
       <tfoot>
+        ${deliveryFooterRows}
         <tr style="background:#fff8f5">
           <td colspan="3" style="padding:14px 8px;font-weight:700;text-align:right;font-size:16px">ORDER TOTAL</td>
           <td style="padding:14px 8px;font-weight:700;text-align:right;font-size:18px;color:#FF6B35">R${order.total.toFixed(2)}</td>
@@ -229,9 +294,9 @@ export function buildInternalReceiptEmail(order: {
 
   return {
     to:      INTERNAL_ORDERS_EMAIL,
-    subject: `[POS] New Online Order ${order.orderNumber} — R${order.total.toFixed(2)}`,
+    subject: `[POS] ${order.orderNumber}${order.tillAccountNumber ? ` | Acc: ${order.tillAccountNumber}` : ''} — ${order.customerName} — R${order.total.toFixed(2)}`,
     html,
-    text: `NEW ONLINE ORDER: ${order.orderNumber}\n\nCustomer: ${order.customerName} <${order.customerEmail}>${order.phone ? ` | ${order.phone}` : ''}\n${order.deliveryAddress ? `Deliver to: ${order.deliveryAddress}\n` : ''}\nItems:\n${order.items.map(i => `  ${i.name}${i.variantName ? ` (${i.variantName})` : ''} x${i.quantity} @ R${i.price.toFixed(2)} = R${(i.price * i.quantity).toFixed(2)}`).join('\n')}\n\nTOTAL: R${order.total.toFixed(2)}\n\nPlease ring up on POS and confirm in the admin portal.`,
+    text: `NEW ONLINE ORDER: ${order.orderNumber}\n${order.tillAccountNumber ? `TILL ACCOUNT: ${order.tillAccountNumber}\n` : 'NO TILL ACCOUNT LINKED\n'}\nCustomer: ${order.customerName} <${order.customerEmail}>${order.phone ? ` | ${order.phone}` : ''}\n${order.deliveryAddress ? `Deliver to: ${order.deliveryAddress}\n` : ''}\nItems:\n${order.items.map(i => `  ${i.name}${i.variantName ? ` (${i.variantName})` : ''} x${i.quantity} @ R${i.price.toFixed(2)} = R${(i.price * i.quantity).toFixed(2)}`).join('\n')}\n${fee > 0 ? `\nDelivery Fee: R${fee.toFixed(2)}` : ''}\n\nTOTAL: R${order.total.toFixed(2)}\n\nPlease ring up on POS and confirm in the admin portal.`,
   };
 }
 
@@ -274,6 +339,155 @@ export function buildOrderStatusEmail(order: {
     subject: `Your Order is ${meta.label} — ${order.orderNumber}`,
     html,
     text: `Hi ${order.customerName}, your order ${order.orderNumber} is now: ${meta.label}. ${meta.message}`,
+  };
+}
+
+// ─── OOS Refund: customer-facing consolidated email ───────────────────────────
+// Sent once when the picker advances to packaging, covering all OOS items
+// in a single email rather than one per item.
+
+export function buildOosRefundCustomerEmail(order: {
+  orderNumber:   string;
+  customerName:  string;
+  customerEmail: string;
+  oosItems:      { name: string; variantName?: string; quantity: number; price: number }[];
+  refundTotal:   number;
+}): EmailPayload {
+  const itemCount = order.oosItems.length;
+
+  const itemList = order.oosItems.map(i => `
+    <tr>
+      <td style="padding:10px 8px;border-bottom:1px solid #fde8e8;font-size:14px">
+        <strong>${i.name}</strong>${i.variantName ? `<br><span style="color:#999;font-size:12px">${i.variantName}</span>` : ''}
+      </td>
+      <td style="padding:10px 8px;border-bottom:1px solid #fde8e8;text-align:center;font-size:14px;color:#888">×${i.quantity}</td>
+      <td style="padding:10px 8px;border-bottom:1px solid #fde8e8;text-align:right;font-size:14px;font-weight:600;color:#ef4444">R${(i.price * i.quantity).toFixed(2)}</td>
+    </tr>`).join('');
+
+  const html = emailWrapper(`
+    <h2 style="margin:0 0 8px;font-size:22px">Oops&hellip; 😕</h2>
+    <p style="color:#555;margin:0 0 24px">
+      Hi ${order.customerName}, unfortunately we couldn't find the following
+      product${itemCount > 1 ? 's' : ''} in stock for your order
+      <strong style="color:#FF6B35">${order.orderNumber}</strong>:
+    </p>
+
+    <table style="width:100%;border-collapse:collapse;margin-bottom:24px;background:#fff5f5;border-radius:8px;overflow:hidden;border:1px solid #fecaca">
+      <thead>
+        <tr style="background:#fee2e2">
+          <th style="padding:10px 8px;text-align:left;font-size:12px;color:#991b1b;font-weight:600;text-transform:uppercase">Product</th>
+          <th style="padding:10px 8px;text-align:center;font-size:12px;color:#991b1b;font-weight:600;text-transform:uppercase">Qty</th>
+          <th style="padding:10px 8px;text-align:right;font-size:12px;color:#991b1b;font-weight:600;text-transform:uppercase">Amount</th>
+        </tr>
+      </thead>
+      <tbody>${itemList}</tbody>
+    </table>
+
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:20px 24px;margin-bottom:24px">
+      <p style="margin:0 0 4px;font-size:12px;color:#166534;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Refund Amount</p>
+      <p style="margin:0;font-size:28px;font-weight:700;color:#15803d">R${order.refundTotal.toFixed(2)}</p>
+    </div>
+
+    <p style="color:#444;margin:0 0 12px;font-size:15px;line-height:1.6">
+      But don't worry — a refund of <strong>R${order.refundTotal.toFixed(2)}</strong> is being processed
+      and will reflect in your account once it's been finalised.
+    </p>
+    <p style="color:#888;font-size:13px;margin:0 0 24px;line-height:1.6">
+      The rest of your order is being prepared as normal and will be on its way to you shortly.
+      You'll receive another update when it's out for delivery.
+    </p>
+    <p style="color:#aaa;font-size:13px;margin:0">Open the TFS app to track your order in real time.</p>
+  `);
+
+  return {
+    to:      order.customerEmail,
+    subject: `Refund Processing — ${order.orderNumber}`,
+    html,
+    text: `Hi ${order.customerName},\n\nUnfortunately we couldn't find the following product${itemCount > 1 ? 's' : ''} in stock for order ${order.orderNumber}:\n\n${order.oosItems.map(i => `  - ${i.name}${i.variantName ? ` (${i.variantName})` : ''} x${i.quantity} = R${(i.price * i.quantity).toFixed(2)}`).join('\n')}\n\nA refund of R${order.refundTotal.toFixed(2)} is being processed and will reflect in your account once finalised. The rest of your order is on its way.`,
+  };
+}
+
+// ─── OOS Refund: internal staff consolidated email ────────────────────────────
+// Sent to the internal orders inbox when picking advances to packaging.
+// Mirrors the POS receipt style so staff can quickly identify and action it.
+
+export function buildOosRefundInternalEmail(order: {
+  orderNumber:    string;
+  customerName:   string;
+  customerEmail:  string;
+  phone?:         string;
+  oosItems:       { name: string; variantName?: string; sku?: string; quantity: number; price: number }[];
+  refundTotal:    number;
+  branchName?:    string;
+  paymentMethod?: string;
+  paymentRef?:    string;
+}): EmailPayload {
+  const rows = order.oosItems.map(i => `
+    <tr>
+      <td style="padding:10px 8px;border-bottom:1px solid #f0f0f0;font-size:14px">
+        <strong>${i.name}</strong>${i.variantName ? `<br><span style="color:#888;font-size:12px">${i.variantName}</span>` : ''}
+        ${i.sku ? `<br><span style="color:#bbb;font-size:11px;font-family:monospace">SKU: ${i.sku}</span>` : ''}
+      </td>
+      <td style="padding:10px 8px;border-bottom:1px solid #f0f0f0;text-align:center;font-size:16px;font-weight:700;color:#ef4444">×${i.quantity}</td>
+      <td style="padding:10px 8px;border-bottom:1px solid #f0f0f0;text-align:right;font-size:14px">R${i.price.toFixed(2)}<br><span style="color:#aaa;font-size:11px">each</span></td>
+      <td style="padding:10px 8px;border-bottom:1px solid #f0f0f0;text-align:right;font-size:14px;font-weight:600">R${(i.price * i.quantity).toFixed(2)}</td>
+    </tr>`).join('');
+
+  const html = emailWrapper(`
+    <div style="background:#1a1a1a;color:#fff;border-radius:10px;padding:20px 24px;margin-bottom:24px">
+      <p style="margin:0 0 4px;font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:1px">⚠️ OOS Refund — ${order.orderNumber}</p>
+      <p style="margin:0;font-size:28px;font-weight:700;letter-spacing:-1px;color:#ef4444">R${order.refundTotal.toFixed(2)}</p>
+      ${order.branchName ? `<p style="margin:6px 0 0;font-size:12px;color:#888">Branch: ${order.branchName}</p>` : ''}
+    </div>
+
+    <h3 style="margin:0 0 12px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:0.5px">Customer</h3>
+    <table style="width:100%;margin-bottom:24px;border-collapse:collapse">
+      <tr>
+        <td style="padding:6px 0;font-size:13px;color:#888;width:120px">Name</td>
+        <td style="padding:6px 0;font-size:14px;font-weight:600">${order.customerName}</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 0;font-size:13px;color:#888">Email</td>
+        <td style="padding:6px 0;font-size:14px"><a href="mailto:${order.customerEmail}" style="color:#FF6B35">${order.customerEmail}</a></td>
+      </tr>
+      ${order.phone ? `<tr><td style="padding:6px 0;font-size:13px;color:#888">Phone</td><td style="padding:6px 0;font-size:14px">${order.phone}</td></tr>` : ''}
+      ${order.paymentMethod ? `<tr><td style="padding:6px 0;font-size:13px;color:#888">Payment</td><td style="padding:6px 0;font-size:14px;text-transform:capitalize">${order.paymentMethod}</td></tr>` : ''}
+      ${order.paymentRef ? `<tr><td style="padding:6px 0;font-size:13px;color:#888">Ref</td><td style="padding:6px 0;font-size:12px;font-family:monospace;color:#555">${order.paymentRef}</td></tr>` : ''}
+    </table>
+
+    <h3 style="margin:0 0 12px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:0.5px">Out-of-Stock Items</h3>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
+      <thead>
+        <tr style="background:#fff1f1">
+          <th style="padding:10px 8px;text-align:left;font-size:12px;color:#991b1b;font-weight:600;text-transform:uppercase">Product</th>
+          <th style="padding:10px 8px;text-align:center;font-size:12px;color:#991b1b;font-weight:600;text-transform:uppercase">Qty</th>
+          <th style="padding:10px 8px;text-align:right;font-size:12px;color:#991b1b;font-weight:600;text-transform:uppercase">Unit Price</th>
+          <th style="padding:10px 8px;text-align:right;font-size:12px;color:#991b1b;font-weight:600;text-transform:uppercase">Refund</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr style="background:#fff1f1">
+          <td colspan="3" style="padding:14px 8px;font-weight:700;text-align:right;font-size:16px">REFUND TOTAL</td>
+          <td style="padding:14px 8px;font-weight:700;text-align:right;font-size:18px;color:#ef4444">R${order.refundTotal.toFixed(2)}</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <div style="background:#fff1f1;border:2px solid #ef4444;border-radius:8px;padding:14px 18px;margin-top:20px">
+      <p style="margin:0;font-size:13px;color:#333">
+        <strong>Action required:</strong> Verify the Paystack refund of
+        <strong style="color:#ef4444">R${order.refundTotal.toFixed(2)}</strong>
+        has been issued successfully. Update the refund status${order.paymentRef ? ` for ref <strong>${order.paymentRef}</strong>` : ''} in the admin portal once confirmed.
+      </p>
+    </div>
+  `);
+
+  return {
+    to:      INTERNAL_ORDERS_EMAIL,
+    subject: `[Refund] OOS — ${order.orderNumber} — R${order.refundTotal.toFixed(2)}`,
+    html,
+    text: `OOS REFUND — ${order.orderNumber}\n\nCustomer: ${order.customerName} <${order.customerEmail}>${order.phone ? ` | ${order.phone}` : ''}\nPayment: ${order.paymentMethod ?? 'unknown'}${order.paymentRef ? ` | Ref: ${order.paymentRef}` : ''}\n\nOut-of-stock items:\n${order.oosItems.map(i => `  - ${i.name}${i.variantName ? ` (${i.variantName})` : ''}${i.sku ? ` [${i.sku}]` : ''} x${i.quantity} @ R${i.price.toFixed(2)} = R${(i.price * i.quantity).toFixed(2)}`).join('\n')}\n\nREFUND TOTAL: R${order.refundTotal.toFixed(2)}\n\nVerify Paystack refund and update admin portal.`,
   };
 }
 
@@ -326,7 +540,6 @@ export async function notifyBranchPickers(
     const client = await clientPromise;
     const db     = client.db('tfs-wholesalers');
 
-    // activeBranchId may be stored as ObjectId OR plain string — handle both
     let branchObjId: ObjectId | null = null;
     try { branchObjId = new ObjectId(branchId); } catch { /* non-ObjectId string */ }
 
@@ -347,8 +560,6 @@ export async function notifyBranchPickers(
     const userIds = branchUsers.map(u => u._id.toString());
     console.log(`[Push] Found ${userIds.length} staff for branch ${branchId}:`, userIds);
 
-    // Only fetch tokens tagged as 'staff' — prevents customer-app tokens
-    // that belong to the same userId from receiving staff notifications
     const tokenDocs = await db.collection('push_tokens').find(
       { userId: { $in: userIds }, appType: 'staff' }
     ).toArray();
@@ -384,7 +595,6 @@ export async function notifyUser(
   userId: string,
   payload: PushPayload
 ): Promise<void> {
-  // Guard: never attempt to notify "guest" or empty userId
   if (!userId || userId === 'guest') {
     console.warn(`[Push] notifyUser: skipping invalid userId "${userId}"`);
     return;
@@ -394,9 +604,6 @@ export async function notifyUser(
     const client = await clientPromise;
     const db     = client.db('tfs-wholesalers');
 
-    // Fetch only customer-app tokens for this user so staff-app tokens
-    // (which may share the same userId if staff also use the customer app)
-    // are never accidentally notified with customer-facing messages.
     const tokenDocs = await db.collection('push_tokens').find(
       { userId, appType: 'customer' }
     ).toArray();

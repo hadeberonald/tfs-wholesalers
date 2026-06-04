@@ -10,6 +10,8 @@ import {
   notifyBranchPickers,
   notifyUser,
   buildOrderStatusEmail,
+  buildOosRefundCustomerEmail,
+  buildOosRefundInternalEmail,
   sendTransactionalEmail,
 } from '@/lib/sendPushNotification';
 import { notifyUserWeb, notifyBranchWeb } from '@/lib/sendWebPush';
@@ -23,6 +25,83 @@ async function findOrder(db: any, orderId: string) {
     if (o) return o;
   }
   return db.collection('orders').findOne({ orderNumber: orderId });
+}
+
+// ─── Consolidated OOS refund emails ──────────────────────────────────────────
+// Called once when picking advances to packaging. Reads all items on the order
+// that were marked OOS during picking, calculates the total refund, and sends
+// one email to the customer and one to the internal orders inbox.
+// Non-fatal: email failures are logged but never block the status transition.
+
+async function sendOosRefundEmails(order: any): Promise<void> {
+  try {
+    const oosItems: {
+      name: string;
+      variantName?: string;
+      sku?: string;
+      quantity: number;
+      price: number;
+    }[] = (order.items ?? []).filter((i: any) => i.oos === true && !i.isBonusItem && !i.isFreeItem && !i.isMultibuyBonus && !i.autoAdded);
+
+    if (oosItems.length === 0) {
+      console.log(`[OOS Refund Emails] No refundable OOS items on order ${order.orderNumber} — skipping`);
+      return;
+    }
+
+    const refundTotal = oosItems.reduce(
+      (sum: number, i: any) => sum + (i.price * i.quantity),
+      0
+    );
+
+    if (refundTotal <= 0) {
+      console.log(`[OOS Refund Emails] Refund total is zero on order ${order.orderNumber} — skipping`);
+      return;
+    }
+
+    const customerEmail = order.customerEmail || order.customerInfo?.email || null;
+    const customerName  = order.customerName  || order.customerInfo?.name  || 'Customer';
+    const phone         = order.phone         || order.customerInfo?.phone || undefined;
+
+    console.log(
+      `[OOS Refund Emails] Order ${order.orderNumber} — ${oosItems.length} OOS item(s), ` +
+      `refund total R${refundTotal.toFixed(2)}, customer: ${customerEmail ?? 'no email'}`
+    );
+
+    // ── Customer email ────────────────────────────────────────────────────
+    if (customerEmail) {
+      const customerPayload = buildOosRefundCustomerEmail({
+        orderNumber:   order.orderNumber,
+        customerName,
+        customerEmail,
+        oosItems,
+        refundTotal,
+      });
+      sendTransactionalEmail(customerPayload).catch(err =>
+        console.error(`[OOS Refund Emails] Customer email failed for ${order.orderNumber}:`, err)
+      );
+    } else {
+      console.warn(`[OOS Refund Emails] No customer email on order ${order.orderNumber} — customer notification skipped`);
+    }
+
+    // ── Internal staff email — always sent ────────────────────────────────
+    const internalPayload = buildOosRefundInternalEmail({
+      orderNumber:   order.orderNumber,
+      customerName,
+      customerEmail: customerEmail ?? '(no email provided)',
+      phone,
+      oosItems,
+      refundTotal,
+      branchName:    order.branchName   || undefined,
+      paymentMethod: order.paymentMethod || undefined,
+      paymentRef:    order.paymentReference || undefined,
+    });
+    sendTransactionalEmail(internalPayload).catch(err =>
+      console.error(`[OOS Refund Emails] Internal email failed for ${order.orderNumber}:`, err)
+    );
+  } catch (err) {
+    // Non-fatal — log and continue. The status transition must not be blocked.
+    console.error(`[OOS Refund Emails] Unexpected error for order ${order.orderNumber}:`, err);
+  }
 }
 
 async function triggerStatusNotifications(order: any, newStatus: string): Promise<void> {
@@ -45,6 +124,10 @@ async function triggerStatusNotifications(order: any, newStatus: string): Promis
         notifyBranchPickers(branchId, { title: '📦 Packaging', body: `${orderNumber} is being packaged`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
         notifyBranchWeb(branchId, { title: '📦 Packaging', body: `${orderNumber} is being packaged`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
       }
+      // ── Fire consolidated OOS refund emails when picking completes ────
+      // The order passed in here is the post-update document, so OOS flags
+      // are already persisted on the items array.
+      await sendOosRefundEmails(order);
       break;
     case 'ready_for_delivery':
       if (branchId) {
@@ -101,7 +184,11 @@ async function applyOrderUpdate(db: any, orderId: string, updates: any) {
   const filter = ObjectId.isValid(orderId) ? { _id: new ObjectId(orderId) } : { orderNumber: orderId };
   const safeUpdates = { ...updates };
   PROTECTED_FIELDS.forEach(k => delete safeUpdates[k]);
-  const result = await db.collection('orders').findOneAndUpdate(filter, { $set: { ...safeUpdates, updatedAt: new Date() } }, { returnDocument: 'after' });
+  const result = await db.collection('orders').findOneAndUpdate(
+    filter,
+    { $set: { ...safeUpdates, updatedAt: new Date() } },
+    { returnDocument: 'after' }
+  );
   return result ? { ...result, _id: result._id.toString(), id: result._id.toString() } : null;
 }
 

@@ -45,6 +45,7 @@ import {
   BarChart2,
   ShieldCheck,
   Receipt,
+  Contact2,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -212,6 +213,13 @@ export const ROUTE_MANIFEST: RouteManifestEntry[] = [
   },
 
   // ── System ────────────────────────────────────────────────────────────────
+  {
+    key: 'online-customers',
+    label: 'Online Customers',
+    group: 'System',
+    icon: Contact2,
+    href: '/admin/online-customers',
+  },
   {
     key: 'users',
     label: 'Users',
