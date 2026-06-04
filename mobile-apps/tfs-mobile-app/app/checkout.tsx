@@ -129,7 +129,7 @@ export default function CheckoutScreen() {
   );
 
   const subtotal    = getTotal();
-  const deliveryFee = deliveryAddress?.deliveryFee ?? 0;
+  const deliveryFee = deliveryAddress?.deliveryFee ?? 35;
   const total       = subtotal + deliveryFee;
 
   const totalSavings = items.reduce(

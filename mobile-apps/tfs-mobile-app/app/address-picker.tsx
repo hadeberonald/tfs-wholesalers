@@ -56,9 +56,9 @@ const DEFAULT_STORE: { lat: number; lng: number } = {
 const DEFAULT_DELIVERY: DeliverySettings = {
   local: 35,
   localRadius: 20,
-  medium: 85,
+  medium: 35,
   mediumRadius: 40,
-  far: 105,
+  far: 35,
   farRadius: 60,
 };
 
@@ -87,13 +87,13 @@ function haversineKm(
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// ── Only local radius is offered — anything beyond is outside the zone ────────
+// ── Flat R35 for everyone within the zone ─────────────────────────────────────
 function calcDelivery(
   distKm: number,
   settings: DeliverySettings,
 ): { fee: number; outsideZone: boolean } {
-  if (distKm <= settings.localRadius) return { fee: settings.local, outsideZone: false };
-  return { fee: settings.local, outsideZone: true };
+  if (distKm <= settings.farRadius) return { fee: 35, outsideZone: false };
+  return { fee: 35, outsideZone: true };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -178,12 +178,13 @@ export default function AddressPickerScreen() {
     lng: branch?.settings?.storeLocation?.lng ?? DEFAULT_STORE.lng,
   };
 
+  // Delivery settings — all tiers hardcoded to R35 for now
   const deliverySettings: DeliverySettings = {
-    local:        (branch?.settings as any)?.deliveryPricing?.local        ?? DEFAULT_DELIVERY.local,
+    local:        35,
     localRadius:  (branch?.settings as any)?.deliveryPricing?.localRadius  ?? DEFAULT_DELIVERY.localRadius,
-    medium:       (branch?.settings as any)?.deliveryPricing?.medium       ?? DEFAULT_DELIVERY.medium,
+    medium:       35,
     mediumRadius: (branch?.settings as any)?.deliveryPricing?.mediumRadius ?? DEFAULT_DELIVERY.mediumRadius,
-    far:          (branch?.settings as any)?.deliveryPricing?.far          ?? DEFAULT_DELIVERY.far,
+    far:          35,
     farRadius:    (branch?.settings as any)?.deliveryPricing?.farRadius    ?? DEFAULT_DELIVERY.farRadius,
   };
 
@@ -294,7 +295,7 @@ export default function AddressPickerScreen() {
       if (!loc) {
         Alert.alert(
           'Location Unavailable',
-          'Could not get your location. Please search for your address using the search bar.',
+          'Could not get your location. Please search for your delivery address instead.',
           [{ text: 'OK' }],
         );
         return;
@@ -336,7 +337,7 @@ export default function AddressPickerScreen() {
     if (address.outsideZone) {
       Alert.alert(
         'Outside Delivery Zone',
-        `Sorry, your location is ${address.distance.toFixed(1)} km away — we only deliver within ${deliverySettings.localRadius} km. Please choose a closer address.`,
+        `Sorry, your location is ${address.distance.toFixed(1)} km away — we only deliver within ${deliverySettings.farRadius} km. Please choose a closer address.`,
         [{ text: 'OK' }],
       );
       return;
@@ -353,7 +354,7 @@ export default function AddressPickerScreen() {
       return (
         <View style={[styles.feeRow, styles.feeRowError]}>
           <Text style={styles.feeTextError}>
-            ⚠️ {address.distance.toFixed(1)} km – outside delivery zone ({deliverySettings.localRadius} km max)
+            ⚠️ {address.distance.toFixed(1)} km – outside delivery zone ({deliverySettings.farRadius} km max)
           </Text>
         </View>
       );

@@ -40,7 +40,7 @@ export default function CheckoutPage() {
   const [loading, setLoading] = useState(false);
   const [deliverySettings, setDeliverySettings] = useState<any>(null);
   const [storeLocation, setStoreLocation] = useState({ lat: -27.763912, lng: 30.798969 });
-  const [deliveryFee, setDeliveryFee] = useState(0);
+  const [deliveryFee, setDeliveryFee] = useState(35);
   const [savedCards, setSavedCards] = useState<SavedCard[]>([]);
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
   const [useNewCard, setUseNewCard] = useState(false);
