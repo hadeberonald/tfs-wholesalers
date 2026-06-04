@@ -124,16 +124,16 @@ export default function CheckoutPage() {
         const data = await res.json();
         if (data.settings) {
           setDeliverySettings(data.settings);
-          setDeliveryFee(data.settings.medium || 85);
+          setDeliveryFee(data.settings.medium || 35);
         }
         if (data.location) setStoreLocation(data.location);
       }
     } catch (error) {
       console.error('Failed to fetch settings:', error);
-      setDeliveryFee(85);
+      setDeliveryFee(35);
       setDeliverySettings({
         local: 35, localRadius: 20,
-        medium: 85, mediumRadius: 40,
+        medium: 35, mediumRadius: 40,
         far: 105, farRadius: 60,
       });
     }
@@ -223,10 +223,6 @@ export default function CheckoutPage() {
    *   2. Sets paymentStatus: 'paid' and status: 'confirmed' in the DB
    *   3. Emits a socket event so the picker app sees the order immediately
    *   4. Sends picker push notifications
-   *
-   * The old `promoteOrderToPending` call has been removed — it was redundant
-   * and was setting status: 'pending' AFTER verify had already set 'confirmed',
-   * which could race and overwrite the correct status.
    */
   const verifyAndRedirect = async (reference: string, orderId: string) => {
     console.log('🔍 Verifying payment:', reference);
