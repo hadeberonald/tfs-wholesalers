@@ -11,7 +11,20 @@ export async function GET(request: NextRequest) {
     const db = client.db('tfs-wholesalers');
     const branch = await db.collection('branches').findOne({ _id: new ObjectId(branchId) });
     if (!branch) return NextResponse.json({ error: 'Branch not found' }, { status: 404 });
-    return NextResponse.json({ settings: branch.settings?.deliveryPricing || { local: 35, localRadius: 20, medium: 85, mediumRadius: 40, far: 105, farRadius: 60 }, location: branch.settings?.storeLocation || { lat: -29.8587, lng: 31.0218, address: '' } });
+
+    const pricing = branch.settings?.deliveryPricing || {};
+
+    return NextResponse.json({
+      settings: {
+        local:        35,
+        localRadius:  pricing.localRadius  ?? 20,
+        medium:       35,
+        mediumRadius: pricing.mediumRadius ?? 40,
+        far:          35,
+        farRadius:    pricing.farRadius    ?? 60,
+      },
+      location: branch.settings?.storeLocation || { lat: -29.8587, lng: 31.0218, address: '' },
+    });
   } catch (error) {
     return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });
   }
