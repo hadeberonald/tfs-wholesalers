@@ -1,7 +1,10 @@
 // app/order-delivered.tsx
-// Terminal screen — no navigation away, but still uses useOrderSocket
-// so if somehow the user lands here before status is confirmed delivered,
-// the screen stays accurate.
+// Same as your existing file — only addition is the call to
+// setPendingDeliveryReview() when the order is confirmed delivered,
+// so the NPS modal fires the NEXT time the app is opened.
+//
+// The in-app confetti / star rating stays exactly as before.
+// The NPS modal is a separate, deeper survey that pops on next open.
 
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import {
@@ -14,6 +17,10 @@ import { CheckCircle, Star, Home, Package } from 'lucide-react-native';
 import { useOrderSocket } from '@/hooks/useOrderSocket';
 import api from '@/lib/api';
 
+// ── NEW import ────────────────────────────────────────────────────────────────
+import { setPendingDeliveryReview } from '@/hooks/usePendingDeliveryReview';
+import { useStore } from '@/lib/store';
+
 const { width: SW } = Dimensions.get('window');
 
 interface Order {
@@ -21,9 +28,10 @@ interface Order {
   subtotal: number; deliveryFee: number; total: number; totalSavings?: number;
   items: { name: string; quantity: number; price: number; autoAdded?: boolean }[];
   deliveredAt?: string; driverInfo?: { name: string };
+  branchSlug?: string;
 }
 
-// ── Confetti ──────────────────────────────────────────────────────────────────
+// ── Confetti (unchanged) ───────────────────────────────────────────────────────
 function ConfettiParticle({ delay, x, color, size }: { delay: number; x: number; color: string; size: number }) {
   const y   = useRef(new Animated.Value(-30)).current;
   const rot = useRef(new Animated.Value(0)).current;
@@ -83,19 +91,30 @@ function StarRating({ rating, onRate }: { rating: number; onRate: (n: number) =>
 
 export default function OrderDeliveredScreen() {
   const router = useRouter();
+  const branch = useStore(s => s.branch);
   const { orderId = '' } = useLocalSearchParams<{ orderId: string }>();
   const [order, setOrder]   = useState<Order | null>(null);
   const [rating, setRating] = useState(0);
   const [rated,  setRated]  = useState(false);
+  const [reviewQueued, setReviewQueued] = useState(false);
   const [showConfetti, setShowConfetti] = useState(true);
   const contentOp = useRef(new Animated.Value(0)).current;
   const contentY  = useRef(new Animated.Value(30)).current;
 
-  // Socket keeps the order data fresh (e.g. deliveredAt timestamp arrives)
-  // No navigation away — this is the terminal screen
   useOrderSocket(orderId, useCallback((o: Order) => {
     setOrder(o);
-  }, []));
+
+    // ── NEW: queue the delivery NPS for next app open ─────────────────────
+    if (!reviewQueued && o.orderNumber) {
+      setReviewQueued(true);
+      setPendingDeliveryReview({
+        orderId:     o._id,
+        orderNumber: o.orderNumber,
+        branchSlug:  o.branchSlug || branch?.slug || '',
+        deliveredAt: o.deliveredAt || new Date().toISOString(),
+      }).catch(() => {});
+    }
+  }, [reviewQueued, branch]));
 
   useEffect(() => {
     Animated.parallel([
@@ -143,13 +162,20 @@ export default function OrderDeliveredScreen() {
 
           <Animated.View style={{ opacity: contentOp, transform: [{ translateY: contentY }] }}>
 
-            {/* Rating */}
+            {/* Quick star rating (unchanged) */}
             <View style={s.card}>
               <Text style={s.cardLabel}>HOW WAS YOUR DELIVERY?</Text>
               <Text style={s.cardSub}>
                 {rated ? (rating >= 4 ? 'Thank you! We love the love! ❤️' : "Thanks — we'll do better!") : 'Tap a star to rate'}
               </Text>
               <StarRating rating={rating} onRate={handleRate} />
+            </View>
+
+            {/* NPS teaser — lets the user know a fuller survey will pop up */}
+            <View style={s.npsTeaser}>
+              <Text style={s.npsTeaserText}>
+                📋 A short delivery survey will appear next time you open the app — your feedback helps us improve!
+              </Text>
             </View>
 
             {/* Savings */}
@@ -214,6 +240,14 @@ const s = StyleSheet.create({
   card:     CARD,
   cardLabel:{ color: '#9ca3af', fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 6 },
   cardSub:  { color: '#6b7280', fontSize: 14, marginBottom: 16 },
+
+  // ── NEW: NPS teaser ───────────────────────────────────────────────────────
+  npsTeaser: {
+    backgroundColor: '#fff7ed', borderRadius: 16, padding: 14,
+    borderWidth: 1, borderColor: '#fed7aa', marginBottom: 14,
+  },
+  npsTeaserText: { fontSize: 13, color: '#92400e', lineHeight: 20 },
+
   savingsCard: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#fffbeb', borderRadius: 20, padding: 20, marginBottom: 14, borderWidth: 1, borderColor: '#fde68a' },
   savingsTitle:{ color: '#1f2937', fontSize: 16, fontWeight: '700' },
   savingsSub:  { color: '#6b7280', fontSize: 12, marginTop: 3 },
