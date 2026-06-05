@@ -164,12 +164,13 @@ export async function POST(request: NextRequest) {
     }
 
     const orderNumber = `ORD-${Date.now()}`;
+    const orderStatus = body.status ?? 'pending';
     const order = {
       ...body,
       items:             enrichedItems,
       branchId:          new ObjectId(body.branchId),
       orderNumber,
-      status:            body.status ?? 'pending',
+      status:            orderStatus,
       deliveryFee,
       tillAccountNumber,
       createdAt:         new Date(),
@@ -182,7 +183,7 @@ export async function POST(request: NextRequest) {
 
     const result  = await db.collection('orders').insertOne(order);
     const orderId = result.insertedId.toString();
-    console.log('✅ Order created:', orderId, '| customer:', customerEmail ?? 'guest', '| till:', tillAccountNumber ?? 'none');
+    console.log('✅ Order created:', orderId, '| customer:', customerEmail ?? 'guest', '| till:', tillAccountNumber ?? 'none', '| status:', orderStatus);
 
     // ── Notify branch pickers (staff app only) ────────────────────────────
     notifyBranchPickers(body.branchId, {
@@ -192,7 +193,11 @@ export async function POST(request: NextRequest) {
     }).catch(() => {});
 
     // ── Customer confirmation email ───────────────────────────────────────
-    if (customerEmail) {
+    // Not sent for payment_pending or payment_failed — these are declined or
+    // cancelled transactions. Confirmation is only meaningful once paid.
+    const isPaid = !['payment_pending', 'payment_failed'].includes(orderStatus);
+
+    if (customerEmail && isPaid) {
       const customerEmailPayload = buildOrderConfirmationEmail({
         orderNumber,
         customerName:      customerName ?? 'Customer',
@@ -206,7 +211,7 @@ export async function POST(request: NextRequest) {
       sendTransactionalEmail(customerEmailPayload).catch(() => {});
     }
 
-    // ── Internal POS receipt — always sent regardless of customer email ───
+    // ── Internal POS receipt — always sent regardless of payment status ───
     // Allows staff to ring the order up on the POS system.
     const internalReceiptPayload = buildInternalReceiptEmail({
       orderNumber,
