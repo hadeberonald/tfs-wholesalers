@@ -87,9 +87,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Payment reference is required' }, { status: 400 });
     }
 
-    const result = await paystackService.verifyPayment(reference);
+    // ── Step 1: verify with Paystack ──────────────────────────────────────────
+    let result: any;
+    try {
+      result = await paystackService.verifyPayment(reference);
+    } catch (err: any) {
+      // Network / timeout talking to Paystack — treat as retryable
+      console.error(`[Verify] Network error reaching Paystack for ${reference}:`, err.message);
+      return NextResponse.json(
+        { verified: false, retryable: true, pending: true, error: 'Could not reach payment provider — please wait a moment' },
+        { status: 202 }
+      );
+    }
 
-    // Paystack gateway-level failure (e.g. bad key, network error)
+    // Paystack gateway-level failure (e.g. bad key)
     if (!result.status) {
       console.warn(`[Verify] Paystack gateway error for ${reference}:`, result.message);
       return NextResponse.json(
@@ -100,9 +111,10 @@ export async function POST(request: NextRequest) {
 
     const txStatus = result.data?.status;
 
-    // Statuses that are retryable — Paystack can transiently report 'failed'
-    // before a transaction fully settles to 'success'. Treat it like 'ongoing'.
-    const RETRYABLE_STATUSES = ['ongoing', 'processing', 'pending', 'failed'];
+    // ── Step 2: check transaction status ─────────────────────────────────────
+    // Paystack can transiently report 'failed' or 'pending' before a transaction
+    // fully settles to 'success' — treat these as retryable, NOT terminal.
+    const RETRYABLE_STATUSES = ['ongoing', 'processing', 'pending', 'queued', 'failed'];
 
     if (txStatus !== 'success') {
       const retryable = RETRYABLE_STATUSES.includes(txStatus);
@@ -116,13 +128,14 @@ export async function POST(request: NextRequest) {
           pending:   retryable,
           error:     result.message || `Payment status: ${txStatus}`,
         },
+        // Use 202 for retryable so axios doesn't throw on the client
         { status: retryable ? 202 : 400 }
       );
     }
 
     const { data } = result;
 
-    // ── Extract orderId from metadata ─────────────────────────────────────────
+    // ── Step 3: extract orderId from metadata ─────────────────────────────────
     const orderId =
       data.metadata?.orderId ||
       data.metadata?.custom_fields?.find(
@@ -154,6 +167,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ── Step 4: update DB ─────────────────────────────────────────────────────
     const client = await clientPromise;
     const db     = client.db('tfs-wholesalers');
 
@@ -166,7 +180,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ verified: false, error: 'Order not found' }, { status: 404 });
     }
 
-    // ── Idempotency: already paid — return success with branch info for redirect
+    // Idempotency: already paid — return success with branch info for redirect
     if (existing.paymentStatus === 'paid') {
       console.log(`[Verify] Order ${orderId} already marked paid — skipping duplicate update`);
       const branchSlug = await getBranchSlug(db, existing.branchId);
@@ -179,7 +193,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // ── Mark order paid and confirmed ─────────────────────────────────────────
+    // Mark order paid and confirmed
     const updated = await db.collection('orders').findOneAndUpdate(
       { _id: new ObjectId(orderId) },
       {

@@ -42,7 +42,6 @@ async function handleChargeSuccess(data: any): Promise<void> {
       `[Webhook] charge.success for ${reference} has no orderId in metadata:`,
       JSON.stringify(data.metadata ?? null)
     );
-    // Return without throwing — we've logged it, and returning 200 stops Paystack retrying
     return;
   }
 
@@ -54,13 +53,13 @@ async function handleChargeSuccess(data: any): Promise<void> {
   const client = await clientPromise;
   const db     = client.db('tfs-wholesalers');
 
-  // Idempotency: skip if already paid (e.g. verify route already ran)
   const existing = await db.collection('orders').findOne({ _id: new ObjectId(orderId) });
   if (!existing) {
     console.error(`[Webhook] Order ${orderId} not found for reference ${reference}`);
     return;
   }
 
+  // Idempotency: skip if already paid (verify route may have run first)
   if (existing.paymentStatus === 'paid') {
     console.log(`[Webhook] Order ${orderId} already paid — skipping duplicate`);
     return;
@@ -93,8 +92,8 @@ async function handleChargeSuccess(data: any): Promise<void> {
 
   emitOrderUpdate(updated);
 
-  const branchId     = updated.branchId?.toString();
-  const orderNumber  = updated.orderNumber || orderId;
+  const branchId      = updated.branchId?.toString();
+  const orderNumber   = updated.orderNumber || orderId;
   const customerEmail = updated.customerEmail || updated.customerInfo?.email || null;
   const customerName  = updated.customerName  || updated.customerInfo?.name  || 'Customer';
 
@@ -164,15 +163,11 @@ export async function POST(request: NextRequest) {
         await handleChargeSuccess(event.data);
         break;
 
-      // Add further event handlers here as needed, e.g.:
-      // case 'refund.processed': ...
-
       default:
-        // Acknowledge unhandled events so Paystack doesn't retry them
         console.log(`[Webhook] Unhandled event type: ${event.event}`);
     }
   } catch (err) {
-    // Log but return 200 — if we return 5xx Paystack will retry indefinitely
+    // Log but return 200 — returning 5xx causes Paystack to retry indefinitely
     console.error(`[Webhook] Error processing event ${event.event}:`, err);
   }
 

@@ -61,8 +61,9 @@ export async function POST(request: NextRequest) {
     if (!orderDoc) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
-    const amount = orderDoc.total;
 
+    // Always use the DB amount — never trust client-supplied amount
+    const amount    = orderDoc.total;
     const reference = generatePaymentReference(`ORDER-${orderId}`);
 
     // ── Saved card: charge immediately ────────────────────────────────────────
@@ -110,8 +111,8 @@ export async function POST(request: NextRequest) {
           }
 
           return NextResponse.json({
-            success: true,
-            charged: true,
+            success:   true,
+            charged:   true,
             reference,
             publicKey: paystackService.getPublicKey(),
           });
@@ -124,10 +125,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ── New card: initialize payment (webhook will fire on success) ───────────
-    // callback_url points to the shared non-slug callback page so it works
-    // for all branches on this multi-tenant site. The verify route returns
-    // branchSlug in its response so the callback page can redirect correctly.
+    // ── New card: initialize payment ──────────────────────────────────────────
+    // callback_url is set so Paystack redirects back after payment on web.
+    // The verify route returns branchSlug so the callback page can redirect correctly.
     const paymentData = {
       email,
       amount:       formatAmountForPayment(amount),
@@ -152,6 +152,9 @@ export async function POST(request: NextRequest) {
         success:           true,
         charged:           false,
         reference,
+        // Return the DB-authoritative amount in kobo so the mobile WebView
+        // uses the same figure Paystack was initialized with — no mismatch.
+        amountKobo:        formatAmountForPayment(amount),
         authorization_url: result.data.authorization_url,
         access_code:       result.data.access_code,
         publicKey:         paystackService.getPublicKey(),

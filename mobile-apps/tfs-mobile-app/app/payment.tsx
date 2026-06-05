@@ -105,13 +105,12 @@ export default function PaymentScreen() {
   const user      = useStore((s) => s.user);
   const clearCart = useStore((s) => s.clearCart);
 
-  const [status, setStatus]               = useState<PaymentStatus>('initializing');
-  const [paystackHtml, setPaystackHtml]   = useState<string | null>(null);
-  const [reference, setReference]         = useState('');
-  const [orderItems, setOrderItems]       = useState<OrderSummaryItem[]>([]);
-  const [errorMessage, setErrorMessage]   = useState('');
-  const [verifyAttempt, setVerifyAttempt] = useState(0);
-  const hasInitialized                    = useRef(false);
+  const [status, setStatus]             = useState<PaymentStatus>('initializing');
+  const [paystackHtml, setPaystackHtml] = useState<string | null>(null);
+  const [reference, setReference]       = useState('');
+  const [orderItems, setOrderItems]     = useState<OrderSummaryItem[]>([]);
+  const [errorMessage, setErrorMessage] = useState('');
+  const hasInitialized                  = useRef(false);
 
   const orderId     = params?.orderId     || '';
   const amount      = parseFloat(params?.amount || '0');
@@ -122,7 +121,7 @@ export default function PaymentScreen() {
     if (orderId) loadOrderItems();
   }, [orderId]);
 
-  // Auto-initialize payment as soon as the screen mounts — no extra tap needed
+  // Auto-initialize payment as soon as the screen mounts
   useEffect(() => {
     if (!hasInitialized.current && orderId && user?.email) {
       hasInitialized.current = true;
@@ -149,7 +148,7 @@ export default function PaymentScreen() {
     }
     setStatus('initializing');
     try {
-      const res = await api.post('/api/payment/initialize', { orderId, email: user.email, amount });
+      const res = await api.post('/api/payment/initialize', { orderId, email: user.email });
       if (!res.data.success) throw new Error(res.data.error || 'Initialization failed');
 
       setReference(res.data.reference);
@@ -160,11 +159,12 @@ export default function PaymentScreen() {
         return;
       }
 
-      // New card: show the Paystack WebView
+      // Use the server-returned amountKobo so the WebView matches exactly
+      // what Paystack was initialized with — never compute it client-side.
       const html = buildPaystackHTML(
         res.data.publicKey,
         user.email,
-        Math.round(amount * 100),
+        res.data.amountKobo,
         res.data.reference,
       );
       setPaystackHtml(html);
@@ -179,7 +179,7 @@ export default function PaymentScreen() {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.event === 'closed') {
-        // User closed the Paystack popup — go back to checkout
+        // User dismissed the Paystack popup — go back to checkout
         router.back();
       } else if (msg.event === 'success') {
         setPaystackHtml(null);
@@ -197,45 +197,38 @@ export default function PaymentScreen() {
    * Verify with exponential backoff to handle Paystack's settlement race.
    *
    * Paystack fires the callback before their backend fully settles the
-   * transaction. Their API can briefly return 'failed' or 'pending' even
-   * for a successful charge — both are treated as retryable here.
-   *
-   * The server returns { retryable: true, pending: true } with HTTP 202
-   * for those transient states, and HTTP 400 with retryable: false only
-   * for genuinely terminal failures (abandoned, reversed, etc.).
+   * transaction. The server returns HTTP 202 with { retryable: true } for
+   * transient states (pending, processing, failed-before-settled).
+   * HTTP 400 with retryable: false means genuinely terminal failure.
    */
   const handleVerify = async (ref: string) => {
     setStatus('verifying');
 
-    const MAX_ATTEMPTS = 8;
-    // Give Paystack progressively more time to settle between retries
-    const RETRY_DELAYS = [3000, 4000, 5000, 6000, 8000, 8000, 8000];
+    const MAX_ATTEMPTS  = 8;
+    const RETRY_DELAYS  = [3000, 4000, 5000, 6000, 8000, 8000, 8000];
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      // Wait before retrying (not before the first attempt)
       if (attempt > 0) {
         const delay = RETRY_DELAYS[Math.min(attempt - 1, RETRY_DELAYS.length - 1)];
         console.log(`[Verify] Attempt ${attempt + 1}/${MAX_ATTEMPTS} — waiting ${delay}ms`);
-        setVerifyAttempt(attempt + 1);
         await new Promise(res => setTimeout(res, delay));
       }
 
       try {
         const res = await api.post('/api/payment/verify', { reference: ref });
 
-        // Server says retryable (pending/ongoing/transient failed) — keep trying
+        // Server says retryable (202) — keep trying
         if (res.data.pending || res.data.retryable) {
           console.log(`[Verify] Attempt ${attempt + 1}: ${res.data.error} — retrying…`);
           continue;
         }
 
-        // Confirmed non-retryable failure from server
+        // Non-retryable failure from server
         if (!res.data.verified) {
           throw new Error(res.data.error || 'Verification failed');
         }
 
-        // ── Success path ──────────────────────────────────────────────────
-        setVerifyAttempt(0);
+        // ── Success ───────────────────────────────────────────────────────────
         const stockChecks = await checkStock();
         const outOfStock  = stockChecks.filter((i) => !i.inStock);
 
@@ -247,15 +240,13 @@ export default function PaymentScreen() {
           clearCart();
           router.replace(`/order-preparing?orderId=${orderId}`);
         }
-        return; // all done
+        return;
 
       } catch (e: any) {
-        // axios throws on 4xx — check if the server response body says retryable
         const retryable = e?.response?.data?.retryable === true;
 
         if (!retryable || attempt === MAX_ATTEMPTS - 1) {
-          console.error('[Verify] Non-retryable error or max attempts reached:', e?.message);
-          setVerifyAttempt(0);
+          console.error('[Verify] Non-retryable or max attempts:', e?.message);
           setStatus('failed');
           setErrorMessage(
             e?.response?.data?.error ||
@@ -265,16 +256,14 @@ export default function PaymentScreen() {
           return;
         }
 
-        // Retryable error — log and continue the loop
         console.warn(`[Verify] Attempt ${attempt + 1} retryable (${e?.message}), continuing…`);
       }
     }
 
-    // Loop exhausted without success
-    setVerifyAttempt(0);
+    // All attempts exhausted
     setStatus('failed');
     setErrorMessage(
-      `Verification timed out after ${MAX_ATTEMPTS} attempts. If you were charged, please contact support with reference: ${ref}`
+      `Verification timed out. If you were charged, please contact support with reference: ${ref}`
     );
   };
 
@@ -311,7 +300,7 @@ export default function PaymentScreen() {
     }
   };
 
-  // ── WebView (Paystack payment iframe) ────────────────────────────────────
+  // ── WebView (Paystack payment iframe) ────────────────────────────────────────
   if (status === 'webview' && paystackHtml) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top']}>
@@ -387,7 +376,7 @@ export default function PaymentScreen() {
     );
   }
 
-  // ── Failed ────────────────────────────────────────────────────────────────
+  // ── Failed ────────────────────────────────────────────────────────────────────
   if (status === 'failed') {
     return (
       <SafeAreaView style={styles.resultContainer} edges={['top']}>
@@ -397,7 +386,6 @@ export default function PaymentScreen() {
         <TouchableOpacity style={styles.retryBtn} onPress={() => {
           hasInitialized.current = false;
           setErrorMessage('');
-          setVerifyAttempt(0);
           initPayment();
         }}>
           <RefreshCw color="#fff" size={20} />
@@ -410,17 +398,15 @@ export default function PaymentScreen() {
     );
   }
 
-  // ── Initializing / Verifying / Refunding ──────────────────────────────────
+  // ── Initializing / Verifying / Refunding ──────────────────────────────────────
   const processingLabel =
     status === 'initializing' ? 'Preparing your payment…' :
-    status === 'verifying'    ? (verifyAttempt > 1 ? `Verifying payment… (attempt ${verifyAttempt})` : 'Verifying payment…') :
+    status === 'verifying'    ? 'Verifying payment…' :
     'Processing refund…';
 
   const processingSubLabel =
     status === 'refunding'
       ? 'Some items were out of stock. We\'re issuing an automatic refund.'
-      : status === 'verifying' && verifyAttempt > 1
-      ? 'Your payment is settling. This may take a few seconds…'
       : 'Please do not close this screen.';
 
   return (
