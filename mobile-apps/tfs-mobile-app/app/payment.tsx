@@ -117,7 +117,6 @@ export default function PaymentScreen() {
 
   useEffect(() => {
     if (orderId) loadOrderItems();
-    // Cleanup: abort any in-flight verify loop if component unmounts
     return () => { verifyAbortRef.current?.abort(); };
   }, [orderId]);
 
@@ -152,7 +151,6 @@ export default function PaymentScreen() {
 
       setReference(res.data.reference);
 
-      // Saved-card charge: skip the WebView entirely
       if (res.data.charged) {
         await handleVerify(res.data.reference);
         return;
@@ -190,31 +188,24 @@ export default function PaymentScreen() {
   };
 
   /**
-   * Verify payment with exponential backoff.
-   *
-   * The server returns:
-   *   HTTP 202 + { pending: true, retryable: true }  → transient, keep polling
-   *   HTTP 200 + { verified: true }                  → success
-   *   HTTP 4xx + { retryable: false }                → terminal failure, stop
-   *
-   * Paystack fires the inline callback before their backend settles ("ongoing"
-   * status). The server distinguishes this from a real failure and returns 202
-   * so we keep retrying without showing a false error to the user.
+   * After Paystack confirms payment, we:
+   * 1. Verify with our backend (with retries for Paystack's settlement lag)
+   * 2. PATCH the order status to 'pending' — this triggers the confirmation
+   *    email on the server (the gate only blocked it at order creation time
+   *    when status was 'payment_pending')
+   * 3. Check stock, handle any OOS refund, then clear cart + navigate
    */
   const handleVerify = async (ref: string) => {
     setStatus('verifying');
 
-    // Cancel any previous verify loop
     verifyAbortRef.current?.abort();
     const abortCtrl = new AbortController();
     verifyAbortRef.current = abortCtrl;
 
-    // Retry schedule: 3s, 4s, 5s, 6s, 8s, 8s, 8s, 10s  (max ~52s total wait)
     const RETRY_DELAYS  = [3000, 4000, 5000, 6000, 8000, 8000, 8000, 10000];
-    const MAX_ATTEMPTS  = RETRY_DELAYS.length + 1; // 9 attempts total
+    const MAX_ATTEMPTS  = RETRY_DELAYS.length + 1;
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      // Check if this verify session was cancelled (user navigated away, retry pressed, etc.)
       if (abortCtrl.signal.aborted) return;
 
       if (attempt > 0) {
@@ -231,21 +222,33 @@ export default function PaymentScreen() {
         console.log(`[Verify] Sending verify request attempt ${attempt + 1}`);
         const res = await api.post('/api/payment/verify', { reference: ref });
 
-        // ── HTTP 202: server says "transient, keep polling" ───────────────────
-        // This covers Paystack's "ongoing" / "pending" settlement race.
         if (res.status === 202 || res.data.pending || res.data.retryable) {
           console.log(`[Verify] Attempt ${attempt + 1}: transient (${res.data.error}) — will retry`);
-          continue; // next iteration with delay
+          continue;
         }
 
-        // ── Non-retryable failure explicitly flagged by server ────────────────
         if (!res.data.verified && res.data.retryable === false) {
           throw Object.assign(new Error(res.data.error || 'Verification failed'), { retryable: false });
         }
 
-        // ── Success ───────────────────────────────────────────────────────────
         if (res.data.verified) {
           if (abortCtrl.signal.aborted) return;
+
+          // ── FIX: PATCH order to 'pending' (paid) so the server sends the
+          // confirmation email and the order enters the normal fulfilment flow.
+          // The order was created with status:'payment_pending' which suppressed
+          // the email at creation time — this PATCH is what triggers it.
+          try {
+            await api.patch(`/api/orders/${orderId}`, {
+              status:           'pending',
+              paymentStatus:    'paid',
+              paymentReference: ref,
+            });
+            console.log(`[Verify] Order ${orderId} patched to pending/paid`);
+          } catch (patchErr: any) {
+            // Non-fatal: log and continue — the payment succeeded, don't block the user
+            console.error('[Verify] Failed to patch order status:', patchErr?.message);
+          }
 
           const stockChecks = await checkStock();
           const outOfStock  = stockChecks.filter((i) => !i.inStock);
@@ -261,7 +264,6 @@ export default function PaymentScreen() {
           return;
         }
 
-        // ── Unexpected response shape — treat as retryable if attempts remain ─
         console.warn(`[Verify] Unexpected response shape on attempt ${attempt + 1}:`, res.data);
         if (attempt < MAX_ATTEMPTS - 1) continue;
         throw new Error(res.data.error || 'Unexpected verification response');
@@ -270,7 +272,6 @@ export default function PaymentScreen() {
         if (abortCtrl.signal.aborted) return;
         if (e.message === 'aborted') return;
 
-        // axios wraps HTTP error responses in e.response
         const serverData  = e?.response?.data;
         const httpStatus  = e?.response?.status;
         const isRetryable = serverData?.retryable === true ||
@@ -282,7 +283,6 @@ export default function PaymentScreen() {
           continue;
         }
 
-        // Terminal or exhausted attempts
         console.error(`[Verify] Non-retryable or max attempts reached:`, e?.message);
         setStatus('failed');
         setErrorMessage(
@@ -294,7 +294,6 @@ export default function PaymentScreen() {
       }
     }
 
-    // All attempts exhausted without success or explicit failure
     if (abortCtrl.signal.aborted) return;
     setStatus('failed');
     setErrorMessage(
@@ -336,7 +335,7 @@ export default function PaymentScreen() {
     }
   };
 
-  // ── WebView (Paystack payment iframe) ────────────────────────────────────────
+  // ── WebView ───────────────────────────────────────────────────────────────
   if (status === 'webview' && paystackHtml) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top']}>
@@ -361,14 +360,8 @@ export default function PaymentScreen() {
           domStorageEnabled
           startInLoadingState
           setSupportMultipleWindows={false}
-          // Only intercept navigation that leaves Paystack's domain.
-          // We do NOT intercept /close or /charge here — we rely entirely
-          // on the JS callback/onClose events via postMessage instead.
-          // This avoids the redirect-based verification race that caused "ongoing".
           onShouldStartLoadWithRequest={(req) => {
             const url = req.url || '';
-
-            // Always allow blank, data URIs, and Paystack assets
             if (
               url === 'about:blank' ||
               url.startsWith('data:') ||
@@ -376,13 +369,10 @@ export default function PaymentScreen() {
             ) {
               return true;
             }
-
-            // Block any external navigation (shouldn't happen normally)
             if (url.startsWith('http')) {
               console.warn('[WebView] Blocking external URL:', url);
               return false;
             }
-
             return true;
           }}
           renderLoading={() => (
@@ -396,7 +386,7 @@ export default function PaymentScreen() {
     );
   }
 
-  // ── Failed ────────────────────────────────────────────────────────────────────
+  // ── Failed ────────────────────────────────────────────────────────────────
   if (status === 'failed') {
     return (
       <SafeAreaView style={styles.resultContainer} edges={['top']}>
@@ -422,7 +412,7 @@ export default function PaymentScreen() {
     );
   }
 
-  // ── Initializing / Verifying / Refunding ──────────────────────────────────────
+  // ── Initializing / Verifying / Refunding ──────────────────────────────────
   const processingLabel =
     status === 'initializing' ? 'Preparing your payment…' :
     status === 'verifying'    ? 'Verifying payment…' :

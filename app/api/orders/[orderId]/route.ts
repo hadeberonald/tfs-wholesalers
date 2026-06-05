@@ -12,6 +12,7 @@ import {
   buildOrderStatusEmail,
   buildOosRefundCustomerEmail,
   buildOosRefundInternalEmail,
+  buildOrderConfirmationEmail,
   sendTransactionalEmail,
 } from '@/lib/sendPushNotification';
 import { notifyUserWeb, notifyBranchWeb } from '@/lib/sendWebPush';
@@ -28,11 +29,6 @@ async function findOrder(db: any, orderId: string) {
 }
 
 // ─── Consolidated OOS refund emails ──────────────────────────────────────────
-// Called once when picking advances to packaging. Reads all items on the order
-// that were marked OOS during picking, calculates the total refund, and sends
-// one email to the customer and one to the internal orders inbox.
-// Non-fatal: email failures are logged but never block the status transition.
-
 async function sendOosRefundEmails(order: any): Promise<void> {
   try {
     const oosItems: {
@@ -67,7 +63,6 @@ async function sendOosRefundEmails(order: any): Promise<void> {
       `refund total R${refundTotal.toFixed(2)}, customer: ${customerEmail ?? 'no email'}`
     );
 
-    // ── Customer email ────────────────────────────────────────────────────
     if (customerEmail) {
       const customerPayload = buildOosRefundCustomerEmail({
         orderNumber:   order.orderNumber,
@@ -83,7 +78,6 @@ async function sendOosRefundEmails(order: any): Promise<void> {
       console.warn(`[OOS Refund Emails] No customer email on order ${order.orderNumber} — customer notification skipped`);
     }
 
-    // ── Internal staff email — always sent ────────────────────────────────
     const internalPayload = buildOosRefundInternalEmail({
       orderNumber:   order.orderNumber,
       customerName,
@@ -99,18 +93,74 @@ async function sendOosRefundEmails(order: any): Promise<void> {
       console.error(`[OOS Refund Emails] Internal email failed for ${order.orderNumber}:`, err)
     );
   } catch (err) {
-    // Non-fatal — log and continue. The status transition must not be blocked.
     console.error(`[OOS Refund Emails] Unexpected error for order ${order.orderNumber}:`, err);
   }
 }
 
-async function triggerStatusNotifications(order: any, newStatus: string): Promise<void> {
+// ─── Payment confirmation email ───────────────────────────────────────────────
+// Fired when an order transitions from 'payment_pending' → 'pending' (paid).
+// At order creation time the email was suppressed because status was
+// 'payment_pending'. The PATCH after successful Paystack verification is what
+// triggers this so the customer gets their confirmation.
+
+async function sendPaymentConfirmationEmail(order: any): Promise<void> {
+  const customerEmail = order.customerEmail || order.customerInfo?.email || null;
+  const customerName  = order.customerName  || order.customerInfo?.name  || 'Customer';
+
+  if (!customerEmail) {
+    console.warn(`[Confirm Email] No customer email on order ${order.orderNumber} — skipping`);
+    return;
+  }
+
+  try {
+    const payload = buildOrderConfirmationEmail({
+      orderNumber:       order.orderNumber,
+      customerName,
+      customerEmail,
+      items:             order.items ?? [],
+      total:             order.total ?? 0,
+      deliveryFee:       order.deliveryFee ?? 0,
+      deliveryAddress:   order.deliveryAddress || order.shippingAddress?.address || undefined,
+      tillAccountNumber: order.tillAccountNumber ?? undefined,
+    });
+    await sendTransactionalEmail(payload);
+    console.log(`[Confirm Email] Sent confirmation for order ${order.orderNumber} → ${customerEmail}`);
+  } catch (err) {
+    console.error(`[Confirm Email] Failed for order ${order.orderNumber}:`, err);
+  }
+}
+
+async function triggerStatusNotifications(order: any, newStatus: string, previousStatus?: string): Promise<void> {
   const orderId     = order._id?.toString() || order.id;
   const orderNumber = order.orderNumber || orderId;
   const branchId    = order.branchId?.toString();
   const customerId  = order.userId?.toString();
   const customerEmail = order.customerEmail || order.customerInfo?.email || null;
   const customerName  = order.customerName  || order.customerInfo?.name  || 'Customer';
+
+  // ── FIX: send confirmation email when payment is confirmed ───────────────
+  // The order was created with status 'payment_pending' which suppressed the
+  // confirmation email at creation time. When the mobile app patches to
+  // 'pending' after Paystack verification succeeds, we fire it here exactly once.
+  if (newStatus === 'pending' && previousStatus === 'payment_pending') {
+    await sendPaymentConfirmationEmail(order);
+
+    // Also notify branch staff about the new confirmed/paid order
+    if (branchId) {
+      notifyBranchPickers(branchId, {
+        title: '🛒 New Order (Paid)',
+        body:  `${orderNumber} payment confirmed — ready to pick`,
+        data:  { type: 'new_order', orderId, orderNumber, status: newStatus },
+      }).catch(() => {});
+      notifyBranchWeb(branchId, {
+        title: '🛒 New Order (Paid)',
+        body:  `${orderNumber} payment confirmed — ready to pick`,
+        data:  { type: 'new_order', orderId, orderNumber, status: newStatus },
+      }).catch(() => {});
+    }
+    // Return early — no further status email needed for 'pending'
+    return;
+  }
 
   switch (newStatus) {
     case 'confirmed':
@@ -124,9 +174,6 @@ async function triggerStatusNotifications(order: any, newStatus: string): Promis
         notifyBranchPickers(branchId, { title: '📦 Packaging', body: `${orderNumber} is being packaged`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
         notifyBranchWeb(branchId, { title: '📦 Packaging', body: `${orderNumber} is being packaged`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
       }
-      // ── Fire consolidated OOS refund emails when picking completes ────
-      // The order passed in here is the post-update document, so OOS flags
-      // are already persisted on the items array.
       await sendOosRefundEmails(order);
       break;
     case 'ready_for_delivery':
@@ -242,39 +289,45 @@ export async function PATCH(request: NextRequest, { params }: { params: { orderI
       const mobileUser = await verifyMobileToken(authHeader.replace('Bearer ', ''));
       if (!mobileUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-      const order = await findOrder(db, params.orderId);
-      if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+      // ── FIX: capture the previous status before applying the update so
+      // triggerStatusNotifications can detect the payment_pending → pending
+      // transition and fire the confirmation email exactly once.
+      const orderBefore = await findOrder(db, params.orderId);
+      if (!orderBefore) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
       if (mobileUser.activeBranchId) {
-        const orderBranch = order.branchId?.toString();
+        const orderBranch = orderBefore.branchId?.toString();
         if (orderBranch && orderBranch !== mobileUser.activeBranchId.toString()) {
           return NextResponse.json({ error: 'Order does not belong to your branch' }, { status: 403 });
         }
       }
 
+      const previousStatus = orderBefore.status;
       const serialized = await applyOrderUpdate(db, params.orderId, updates);
       if (!serialized) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
       emitOrderUpdate(serialized, updates.status);
-      if (updates.status) await triggerStatusNotifications(serialized, updates.status);
-      console.log(`✅ [Mobile] Order ${params.orderId} → ${updates.status ?? 'updated'}`);
+      if (updates.status) await triggerStatusNotifications(serialized, updates.status, previousStatus);
+      console.log(`✅ [Mobile] Order ${params.orderId} ${previousStatus} → ${updates.status ?? 'updated'}`);
       return NextResponse.json({ success: true, order: serialized });
     }
 
     const auth = await requirePermission('orders:write');
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-    const order = await findOrder(db, params.orderId);
-    if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    // ── Same previous-status capture for admin PATCH ─────────────────────
+    const orderBefore = await findOrder(db, params.orderId);
+    if (!orderBefore) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
-    if (!auth.isSuperAdmin && order.branchId?.toString() !== auth.branchId?.toString()) {
+    if (!auth.isSuperAdmin && orderBefore.branchId?.toString() !== auth.branchId?.toString()) {
       return NextResponse.json({ error: 'Not authorized to update this order' }, { status: 403 });
     }
 
+    const previousStatus = orderBefore.status;
     const serialized = await applyOrderUpdate(db, params.orderId, updates);
     if (!serialized) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     emitOrderUpdate(serialized, updates.status);
-    if (updates.status) await triggerStatusNotifications(serialized, updates.status);
-    console.log(`✅ [Admin] Order ${params.orderId} → ${updates.status ?? 'updated'}`);
+    if (updates.status) await triggerStatusNotifications(serialized, updates.status, previousStatus);
+    console.log(`✅ [Admin] Order ${params.orderId} ${previousStatus} → ${updates.status ?? 'updated'}`);
     return NextResponse.json({ success: true, order: serialized });
   } catch (error: any) {
     console.error('❌ Error updating order:', error);
