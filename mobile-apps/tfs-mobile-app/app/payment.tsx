@@ -105,13 +105,13 @@ export default function PaymentScreen() {
   const user      = useStore((s) => s.user);
   const clearCart = useStore((s) => s.clearCart);
 
-  const [status, setStatus]             = useState<PaymentStatus>('initializing');
-  const [paystackHtml, setPaystackHtml] = useState<string | null>(null);
-  const [reference, setReference]       = useState('');
-  const [orderItems, setOrderItems]     = useState<OrderSummaryItem[]>([]);
-  const [errorMessage, setErrorMessage] = useState('');
+  const [status, setStatus]               = useState<PaymentStatus>('initializing');
+  const [paystackHtml, setPaystackHtml]   = useState<string | null>(null);
+  const [reference, setReference]         = useState('');
+  const [orderItems, setOrderItems]       = useState<OrderSummaryItem[]>([]);
+  const [errorMessage, setErrorMessage]   = useState('');
   const [verifyAttempt, setVerifyAttempt] = useState(0);
-  const hasInitialized                  = useRef(false);
+  const hasInitialized                    = useRef(false);
 
   const orderId     = params?.orderId     || '';
   const amount      = parseFloat(params?.amount || '0');
@@ -194,16 +194,22 @@ export default function PaymentScreen() {
   };
 
   /**
-   * Verify with exponential-ish backoff to handle Paystack's "ongoing" race.
-   * Paystack fires callback before the transaction fully settles server-side,
-   * so we retry up to MAX_ATTEMPTS times before giving up.
+   * Verify with exponential backoff to handle Paystack's settlement race.
+   *
+   * Paystack fires the callback before their backend fully settles the
+   * transaction. Their API can briefly return 'failed' or 'pending' even
+   * for a successful charge — both are treated as retryable here.
+   *
+   * The server returns { retryable: true, pending: true } with HTTP 202
+   * for those transient states, and HTTP 400 with retryable: false only
+   * for genuinely terminal failures (abandoned, reversed, etc.).
    */
   const handleVerify = async (ref: string) => {
     setStatus('verifying');
 
-    const MAX_ATTEMPTS = 6;
-    // Delays in ms between retries: 1.5s, 2s, 3s, 4s, 5s
-    const RETRY_DELAYS = [1500, 2000, 3000, 4000, 5000];
+    const MAX_ATTEMPTS = 8;
+    // Give Paystack progressively more time to settle between retries
+    const RETRY_DELAYS = [3000, 4000, 5000, 6000, 8000, 8000, 8000];
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       // Wait before retrying (not before the first attempt)
@@ -217,13 +223,13 @@ export default function PaymentScreen() {
       try {
         const res = await api.post('/api/payment/verify', { reference: ref });
 
-        // 202 = still processing, retry
-        if (res.status === 202 && res.data.pending) {
-          console.log(`[Verify] Attempt ${attempt + 1}: payment still pending, will retry`);
+        // Server says retryable (pending/ongoing/transient failed) — keep trying
+        if (res.data.pending || res.data.retryable) {
+          console.log(`[Verify] Attempt ${attempt + 1}: ${res.data.error} — retrying…`);
           continue;
         }
 
-        // Hard failure from server
+        // Confirmed non-retryable failure from server
         if (!res.data.verified) {
           throw new Error(res.data.error || 'Verification failed');
         }
@@ -244,28 +250,31 @@ export default function PaymentScreen() {
         return; // all done
 
       } catch (e: any) {
-        // On the last attempt, surface the error
-        if (attempt === MAX_ATTEMPTS - 1) {
-          console.error('[Verify] All attempts exhausted:', e?.message);
+        // axios throws on 4xx — check if the server response body says retryable
+        const retryable = e?.response?.data?.retryable === true;
+
+        if (!retryable || attempt === MAX_ATTEMPTS - 1) {
+          console.error('[Verify] Non-retryable error or max attempts reached:', e?.message);
           setVerifyAttempt(0);
           setStatus('failed');
           setErrorMessage(
+            e?.response?.data?.error ||
             e?.message ||
-            `Payment could not be verified after ${MAX_ATTEMPTS} attempts. ` +
-            `If you were charged, please contact support with reference: ${ref}`
+            `Payment could not be verified. If you were charged, please contact support with reference: ${ref}`
           );
           return;
         }
-        // Otherwise log and retry
-        console.warn(`[Verify] Attempt ${attempt + 1} failed (${e?.message}), retrying…`);
+
+        // Retryable error — log and continue the loop
+        console.warn(`[Verify] Attempt ${attempt + 1} retryable (${e?.message}), continuing…`);
       }
     }
 
-    // Should not reach here, but just in case
+    // Loop exhausted without success
     setVerifyAttempt(0);
     setStatus('failed');
     setErrorMessage(
-      `Payment verification timed out. If you were charged, please contact support with reference: ${ref}`
+      `Verification timed out after ${MAX_ATTEMPTS} attempts. If you were charged, please contact support with reference: ${ref}`
     );
   };
 
@@ -345,9 +354,9 @@ export default function PaymentScreen() {
 
             if (url.includes('paystack.co/close') || url.includes('paystack.co/charge')) {
               try {
-                const qs     = url.split('?')[1] || '';
-                const qp     = Object.fromEntries(qs.split('&').map(p => p.split('=')));
-                const ref    = qp.reference || qp.trxref || reference;
+                const qs  = url.split('?')[1] || '';
+                const qp  = Object.fromEntries(qs.split('&').map(p => p.split('=')));
+                const ref = qp.reference || qp.trxref || reference;
                 if (ref) {
                   setPaystackHtml(null);
                   setStatus('verifying');

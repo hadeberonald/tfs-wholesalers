@@ -100,21 +100,23 @@ export async function POST(request: NextRequest) {
 
     const txStatus = result.data?.status;
 
-    // Transaction is still settling — tell the client to retry
-    if (txStatus === 'ongoing' || txStatus === 'processing' || txStatus === 'pending') {
-      console.log(`[Verify] Payment ${reference} is still ${txStatus} — asking client to retry`);
-      return NextResponse.json(
-        { verified: false, pending: true, error: `Payment is still ${txStatus}` },
-        { status: 202 }
-      );
-    }
+    // Statuses that are retryable — Paystack can transiently report 'failed'
+    // before a transaction fully settles to 'success'. Treat it like 'ongoing'.
+    const RETRYABLE_STATUSES = ['ongoing', 'processing', 'pending', 'failed'];
 
-    // Any non-success terminal state (failed, abandoned, reversed, etc.)
     if (txStatus !== 'success') {
-      console.warn(`[Verify] Paystack reports non-success for ${reference}: ${txStatus}`);
+      const retryable = RETRYABLE_STATUSES.includes(txStatus);
+      console.warn(
+        `[Verify] Paystack status "${txStatus}" for ${reference} — retryable: ${retryable}`
+      );
       return NextResponse.json(
-        { verified: false, error: result.message || `Payment status: ${txStatus}` },
-        { status: 400 }
+        {
+          verified:  false,
+          retryable,
+          pending:   retryable,
+          error:     result.message || `Payment status: ${txStatus}`,
+        },
+        { status: retryable ? 202 : 400 }
       );
     }
 
