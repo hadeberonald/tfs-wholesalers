@@ -10,8 +10,6 @@ import {
   ArrowLeft, Truck, Package, CheckCircle, XCircle,
 } from 'lucide-react';
 
-// ─── Types ─────────────────────────────────────────────────────────────────────
-
 interface SectionStats {
   overall:  Record<string, Record<string, number>>;
   store:    Record<string, Record<string, number>>;
@@ -47,8 +45,6 @@ interface NPSStats {
   recentResponses: NPSResponse[];
 }
 
-// ─── Delivery types ────────────────────────────────────────────────────────────
-
 interface DeliveryStats {
   totalResponses:   number;
   npsScore:         number;
@@ -81,8 +77,6 @@ interface DeliveryStats {
   recentResponses:  any[];
 }
 
-// ─── Constants ─────────────────────────────────────────────────────────────────
-
 const PERIOD_OPTIONS = [
   { label: 'Today',        value: '1'   },
   { label: 'Last 7 days',  value: '7'   },
@@ -90,8 +84,6 @@ const PERIOD_OPTIONS = [
   { label: 'Last 90 days', value: '90'  },
   { label: 'All time',     value: 'all' },
 ];
-
-// ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function pct(count: number, total: number) {
   return total > 0 ? Math.round((count / total) * 100) : 0;
@@ -132,17 +124,21 @@ function SectionCard({ title, icon: Icon, iconColor, children }: {
   );
 }
 
+// Always renders — shows "No records yet" when data is empty
 function MetricGroup({ label, data, total, color = 'bg-brand-orange' }: {
   label: string; data: Record<string, number>; total: number; color?: string;
 }) {
   const entries = Object.entries(data).sort((a, b) => b[1] - a[1]);
-  if (!entries.length) return null;
   return (
     <div className="mb-5">
       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">{label}</p>
-      {entries.map(([key, count]) => (
-        <BarRow key={key} label={key} count={count} total={total} color={color} />
-      ))}
+      {entries.length === 0 ? (
+        <p className="text-xs text-gray-400 italic py-1">No records yet</p>
+      ) : (
+        entries.map(([key, count]) => (
+          <BarRow key={key} label={key} count={count} total={total} color={color} />
+        ))
+      )}
     </div>
   );
 }
@@ -165,7 +161,6 @@ function StarBar({ value }: { value: number }) {
   );
 }
 
-// ─── PDF Print styles ──────────────────────────────────────────────────────────
 const PRINT_STYLES = `
 @media print {
   body * { visibility: hidden; }
@@ -176,18 +171,49 @@ const PRINT_STYLES = `
 }
 `;
 
-// ─── Main component ────────────────────────────────────────────────────────────
+// Empty delivery stats scaffold — shown when API returns nothing
+const EMPTY_DELIVERY_STATS: DeliveryStats = {
+  totalResponses: 0,
+  npsScore: 0,
+  promoters: 0,
+  passives: 0,
+  detractors: 0,
+  averageScore: 0,
+  averageRatings: {
+    deliverySpeed: 0,
+    driverFriendliness: 0,
+    packagingQuality: 0,
+    overallSatisfaction: 0,
+  },
+  scoreDistribution: [],
+  trend: 0,
+  sectionStats: {
+    delivery: {
+      speed: {},
+      driverFriendliness: {},
+      packagingQuality: {},
+      itemsReceived: {},
+      itemCondition: {},
+    },
+    overall: {
+      satisfaction: {},
+      wouldReorder: {},
+    },
+  },
+  comments: [],
+  recentResponses: [],
+};
 
 export default function NPSResultsPage() {
   const params = useParams();
   const slug   = params?.slug as string;
 
-  const [stats, setStats]           = useState<NPSStats | null>(null);
-  const [deliveryStats, setDeliveryStats] = useState<DeliveryStats | null>(null);
-  const [loading, setLoading]       = useState(true);
-  const [period, setPeriod]         = useState('30');
-  const [activeTab, setActiveTab]   = useState<'overview' | 'sections' | 'delivery' | 'responses'>('overview');
-  const [respFilter, setRespFilter] = useState<'all' | 'promoter' | 'passive' | 'detractor'>('all');
+  const [stats, setStats]                 = useState<NPSStats | null>(null);
+  const [deliveryStats, setDeliveryStats] = useState<DeliveryStats>(EMPTY_DELIVERY_STATS);
+  const [loading, setLoading]             = useState(true);
+  const [period, setPeriod]               = useState('30');
+  const [activeTab, setActiveTab]         = useState<'overview' | 'sections' | 'delivery' | 'responses'>('overview');
+  const [respFilter, setRespFilter]       = useState<'all' | 'promoter' | 'passive' | 'detractor'>('all');
 
   useEffect(() => { fetchAllStats(); }, [period]);
 
@@ -204,10 +230,14 @@ export default function NPSResultsPage() {
       }
       if (deliveryRes.ok) {
         const data = await deliveryRes.json();
-        setDeliveryStats(data.stats);
+        // Merge returned data over the empty scaffold so missing fields stay safe
+        setDeliveryStats({ ...EMPTY_DELIVERY_STATS, ...(data.stats ?? {}) });
+      } else {
+        setDeliveryStats(EMPTY_DELIVERY_STATS);
       }
     } catch (err) {
       console.error('Failed to fetch NPS stats:', err);
+      setDeliveryStats(EMPTY_DELIVERY_STATS);
     } finally {
       setLoading(false);
     }
@@ -238,12 +268,13 @@ export default function NPSResultsPage() {
   );
 
   const n      = stats.totalResponses;
-  const dn     = deliveryStats?.totalResponses ?? 0;
+  const dn     = deliveryStats.totalResponses;
   const bg     = stats.npsScore >= 50 ? 'from-green-500 to-emerald-600' : stats.npsScore >= 0 ? 'from-yellow-400 to-orange-500' : 'from-red-500 to-rose-600';
-  const dbg    = !deliveryStats ? 'from-gray-300 to-gray-400' : deliveryStats.npsScore >= 50 ? 'from-green-500 to-emerald-600' : deliveryStats.npsScore >= 0 ? 'from-yellow-400 to-orange-500' : 'from-red-500 to-rose-600';
+  const dbg    = dn === 0 ? 'from-gray-300 to-gray-400' : deliveryStats.npsScore >= 50 ? 'from-green-500 to-emerald-600' : deliveryStats.npsScore >= 0 ? 'from-yellow-400 to-orange-500' : 'from-red-500 to-rose-600';
   const ss     = stats.sectionStats;
+  const ds     = deliveryStats.sectionStats;
   const maxBar = Math.max(...stats.scoreDistribution.map(d => d.count), 1);
-  const dmaxBar = deliveryStats ? Math.max(...deliveryStats.scoreDistribution.map(d => d.count), 1) : 1;
+  const dmaxBar = Math.max(...deliveryStats.scoreDistribution.map(d => d.count), 1);
 
   const today = new Date().toLocaleDateString('en-ZA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
@@ -303,13 +334,13 @@ export default function NPSResultsPage() {
             </div>
           </div>
 
-          {/* ── Tabs — now includes Delivery ── */}
+          {/* ── Tabs ── */}
           <div className="flex gap-1 bg-white rounded-2xl p-1 shadow-sm border border-gray-100 mb-8 no-print w-fit">
             {([
-              { key: 'overview',   label: 'Overview'   },
-              { key: 'sections',   label: 'In-Store'   },
-              { key: 'delivery',   label: 'Delivery'   },
-              { key: 'responses',  label: 'Responses'  },
+              { key: 'overview',   label: 'Overview'  },
+              { key: 'sections',   label: 'In-Store'  },
+              { key: 'delivery',   label: 'Delivery'  },
+              { key: 'responses',  label: 'Responses' },
             ] as const).map(t => (
               <button
                 key={t.key}
@@ -329,7 +360,6 @@ export default function NPSResultsPage() {
           {/* ════════════════════ OVERVIEW TAB ════════════════════ */}
           {activeTab === 'overview' && (
             <div>
-              {/* ── Combined NPS summary ── */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
                 {/* In-store NPS */}
                 <div className={`bg-gradient-to-br ${bg} rounded-2xl p-6 text-white shadow-lg`}>
@@ -347,13 +377,18 @@ export default function NPSResultsPage() {
                   </p>
                 </div>
 
-                {/* Delivery NPS */}
+                {/* Delivery NPS — always visible */}
                 <div className={`bg-gradient-to-br ${dbg} rounded-2xl p-6 text-white shadow-lg`}>
                   <div className="flex items-center gap-2 mb-2">
                     <Truck className="w-4 h-4 text-white/80" />
                     <p className="text-white/80 text-sm font-medium">Delivery NPS</p>
                   </div>
-                  {deliveryStats ? (
+                  {dn === 0 ? (
+                    <>
+                      <p className="text-5xl font-black leading-none mb-2 text-white/60">—</p>
+                      <p className="text-white/60 text-sm mt-1">No delivery responses yet</p>
+                    </>
+                  ) : (
                     <>
                       <p className="text-6xl font-black leading-none mb-2">{deliveryStats.npsScore > 0 ? '+' : ''}{deliveryStats.npsScore}</p>
                       <div className="flex items-center gap-1 text-white/80 text-sm">
@@ -364,8 +399,6 @@ export default function NPSResultsPage() {
                         {dn} response{dn !== 1 ? 's' : ''} · {deliveryStats.npsScore >= 70 ? '🏆 World class' : deliveryStats.npsScore >= 50 ? '✅ Excellent' : deliveryStats.npsScore >= 0 ? '👍 Good' : '⚠️ Needs attention'}
                       </p>
                     </>
-                  ) : (
-                    <p className="text-white/60 text-lg mt-4">No delivery data yet</p>
                   )}
                 </div>
               </div>
@@ -373,10 +406,10 @@ export default function NPSResultsPage() {
               {/* Top stats row */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                 {[
-                  { label: 'In-Store Responses', value: n,                              sub: 'total collected',    icon: <Users className="w-4 h-4 text-gray-600" />,        ibg: 'bg-gray-100'  },
-                  { label: 'Delivery Responses', value: dn,                             sub: 'app reviews',        icon: <Truck className="w-4 h-4 text-brand-orange" />,    ibg: 'bg-orange-50' },
-                  { label: 'Avg In-Store',        value: stats.averageScore.toFixed(1), sub: 'out of 5',           icon: <Star className="w-4 h-4 text-yellow-600" />,       ibg: 'bg-yellow-100'},
-                  { label: 'Avg Delivery',        value: deliveryStats ? deliveryStats.averageScore.toFixed(1) : '—', sub: 'out of 5', icon: <Star className="w-4 h-4 text-green-600" />, ibg: 'bg-green-50'},
+                  { label: 'In-Store Responses', value: n,                                    sub: 'total collected', icon: <Users className="w-4 h-4 text-gray-600" />,        ibg: 'bg-gray-100'  },
+                  { label: 'Delivery Responses', value: dn,                                   sub: 'app reviews',     icon: <Truck className="w-4 h-4 text-brand-orange" />,    ibg: 'bg-orange-50' },
+                  { label: 'Avg In-Store',        value: stats.averageScore.toFixed(1),        sub: 'out of 5',        icon: <Star className="w-4 h-4 text-yellow-600" />,       ibg: 'bg-yellow-100'},
+                  { label: 'Avg Delivery',        value: dn > 0 ? deliveryStats.averageScore.toFixed(1) : '—', sub: 'out of 5', icon: <Star className="w-4 h-4 text-green-600" />, ibg: 'bg-green-50'},
                 ].map(({ label, value, sub, icon, ibg }) => (
                   <div key={label} className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
                     <div className="flex items-center gap-2 mb-3">
@@ -391,7 +424,6 @@ export default function NPSResultsPage() {
 
               {/* Promoter breakdowns side by side */}
               <div className="grid lg:grid-cols-2 gap-6 mb-8">
-                {/* In-store promoters */}
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
                   <div className="flex items-center gap-2 mb-5">
                     <Store className="w-4 h-4 text-gray-500" />
@@ -425,14 +457,17 @@ export default function NPSResultsPage() {
                   </div>
                 </div>
 
-                {/* Delivery promoters */}
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
                   <div className="flex items-center gap-2 mb-5">
                     <Truck className="w-4 h-4 text-brand-orange" />
                     <h2 className="text-lg font-bold text-gray-900">Delivery — Overall Satisfaction</h2>
                   </div>
-                  {!deliveryStats || dn === 0 ? (
-                    <p className="text-gray-400 text-sm italic py-8 text-center">No delivery responses yet for this period.</p>
+                  {dn === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-10 text-center">
+                      <Truck className="w-10 h-10 text-gray-200 mb-3" />
+                      <p className="text-gray-400 font-medium text-sm">No NPS records yet</p>
+                      <p className="text-gray-300 text-xs mt-1">Delivery responses will appear here once collected</p>
+                    </div>
                   ) : (
                     <div className="space-y-4">
                       {[
@@ -464,7 +499,7 @@ export default function NPSResultsPage() {
                 </div>
               </div>
 
-              {/* Score distributions side by side */}
+              {/* Score distributions */}
               <div className="grid lg:grid-cols-2 gap-6 mb-8">
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
                   <h2 className="text-lg font-bold text-gray-900 mb-5">In-Store Rating Distribution</h2>
@@ -487,8 +522,10 @@ export default function NPSResultsPage() {
 
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
                   <h2 className="text-lg font-bold text-gray-900 mb-5">Delivery Rating Distribution</h2>
-                  {!deliveryStats || dn === 0 ? (
-                    <p className="text-gray-400 text-sm italic py-8 text-center">No delivery data yet.</p>
+                  {dn === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-36 text-center">
+                      <p className="text-gray-300 text-sm italic">No delivery data yet</p>
+                    </div>
                   ) : (
                     <div className="flex items-end justify-between gap-1 h-36">
                       {Array.from({ length: 5 }, (_, i) => {
@@ -558,13 +595,18 @@ export default function NPSResultsPage() {
                 </div>
               )}
 
-              {/* Delivery comments in overview */}
-              {deliveryStats && deliveryStats.comments.length > 0 && (
-                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Truck className="w-5 h-5 text-brand-orange" />
-                    <h2 className="text-lg font-bold text-gray-900">Delivery Feedback Comments</h2>
+              {/* Delivery comments preview */}
+              <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+                <div className="flex items-center gap-2 mb-4">
+                  <Truck className="w-5 h-5 text-brand-orange" />
+                  <h2 className="text-lg font-bold text-gray-900">Delivery Feedback Comments</h2>
+                </div>
+                {deliveryStats.comments.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-center">
+                    <MessageSquare className="w-8 h-8 text-gray-200 mb-2" />
+                    <p className="text-gray-400 text-sm italic">No comments yet</p>
                   </div>
+                ) : (
                   <div className="space-y-2">
                     {deliveryStats.comments.slice(0, 5).map((text, i) => (
                       <div key={i} className="flex items-start gap-2 bg-orange-50 border border-orange-100 rounded-xl px-4 py-2.5">
@@ -581,8 +623,8 @@ export default function NPSResultsPage() {
                       </button>
                     )}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           )}
 
@@ -613,73 +655,78 @@ export default function NPSResultsPage() {
             </div>
           )}
 
-          {/* ════════════════════ DELIVERY TAB ════════════════════ */}
+          {/* ════════════════════ DELIVERY TAB — always renders ════════════════════ */}
           {activeTab === 'delivery' && (
             <div>
-              {!deliveryStats || dn === 0 ? (
-                <div className="bg-white rounded-2xl p-16 shadow-sm border border-gray-100 text-center">
-                  <Truck className="w-12 h-12 text-gray-200 mx-auto mb-4" />
-                  <p className="text-gray-400 font-medium">No delivery reviews yet for this period.</p>
-                  <p className="text-gray-400 text-sm mt-1">Reviews appear here after customers complete the in-app delivery survey.</p>
+              {/* Average star ratings — show zeroes when no data */}
+              <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 mb-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-lg font-bold text-gray-900">Average Delivery Ratings</h2>
+                  {dn === 0 && <span className="text-xs text-gray-400 italic bg-gray-50 px-3 py-1 rounded-full">No NPS records yet</span>}
                 </div>
-              ) : (
-                <div>
-                  {/* Delivery average star ratings */}
-                  <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 mb-6">
-                    <h2 className="text-lg font-bold text-gray-900 mb-6">Average Delivery Ratings</h2>
-                    <div className="grid sm:grid-cols-2 gap-6">
-                      {[
-                        { label: '🚚 Delivery Speed',         value: deliveryStats.averageRatings.deliverySpeed        },
-                        { label: '😊 Driver Friendliness',    value: deliveryStats.averageRatings.driverFriendliness   },
-                        { label: '📦 Packaging Quality',      value: deliveryStats.averageRatings.packagingQuality      },
-                        { label: '⭐ Overall Satisfaction',   value: deliveryStats.averageRatings.overallSatisfaction   },
-                      ].map(({ label, value }) => (
-                        <div key={label}>
-                          <p className="text-sm font-semibold text-gray-700 mb-2">{label}</p>
-                          <StarBar value={value} />
-                        </div>
-                      ))}
+                <div className="grid sm:grid-cols-2 gap-6">
+                  {[
+                    { label: '🚚 Delivery Speed',         value: deliveryStats.averageRatings.deliverySpeed        },
+                    { label: '😊 Driver Friendliness',    value: deliveryStats.averageRatings.driverFriendliness   },
+                    { label: '📦 Packaging Quality',      value: deliveryStats.averageRatings.packagingQuality      },
+                    { label: '⭐ Overall Satisfaction',   value: deliveryStats.averageRatings.overallSatisfaction   },
+                  ].map(({ label, value }) => (
+                    <div key={label}>
+                      <p className="text-sm font-semibold text-gray-700 mb-2">{label}</p>
+                      {dn === 0 ? (
+                        <p className="text-xs text-gray-300 italic">No data yet</p>
+                      ) : (
+                        <StarBar value={value} />
+                      )}
                     </div>
-                  </div>
-
-                  {/* Delivery section breakdowns */}
-                  <div className="grid lg:grid-cols-2 gap-6 mb-6">
-                    <SectionCard title="Delivery Experience" icon={Truck} iconColor="text-brand-orange">
-                      <MetricGroup label="Delivery Speed"      data={deliveryStats.sectionStats.delivery.speed              || {}} total={dn} color="bg-brand-orange" />
-                      <MetricGroup label="Driver Friendliness" data={deliveryStats.sectionStats.delivery.driverFriendliness || {}} total={dn} color="bg-amber-400"    />
-                      <MetricGroup label="Packaging Quality"   data={deliveryStats.sectionStats.delivery.packagingQuality   || {}} total={dn} color="bg-yellow-400"   />
-                    </SectionCard>
-
-                    <SectionCard title="Items Received" icon={Package} iconColor="text-indigo-500">
-                      <MetricGroup label="All Items Received?" data={deliveryStats.sectionStats.delivery.itemsReceived || {}} total={dn} color="bg-indigo-400" />
-                      <MetricGroup label="Item Condition"      data={deliveryStats.sectionStats.delivery.itemCondition || {}} total={dn} color="bg-blue-400"   />
-                    </SectionCard>
-
-                    <SectionCard title="Overall Experience" icon={Star} iconColor="text-green-500">
-                      <MetricGroup label="Overall Satisfaction" data={deliveryStats.sectionStats.overall.satisfaction || {}} total={dn} color="bg-green-500"  />
-                      <MetricGroup label="Would Order Again"    data={deliveryStats.sectionStats.overall.wouldReorder  || {}} total={dn} color="bg-emerald-400" />
-                    </SectionCard>
-                  </div>
-
-                  {/* Delivery comments */}
-                  {deliveryStats.comments.length > 0 && (
-                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-                      <div className="flex items-center gap-2 mb-4">
-                        <MessageSquare className="w-5 h-5 text-blue-500" />
-                        <h2 className="text-lg font-bold text-gray-900">Delivery Comments ({deliveryStats.comments.length})</h2>
-                      </div>
-                      <div className="space-y-2">
-                        {deliveryStats.comments.map((text, i) => (
-                          <div key={i} className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5">
-                            <span className="text-blue-400 mt-0.5">•</span>
-                            <p className="text-sm text-gray-700">{text}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  ))}
                 </div>
-              )}
+              </div>
+
+              {/* Delivery section breakdowns — always shown */}
+              <div className="grid lg:grid-cols-2 gap-6 mb-6">
+                <SectionCard title="Delivery Experience" icon={Truck} iconColor="text-brand-orange">
+                  <MetricGroup label="Delivery Speed"      data={ds.delivery.speed              || {}} total={dn} color="bg-brand-orange" />
+                  <MetricGroup label="Driver Friendliness" data={ds.delivery.driverFriendliness || {}} total={dn} color="bg-amber-400"    />
+                  <MetricGroup label="Packaging Quality"   data={ds.delivery.packagingQuality   || {}} total={dn} color="bg-yellow-400"   />
+                </SectionCard>
+
+                <SectionCard title="Items Received" icon={Package} iconColor="text-indigo-500">
+                  <MetricGroup label="All Items Received?" data={ds.delivery.itemsReceived || {}} total={dn} color="bg-indigo-400" />
+                  <MetricGroup label="Item Condition"      data={ds.delivery.itemCondition || {}} total={dn} color="bg-blue-400"   />
+                </SectionCard>
+
+                <SectionCard title="Overall Experience" icon={Star} iconColor="text-green-500">
+                  <MetricGroup label="Overall Satisfaction" data={ds.overall.satisfaction || {}} total={dn} color="bg-green-500"  />
+                  <MetricGroup label="Would Order Again"    data={ds.overall.wouldReorder  || {}} total={dn} color="bg-emerald-400" />
+                </SectionCard>
+              </div>
+
+              {/* Delivery comments — always shown */}
+              <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+                <div className="flex items-center gap-2 mb-4">
+                  <MessageSquare className="w-5 h-5 text-blue-500" />
+                  <h2 className="text-lg font-bold text-gray-900">
+                    Delivery Comments {dn > 0 && `(${deliveryStats.comments.length})`}
+                  </h2>
+                </div>
+                {deliveryStats.comments.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 text-center">
+                    <MessageSquare className="w-10 h-10 text-gray-200 mb-3" />
+                    <p className="text-gray-400 font-medium text-sm">No comments yet</p>
+                    <p className="text-gray-300 text-xs mt-1">Customer delivery comments will appear here</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {deliveryStats.comments.map((text, i) => (
+                      <div key={i} className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5">
+                        <span className="text-blue-400 mt-0.5">•</span>
+                        <p className="text-sm text-gray-700">{text}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
