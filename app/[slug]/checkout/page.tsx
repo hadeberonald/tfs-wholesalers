@@ -40,17 +40,14 @@ export default function CheckoutPage() {
   const [loading, setLoading] = useState(false);
   const [deliverySettings, setDeliverySettings] = useState<any>(null);
   const [storeLocation, setStoreLocation] = useState({ lat: -27.763912, lng: 30.798969 });
-  // Delivery fee is always R35 — all zones return 35 from the API
   const deliveryFee = 35;
   const [savedCards, setSavedCards] = useState<SavedCard[]>([]);
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
   const [useNewCard, setUseNewCard] = useState(false);
   const [locationValid, setLocationValid] = useState(false);
-  // Track whether user has interacted with the map (so we only show error after they've tried)
   const [locationTouched, setLocationTouched] = useState(false);
-  // Track the selected distance so we can show a helpful message
   const [selectedDistance, setSelectedDistance] = useState<number | null>(null);
-  const maxDeliveryRadius = 60;
+  const maxDeliveryRadius = 15;
 
   const [formData, setFormData] = useState({
     name: user?.name || '',
@@ -71,13 +68,11 @@ export default function CheckoutPage() {
       router.push('/cart');
     }
 
-    // Load Paystack script
     const script = document.createElement('script');
     script.src = 'https://js.paystack.co/v1/inline.js';
     script.async = true;
     document.body.appendChild(script);
 
-    // Load Leaflet CSS
     const link = document.createElement('link');
     link.rel = 'stylesheet';
     link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
@@ -130,7 +125,6 @@ export default function CheckoutPage() {
         const data = await res.json();
         if (data.settings) {
           setDeliverySettings(data.settings);
-          // Note: deliveryFee is always 35 — ignore data.settings fee values
         }
         if (data.location) setStoreLocation(data.location);
       }
@@ -179,7 +173,6 @@ export default function CheckoutPage() {
 
       console.log('✅ Payment initialized:', data.reference);
 
-      // Saved card charged immediately — verify and redirect
       if (savedCardData?.authorizationCode && data.charged) {
         console.log('✅ Charged with saved card');
         await verifyAndRedirect(data.reference, orderId);
@@ -194,17 +187,11 @@ export default function CheckoutPage() {
         amount: Math.round(orderData.total * 100),
         currency: 'ZAR',
         ref: data.reference,
-        // IMPORTANT: must be a plain function, NOT async.
-        // Paystack validates typeof callback === 'function' and does not
-        // handle Promise return values — async breaks the internal check.
         callback: function (response: any) {
           console.log('✅ Paystack callback received:', response.reference);
-
           if (user && useNewCard && response.authorization) {
             savePaymentMethod(response.authorization);
           }
-
-          // Fire async work without awaiting — callback must stay synchronous
           verifyAndRedirect(response.reference, orderId);
         },
         onClose: function () {
@@ -223,19 +210,6 @@ export default function CheckoutPage() {
     }
   };
 
-  /**
-   * verifyAndRedirect
-   *
-   * Calls /api/payment/verify which:
-   *   1. Confirms the charge with Paystack
-   *   2. Sets paymentStatus: 'paid' and status: 'confirmed' in the DB
-   *   3. Emits a socket event so the picker app sees the order immediately
-   *   4. Sends picker push notifications
-   *
-   * The old `promoteOrderToPending` call has been removed — it was setting
-   * status: 'pending' AFTER verify had already set 'confirmed', which could
-   * race and overwrite the correct status.
-   */
   const verifyAndRedirect = async (reference: string, orderId: string) => {
     console.log('🔍 Verifying payment:', reference);
     try {
@@ -430,8 +404,8 @@ export default function CheckoutPage() {
     );
   }
 
-  // Out-of-range: user picked a location but it's beyond 60km
   const addressOutOfRange = locationTouched && selectedDistance !== null && selectedDistance > maxDeliveryRadius;
+  const canSubmit = locationValid && !loading;
 
   return (
     <div className="min-h-screen bg-gray-50 pt-32 md:pt-28">
@@ -487,7 +461,6 @@ export default function CheckoutPage() {
                   />
                 )}
 
-                {/* Out-of-range warning shown inline under the map */}
                 {addressOutOfRange && (
                   <div className="mt-4 flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-4">
                     <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
@@ -526,7 +499,7 @@ export default function CheckoutPage() {
                     onChange={(e) => setFormData({ ...formData, deliveryNotes: e.target.value })}
                     placeholder="Please give us any delivery instructions or specific directions to find you easily…" />
                   <p className="text-xs text-gray-500 mt-2">
-                    Example: "Ring the intercom at gate 5" or "Leave with security at main entrance"
+                    Example: &quot;Ring the intercom at gate 5&quot; or &quot;Leave with security at main entrance&quot;
                   </p>
                 </div>
               </div>
@@ -613,7 +586,8 @@ export default function CheckoutPage() {
 
               <button
                 type="submit"
-                disabled={loading || !locationValid}
+                disabled={!canSubmit}
+                style={!canSubmit ? { pointerEvents: 'none' } : undefined}
                 className="btn-primary w-full text-lg py-4 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? (

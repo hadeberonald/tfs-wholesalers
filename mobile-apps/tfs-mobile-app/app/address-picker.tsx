@@ -217,14 +217,14 @@ export default function AddressPickerScreen() {
     lng: branch?.settings?.storeLocation?.lng ?? DEFAULT_STORE.lng,
   };
 
-  const deliverySettings: DeliverySettings = {
-    local:        35,
-    localRadius:  (branch?.settings as any)?.deliveryPricing?.localRadius  ?? DEFAULT_DELIVERY.localRadius,
-    medium:       35,
-    mediumRadius: (branch?.settings as any)?.deliveryPricing?.mediumRadius ?? DEFAULT_DELIVERY.mediumRadius,
-    far:          35,
-    farRadius:    (branch?.settings as any)?.deliveryPricing?.farRadius    ?? DEFAULT_DELIVERY.farRadius,
-  };
+ const deliverySettings: DeliverySettings = {
+  local: 35,
+  localRadius: 15,
+  medium: 35,
+  mediumRadius: 15,
+  far: 35,
+  farRadius: 15,
+};
 
   const initialRegion: Region = {
     latitude:      storeLocation.lat,

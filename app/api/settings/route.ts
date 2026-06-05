@@ -17,11 +17,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       settings: {
         local:        35,
-        localRadius:  pricing.localRadius  ?? 20,
+        localRadius:  pricing.localRadius  ?? 15,
         medium:       35,
-        mediumRadius: pricing.mediumRadius ?? 40,
+        mediumRadius: pricing.mediumRadius ?? 15,
         far:          35,
-        farRadius:    pricing.farRadius    ?? 60,
+        farRadius:    pricing.farRadius    ?? 15,
       },
       location: branch.settings?.storeLocation || { lat: -29.8587, lng: 31.0218, address: '' },
     });

@@ -111,7 +111,7 @@ export default function CheckoutScreen() {
 
   // Pull the max delivery radius from branch settings
   const maxDeliveryRadius: number =
-    (branch?.settings as any)?.deliveryPricing?.farRadius ?? 60;
+    (branch?.settings as any)?.deliveryPricing?.farRadius ?? 15;
 
   // Delivery fee is always R35 regardless of distance (within zone)
   const deliveryFee = 35;
