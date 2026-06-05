@@ -461,17 +461,7 @@ export default function CheckoutPage() {
                   />
                 )}
 
-                {addressOutOfRange && (
-                  <div className="mt-4 flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-4">
-                    <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-sm font-semibold text-red-700">Outside delivery zone</p>
-                      <p className="text-sm text-red-600 mt-0.5">
-                        Your address is {selectedDistance?.toFixed(1)} km away. We only deliver within {maxDeliveryRadius} km of our store. Please choose a closer address.
-                      </p>
-                    </div>
-                  </div>
-                )}
+                
 
                 <div className="mt-6 grid md:grid-cols-2 gap-4">
                   <div>
