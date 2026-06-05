@@ -10,6 +10,26 @@ import {
 } from '@/lib/sendPushNotification';
 import { notifyUserWeb, notifyBranchWeb } from '@/lib/sendWebPush';
 
+// ─── Paystack statuses that mean "not settled yet — try again" ────────────────
+// These are transient states where the transaction is in-flight.
+// "ongoing" is the most common race condition hit when Paystack fires
+// the callback before their backend fully settles.
+const RETRYABLE_STATUSES = new Set([
+  'ongoing',
+  'pending',
+  'processing',
+  'queued',
+]);
+
+// These are terminal failures — no point retrying
+const TERMINAL_FAILURE_STATUSES = new Set([
+  'failed',
+  'reversed',
+  'abandoned',
+  'cancelled',
+  'timeout',
+]);
+
 // ─── Socket emit ──────────────────────────────────────────────────────────────
 function emitOrderUpdate(order: any) {
   try {
@@ -87,55 +107,72 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Payment reference is required' }, { status: 400 });
     }
 
-    // ── Step 1: verify with Paystack ──────────────────────────────────────────
-    let result: any;
+    // ── Step 1: Ask Paystack for the transaction status ───────────────────────
+    let paystackResult: any;
     try {
-      result = await paystackService.verifyPayment(reference);
-    } catch (err: any) {
-      // Network / timeout talking to Paystack — treat as retryable
-      console.error(`[Verify] Network error reaching Paystack for ${reference}:`, err.message);
+      paystackResult = await paystackService.verifyPayment(reference);
+    } catch (fetchErr: any) {
+      // Network error hitting Paystack — tell client to retry
+      console.error(`[Verify] Network error calling Paystack for ${reference}:`, fetchErr.message);
       return NextResponse.json(
-        { verified: false, retryable: true, pending: true, error: 'Could not reach payment provider — please wait a moment' },
+        {
+          verified:  false,
+          pending:   true,
+          retryable: true,
+          error:     'Could not reach payment provider — retrying…',
+        },
         { status: 202 }
       );
     }
 
-    // Paystack gateway-level failure (e.g. bad key)
-    if (!result.status) {
-      console.warn(`[Verify] Paystack gateway error for ${reference}:`, result.message);
+    const paystackStatus: string = paystackResult?.data?.status ?? '';
+
+    console.log(`[Verify] Paystack status "${paystackStatus}" for ${reference}`);
+
+    // ── Step 2: Handle transient / not-yet-settled states ────────────────────
+    // Return HTTP 202 so the client knows to keep polling.
+    if (RETRYABLE_STATUSES.has(paystackStatus)) {
+      console.log(`[Verify] Status "${paystackStatus}" is transient — instructing client to retry`);
       return NextResponse.json(
-        { verified: false, error: result.message || 'Could not reach payment provider' },
+        {
+          verified:  false,
+          pending:   true,
+          retryable: true,
+          error:     `Payment status is "${paystackStatus}" — waiting for settlement`,
+        },
+        { status: 202 }
+      );
+    }
+
+    // ── Step 3: Handle terminal Paystack failures ─────────────────────────────
+    if (TERMINAL_FAILURE_STATUSES.has(paystackStatus)) {
+      console.warn(`[Verify] Terminal failure "${paystackStatus}" for ${reference}`);
+      return NextResponse.json(
+        {
+          verified:  false,
+          retryable: false,
+          error:     `Payment ${paystackStatus}. Please try again or use a different card.`,
+        },
         { status: 400 }
       );
     }
 
-    const txStatus = result.data?.status;
-
-    // ── Step 2: check transaction status ─────────────────────────────────────
-    // Paystack can transiently report 'failed' or 'pending' before a transaction
-    // fully settles to 'success' — treat these as retryable, NOT terminal.
-    const RETRYABLE_STATUSES = ['ongoing', 'processing', 'pending', 'queued', 'failed'];
-
-    if (txStatus !== 'success') {
-      const retryable = RETRYABLE_STATUSES.includes(txStatus);
-      console.warn(
-        `[Verify] Paystack status "${txStatus}" for ${reference} — retryable: ${retryable}`
-      );
+    // ── Step 4: Validate Paystack reports success ─────────────────────────────
+    if (!paystackResult.status || paystackStatus !== 'success') {
+      console.warn(`[Verify] Non-success status "${paystackStatus}" for ${reference}:`, paystackResult.message);
       return NextResponse.json(
         {
           verified:  false,
-          retryable,
-          pending:   retryable,
-          error:     result.message || `Payment status: ${txStatus}`,
+          retryable: false,
+          error:     paystackResult.message || `Payment was not successful (status: ${paystackStatus})`,
         },
-        // Use 202 for retryable so axios doesn't throw on the client
-        { status: retryable ? 202 : 400 }
+        { status: 400 }
       );
     }
 
-    const { data } = result;
+    // ── Step 5: Payment is confirmed by Paystack — process in our DB ─────────
+    const { data } = paystackResult;
 
-    // ── Step 3: extract orderId from metadata ─────────────────────────────────
     const orderId =
       data.metadata?.orderId ||
       data.metadata?.custom_fields?.find(
@@ -145,15 +182,15 @@ export async function POST(request: NextRequest) {
     if (!orderId) {
       console.error(
         `[Verify] CRITICAL: Payment ${reference} verified on Paystack but no orderId in metadata.`,
-        'Metadata received:',
-        JSON.stringify(data.metadata ?? null)
+        'Metadata received:', JSON.stringify(data.metadata ?? null)
       );
       return NextResponse.json(
         {
-          verified: false,
+          verified:  false,
+          retryable: false,
           error:
-            'Payment was received but we could not match it to your order. Please contact support with reference: ' +
-            reference,
+            'Payment received but could not be matched to your order. ' +
+            'Please contact support with reference: ' + reference,
         },
         { status: 422 }
       );
@@ -162,25 +199,25 @@ export async function POST(request: NextRequest) {
     if (!ObjectId.isValid(orderId)) {
       console.error(`[Verify] Invalid orderId format in metadata: "${orderId}" for reference ${reference}`);
       return NextResponse.json(
-        { verified: false, error: 'Invalid order reference. Please contact support.' },
+        { verified: false, retryable: false, error: 'Invalid order reference. Please contact support.' },
         { status: 422 }
       );
     }
 
-    // ── Step 4: update DB ─────────────────────────────────────────────────────
     const client = await clientPromise;
     const db     = client.db('tfs-wholesalers');
 
-    const existing = await db.collection('orders').findOne({
-      _id: new ObjectId(orderId),
-    });
+    const existing = await db.collection('orders').findOne({ _id: new ObjectId(orderId) });
 
     if (!existing) {
       console.error(`[Verify] Order ${orderId} not found in DB for reference ${reference}`);
-      return NextResponse.json({ verified: false, error: 'Order not found' }, { status: 404 });
+      return NextResponse.json(
+        { verified: false, retryable: false, error: 'Order not found' },
+        { status: 404 }
+      );
     }
 
-    // Idempotency: already paid — return success with branch info for redirect
+    // ── Step 6: Idempotency — already paid, just return success ──────────────
     if (existing.paymentStatus === 'paid') {
       console.log(`[Verify] Order ${orderId} already marked paid — skipping duplicate update`);
       const branchSlug = await getBranchSlug(db, existing.branchId);
@@ -193,7 +230,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Mark order paid and confirmed
+    // ── Step 7: Mark order paid and confirmed ─────────────────────────────────
     const updated = await db.collection('orders').findOneAndUpdate(
       { _id: new ObjectId(orderId) },
       {
@@ -215,7 +252,7 @@ export async function POST(request: NextRequest) {
     if (!updated) {
       console.error(`[Verify] findOneAndUpdate returned null for order ${orderId}`);
       return NextResponse.json(
-        { verified: false, error: 'Failed to update order — please contact support' },
+        { verified: false, retryable: false, error: 'Failed to update order — please contact support' },
         { status: 500 }
       );
     }
@@ -236,6 +273,9 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('[Verify] Unexpected error:', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message || 'Internal server error', retryable: false },
+      { status: 500 }
+    );
   }
 }

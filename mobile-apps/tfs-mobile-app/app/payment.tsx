@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  ActivityIndicator, Alert, Animated,
+  ActivityIndicator, Alert, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -34,9 +34,7 @@ function buildPaystackHTML(publicKey: string, email: string, amountKobo: number,
       display: flex; align-items: center; justify-content: center;
       min-height: 100vh; font-family: -apple-system, sans-serif;
     }
-    .loading {
-      text-align: center; padding: 32px;
-    }
+    .loading { text-align: center; padding: 32px; }
     .loading-title { font-size: 17px; font-weight: 600; color: #1f2937; margin-bottom: 8px; }
     .loading-sub   { font-size: 13px; color: #6b7280; }
     .spinner {
@@ -98,9 +96,9 @@ function StatusBadge({ status }: { status: PaymentStatus }) {
 }
 
 export default function PaymentScreen() {
-  const router = useRouter();
-  const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ orderId: string; amount: string; orderNumber: string }>();
+  const router  = useRouter();
+  const insets  = useSafeAreaInsets();
+  const params  = useLocalSearchParams<{ orderId: string; amount: string; orderNumber: string }>();
 
   const user      = useStore((s) => s.user);
   const clearCart = useStore((s) => s.clearCart);
@@ -111,17 +109,18 @@ export default function PaymentScreen() {
   const [orderItems, setOrderItems]     = useState<OrderSummaryItem[]>([]);
   const [errorMessage, setErrorMessage] = useState('');
   const hasInitialized                  = useRef(false);
+  const verifyAbortRef                  = useRef<AbortController | null>(null);
 
   const orderId     = params?.orderId     || '';
   const amount      = parseFloat(params?.amount || '0');
   const orderNumber = params?.orderNumber || '';
 
-  // Load order items for the summary card
   useEffect(() => {
     if (orderId) loadOrderItems();
+    // Cleanup: abort any in-flight verify loop if component unmounts
+    return () => { verifyAbortRef.current?.abort(); };
   }, [orderId]);
 
-  // Auto-initialize payment as soon as the screen mounts
   useEffect(() => {
     if (!hasInitialized.current && orderId && user?.email) {
       hasInitialized.current = true;
@@ -159,8 +158,6 @@ export default function PaymentScreen() {
         return;
       }
 
-      // Use the server-returned amountKobo so the WebView matches exactly
-      // what Paystack was initialized with — never compute it client-side.
       const html = buildPaystackHTML(
         res.data.publicKey,
         user.email,
@@ -179,7 +176,6 @@ export default function PaymentScreen() {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.event === 'closed') {
-        // User dismissed the Paystack popup — go back to checkout
         router.back();
       } else if (msg.event === 'success') {
         setPaystackHtml(null);
@@ -194,76 +190,116 @@ export default function PaymentScreen() {
   };
 
   /**
-   * Verify with exponential backoff to handle Paystack's settlement race.
+   * Verify payment with exponential backoff.
    *
-   * Paystack fires the callback before their backend fully settles the
-   * transaction. The server returns HTTP 202 with { retryable: true } for
-   * transient states (pending, processing, failed-before-settled).
-   * HTTP 400 with retryable: false means genuinely terminal failure.
+   * The server returns:
+   *   HTTP 202 + { pending: true, retryable: true }  → transient, keep polling
+   *   HTTP 200 + { verified: true }                  → success
+   *   HTTP 4xx + { retryable: false }                → terminal failure, stop
+   *
+   * Paystack fires the inline callback before their backend settles ("ongoing"
+   * status). The server distinguishes this from a real failure and returns 202
+   * so we keep retrying without showing a false error to the user.
    */
   const handleVerify = async (ref: string) => {
     setStatus('verifying');
 
-    const MAX_ATTEMPTS  = 8;
-    const RETRY_DELAYS  = [3000, 4000, 5000, 6000, 8000, 8000, 8000];
+    // Cancel any previous verify loop
+    verifyAbortRef.current?.abort();
+    const abortCtrl = new AbortController();
+    verifyAbortRef.current = abortCtrl;
+
+    // Retry schedule: 3s, 4s, 5s, 6s, 8s, 8s, 8s, 10s  (max ~52s total wait)
+    const RETRY_DELAYS  = [3000, 4000, 5000, 6000, 8000, 8000, 8000, 10000];
+    const MAX_ATTEMPTS  = RETRY_DELAYS.length + 1; // 9 attempts total
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      // Check if this verify session was cancelled (user navigated away, retry pressed, etc.)
+      if (abortCtrl.signal.aborted) return;
+
       if (attempt > 0) {
         const delay = RETRY_DELAYS[Math.min(attempt - 1, RETRY_DELAYS.length - 1)];
-        console.log(`[Verify] Attempt ${attempt + 1}/${MAX_ATTEMPTS} — waiting ${delay}ms`);
-        await new Promise(res => setTimeout(res, delay));
+        console.log(`[Verify] Attempt ${attempt + 1}/${MAX_ATTEMPTS} — waiting ${delay}ms before retry`);
+        await new Promise<void>((resolve, reject) => {
+          const t = setTimeout(resolve, delay);
+          abortCtrl.signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('aborted')); });
+        }).catch(() => null);
+        if (abortCtrl.signal.aborted) return;
       }
 
       try {
+        console.log(`[Verify] Sending verify request attempt ${attempt + 1}`);
         const res = await api.post('/api/payment/verify', { reference: ref });
 
-        // Server says retryable (202) — keep trying
-        if (res.data.pending || res.data.retryable) {
-          console.log(`[Verify] Attempt ${attempt + 1}: ${res.data.error} — retrying…`);
-          continue;
+        // ── HTTP 202: server says "transient, keep polling" ───────────────────
+        // This covers Paystack's "ongoing" / "pending" settlement race.
+        if (res.status === 202 || res.data.pending || res.data.retryable) {
+          console.log(`[Verify] Attempt ${attempt + 1}: transient (${res.data.error}) — will retry`);
+          continue; // next iteration with delay
         }
 
-        // Non-retryable failure from server
-        if (!res.data.verified) {
-          throw new Error(res.data.error || 'Verification failed');
+        // ── Non-retryable failure explicitly flagged by server ────────────────
+        if (!res.data.verified && res.data.retryable === false) {
+          throw Object.assign(new Error(res.data.error || 'Verification failed'), { retryable: false });
         }
 
         // ── Success ───────────────────────────────────────────────────────────
-        const stockChecks = await checkStock();
-        const outOfStock  = stockChecks.filter((i) => !i.inStock);
+        if (res.data.verified) {
+          if (abortCtrl.signal.aborted) return;
 
-        if (outOfStock.length > 0) {
-          const refundTotal = outOfStock.reduce((s, i) => s + i.price * i.quantity, 0);
-          setStatus('refunding');
-          await processRefund(ref, refundTotal, outOfStock);
-        } else {
-          clearCart();
-          router.replace(`/order-preparing?orderId=${orderId}`);
-        }
-        return;
+          const stockChecks = await checkStock();
+          const outOfStock  = stockChecks.filter((i) => !i.inStock);
 
-      } catch (e: any) {
-        const retryable = e?.response?.data?.retryable === true;
-
-        if (!retryable || attempt === MAX_ATTEMPTS - 1) {
-          console.error('[Verify] Non-retryable or max attempts:', e?.message);
-          setStatus('failed');
-          setErrorMessage(
-            e?.response?.data?.error ||
-            e?.message ||
-            `Payment could not be verified. If you were charged, please contact support with reference: ${ref}`
-          );
+          if (outOfStock.length > 0) {
+            const refundTotal = outOfStock.reduce((s, i) => s + i.price * i.quantity, 0);
+            setStatus('refunding');
+            await processRefund(ref, refundTotal, outOfStock);
+          } else {
+            clearCart();
+            router.replace(`/order-preparing?orderId=${orderId}`);
+          }
           return;
         }
 
-        console.warn(`[Verify] Attempt ${attempt + 1} retryable (${e?.message}), continuing…`);
+        // ── Unexpected response shape — treat as retryable if attempts remain ─
+        console.warn(`[Verify] Unexpected response shape on attempt ${attempt + 1}:`, res.data);
+        if (attempt < MAX_ATTEMPTS - 1) continue;
+        throw new Error(res.data.error || 'Unexpected verification response');
+
+      } catch (e: any) {
+        if (abortCtrl.signal.aborted) return;
+        if (e.message === 'aborted') return;
+
+        // axios wraps HTTP error responses in e.response
+        const serverData  = e?.response?.data;
+        const httpStatus  = e?.response?.status;
+        const isRetryable = serverData?.retryable === true ||
+                            (httpStatus === 202)           ||
+                            e?.retryable === true;
+
+        if (isRetryable && attempt < MAX_ATTEMPTS - 1) {
+          console.warn(`[Verify] Attempt ${attempt + 1} retryable error (${e?.message}), continuing…`);
+          continue;
+        }
+
+        // Terminal or exhausted attempts
+        console.error(`[Verify] Non-retryable or max attempts reached:`, e?.message);
+        setStatus('failed');
+        setErrorMessage(
+          serverData?.error ||
+          e?.message ||
+          `Payment verification failed. If you were charged, contact support with reference: ${ref}`
+        );
+        return;
       }
     }
 
-    // All attempts exhausted
+    // All attempts exhausted without success or explicit failure
+    if (abortCtrl.signal.aborted) return;
     setStatus('failed');
     setErrorMessage(
-      `Verification timed out. If you were charged, please contact support with reference: ${ref}`
+      `Verification timed out after multiple attempts. ` +
+      `If you were charged, please contact support with reference: ${ref}`
     );
   };
 
@@ -305,10 +341,7 @@ export default function PaymentScreen() {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top']}>
         <View style={styles.webViewHeader}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={styles.webViewBack}
-          >
+          <TouchableOpacity onPress={() => router.back()} style={styles.webViewBack}>
             <ChevronLeft color="#1f2937" size={24} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
@@ -328,38 +361,25 @@ export default function PaymentScreen() {
           domStorageEnabled
           startInLoadingState
           setSupportMultipleWindows={false}
+          // Only intercept navigation that leaves Paystack's domain.
+          // We do NOT intercept /close or /charge here — we rely entirely
+          // on the JS callback/onClose events via postMessage instead.
+          // This avoids the redirect-based verification race that caused "ongoing".
           onShouldStartLoadWithRequest={(req) => {
             const url = req.url || '';
 
+            // Always allow blank, data URIs, and Paystack assets
             if (
               url === 'about:blank' ||
               url.startsWith('data:') ||
-              url.includes('paystack.co/assets') ||
-              url.includes('paystack.co/v1') ||
-              url.includes('js.paystack.co')
+              url.includes('paystack.co')
             ) {
               return true;
             }
 
-            if (url.includes('paystack.co/close') || url.includes('paystack.co/charge')) {
-              try {
-                const qs  = url.split('?')[1] || '';
-                const qp  = Object.fromEntries(qs.split('&').map(p => p.split('=')));
-                const ref = qp.reference || qp.trxref || reference;
-                if (ref) {
-                  setPaystackHtml(null);
-                  setStatus('verifying');
-                  handleVerify(ref);
-                } else {
-                  router.back();
-                }
-              } catch {
-                router.back();
-              }
-              return false;
-            }
-
-            if (url.startsWith('http') && !url.includes('paystack.co')) {
+            // Block any external navigation (shouldn't happen normally)
+            if (url.startsWith('http')) {
+              console.warn('[WebView] Blocking external URL:', url);
               return false;
             }
 
@@ -383,11 +403,15 @@ export default function PaymentScreen() {
         <View style={styles.failCircle}><XCircle color="#ef4444" size={72} /></View>
         <Text style={styles.resultTitle}>Payment Failed</Text>
         <Text style={styles.resultSub}>{errorMessage || 'Something went wrong. Please try again.'}</Text>
-        <TouchableOpacity style={styles.retryBtn} onPress={() => {
-          hasInitialized.current = false;
-          setErrorMessage('');
-          initPayment();
-        }}>
+        <TouchableOpacity
+          style={styles.retryBtn}
+          onPress={() => {
+            verifyAbortRef.current?.abort();
+            hasInitialized.current = false;
+            setErrorMessage('');
+            initPayment();
+          }}
+        >
           <RefreshCw color="#fff" size={20} />
           <Text style={styles.retryText}>Try Again</Text>
         </TouchableOpacity>
@@ -427,7 +451,6 @@ export default function PaymentScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Order summary card */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Package color="#FF6B35" size={20} />
@@ -451,7 +474,6 @@ export default function PaymentScreen() {
           </View>
         </View>
 
-        {/* Security badges */}
         <View style={styles.securityRow}>
           <Shield color="#10b981" size={16} />
           <Text style={styles.securityText}>
@@ -467,7 +489,6 @@ export default function PaymentScreen() {
           ))}
         </View>
 
-        {/* Processing state */}
         <View style={styles.processingCard}>
           <ActivityIndicator color="#FF6B35" size="large" />
           <Text style={styles.processingTitle}>{processingLabel}</Text>
@@ -535,7 +556,6 @@ const styles = StyleSheet.create({
   processingTitle: { fontSize: 18, fontWeight: '700', color: '#1f2937', textAlign: 'center' },
   processingText:  { fontSize: 13, color: '#6b7280', textAlign: 'center', lineHeight: 20 },
 
-  // WebView
   webViewHeader: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
     paddingTop: 12, paddingBottom: 14, paddingHorizontal: 16,
@@ -555,7 +575,6 @@ const styles = StyleSheet.create({
   },
   webViewLoadingText: { color: '#6b7280', marginTop: 12, fontSize: 14 },
 
-  // Failed
   resultContainer: {
     flex: 1, backgroundColor: '#f9fafb',
     alignItems: 'center', justifyContent: 'center', padding: 32,
