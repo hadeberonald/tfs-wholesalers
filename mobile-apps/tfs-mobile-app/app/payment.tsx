@@ -110,6 +110,7 @@ export default function PaymentScreen() {
   const [reference, setReference]       = useState('');
   const [orderItems, setOrderItems]     = useState<OrderSummaryItem[]>([]);
   const [errorMessage, setErrorMessage] = useState('');
+  const [verifyAttempt, setVerifyAttempt] = useState(0);
   const hasInitialized                  = useRef(false);
 
   const orderId     = params?.orderId     || '';
@@ -178,8 +179,7 @@ export default function PaymentScreen() {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.event === 'closed') {
-        // User closed the Paystack popup — go back to checkout rather than
-        // sitting on a blank screen
+        // User closed the Paystack popup — go back to checkout
         router.back();
       } else if (msg.event === 'success') {
         setPaystackHtml(null);
@@ -193,27 +193,80 @@ export default function PaymentScreen() {
     } catch {}
   };
 
+  /**
+   * Verify with exponential-ish backoff to handle Paystack's "ongoing" race.
+   * Paystack fires callback before the transaction fully settles server-side,
+   * so we retry up to MAX_ATTEMPTS times before giving up.
+   */
   const handleVerify = async (ref: string) => {
     setStatus('verifying');
-    try {
-      const res = await api.post('/api/payment/verify', { reference: ref });
-      if (!res.data.verified) throw new Error(res.data.error || 'Verification failed');
 
-      const stockChecks = await checkStock();
-      const outOfStock  = stockChecks.filter((i) => !i.inStock);
+    const MAX_ATTEMPTS = 6;
+    // Delays in ms between retries: 1.5s, 2s, 3s, 4s, 5s
+    const RETRY_DELAYS = [1500, 2000, 3000, 4000, 5000];
 
-      if (outOfStock.length > 0) {
-        const refundTotal = outOfStock.reduce((s, i) => s + i.price * i.quantity, 0);
-        setStatus('refunding');
-        await processRefund(ref, refundTotal, outOfStock);
-      } else {
-        clearCart();
-        router.replace(`/order-preparing?orderId=${orderId}`);
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      // Wait before retrying (not before the first attempt)
+      if (attempt > 0) {
+        const delay = RETRY_DELAYS[Math.min(attempt - 1, RETRY_DELAYS.length - 1)];
+        console.log(`[Verify] Attempt ${attempt + 1}/${MAX_ATTEMPTS} — waiting ${delay}ms`);
+        setVerifyAttempt(attempt + 1);
+        await new Promise(res => setTimeout(res, delay));
       }
-    } catch (e: any) {
-      setStatus('failed');
-      setErrorMessage(e?.message || 'Payment could not be verified.');
+
+      try {
+        const res = await api.post('/api/payment/verify', { reference: ref });
+
+        // 202 = still processing, retry
+        if (res.status === 202 && res.data.pending) {
+          console.log(`[Verify] Attempt ${attempt + 1}: payment still pending, will retry`);
+          continue;
+        }
+
+        // Hard failure from server
+        if (!res.data.verified) {
+          throw new Error(res.data.error || 'Verification failed');
+        }
+
+        // ── Success path ──────────────────────────────────────────────────
+        setVerifyAttempt(0);
+        const stockChecks = await checkStock();
+        const outOfStock  = stockChecks.filter((i) => !i.inStock);
+
+        if (outOfStock.length > 0) {
+          const refundTotal = outOfStock.reduce((s, i) => s + i.price * i.quantity, 0);
+          setStatus('refunding');
+          await processRefund(ref, refundTotal, outOfStock);
+        } else {
+          clearCart();
+          router.replace(`/order-preparing?orderId=${orderId}`);
+        }
+        return; // all done
+
+      } catch (e: any) {
+        // On the last attempt, surface the error
+        if (attempt === MAX_ATTEMPTS - 1) {
+          console.error('[Verify] All attempts exhausted:', e?.message);
+          setVerifyAttempt(0);
+          setStatus('failed');
+          setErrorMessage(
+            e?.message ||
+            `Payment could not be verified after ${MAX_ATTEMPTS} attempts. ` +
+            `If you were charged, please contact support with reference: ${ref}`
+          );
+          return;
+        }
+        // Otherwise log and retry
+        console.warn(`[Verify] Attempt ${attempt + 1} failed (${e?.message}), retrying…`);
+      }
     }
+
+    // Should not reach here, but just in case
+    setVerifyAttempt(0);
+    setStatus('failed');
+    setErrorMessage(
+      `Payment verification timed out. If you were charged, please contact support with reference: ${ref}`
+    );
   };
 
   const checkStock = async (): Promise<OrderSummaryItem[]> => {
@@ -255,10 +308,7 @@ export default function PaymentScreen() {
       <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top']}>
         <View style={styles.webViewHeader}>
           <TouchableOpacity
-            onPress={() => {
-              // Going back here means the user cancelled — return to checkout
-              router.back();
-            }}
+            onPress={() => router.back()}
             style={styles.webViewBack}
           >
             <ChevronLeft color="#1f2937" size={24} />
@@ -280,13 +330,9 @@ export default function PaymentScreen() {
           domStorageEnabled
           startInLoadingState
           setSupportMultipleWindows={false}
-          // Intercept Paystack's internal redirect to standard.paystack.co/close
-          // so it never opens an external browser. The reference lives in the
-          // query string: ?trxref=xxx&reference=xxx
           onShouldStartLoadWithRequest={(req) => {
             const url = req.url || '';
 
-            // Allow the initial blank/about page and paystack JS to load
             if (
               url === 'about:blank' ||
               url.startsWith('data:') ||
@@ -297,28 +343,24 @@ export default function PaymentScreen() {
               return true;
             }
 
-            // Catch the post-payment redirect — extract reference and fire success
             if (url.includes('paystack.co/close') || url.includes('paystack.co/charge')) {
               try {
-                const qs      = url.split('?')[1] || '';
-                const params  = Object.fromEntries(qs.split('&').map(p => p.split('=')));
-                const ref     = params.reference || params.trxref || reference;
+                const qs     = url.split('?')[1] || '';
+                const qp     = Object.fromEntries(qs.split('&').map(p => p.split('=')));
+                const ref    = qp.reference || qp.trxref || reference;
                 if (ref) {
                   setPaystackHtml(null);
                   setStatus('verifying');
                   handleVerify(ref);
                 } else {
-                  // Reference missing — treat as closed
                   router.back();
                 }
               } catch {
                 router.back();
               }
-              return false; // Block the navigation
+              return false;
             }
 
-            // Block any other external navigation (e.g. bank 3DS pages that
-            // Paystack inline handles internally via its own iframe)
             if (url.startsWith('http') && !url.includes('paystack.co')) {
               return false;
             }
@@ -346,6 +388,7 @@ export default function PaymentScreen() {
         <TouchableOpacity style={styles.retryBtn} onPress={() => {
           hasInitialized.current = false;
           setErrorMessage('');
+          setVerifyAttempt(0);
           initPayment();
         }}>
           <RefreshCw color="#fff" size={20} />
@@ -361,19 +404,28 @@ export default function PaymentScreen() {
   // ── Initializing / Verifying / Refunding ──────────────────────────────────
   const processingLabel =
     status === 'initializing' ? 'Preparing your payment…' :
-    status === 'verifying'    ? 'Verifying payment…' :
+    status === 'verifying'    ? (verifyAttempt > 1 ? `Verifying payment… (attempt ${verifyAttempt})` : 'Verifying payment…') :
     'Processing refund…';
 
   const processingSubLabel =
     status === 'refunding'
       ? 'Some items were out of stock. We\'re issuing an automatic refund.'
+      : status === 'verifying' && verifyAttempt > 1
+      ? 'Your payment is settling. This may take a few seconds…'
       : 'Please do not close this screen.';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} disabled={status === 'verifying' || status === 'refunding'}>
-          <ChevronLeft color={status === 'verifying' || status === 'refunding' ? '#d1d5db' : '#1f2937'} size={24} />
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => router.back()}
+          disabled={status === 'verifying' || status === 'refunding'}
+        >
+          <ChevronLeft
+            color={status === 'verifying' || status === 'refunding' ? '#d1d5db' : '#1f2937'}
+            size={24}
+          />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Checkout</Text>
         <StatusBadge status={status} />

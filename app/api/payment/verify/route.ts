@@ -89,10 +89,31 @@ export async function POST(request: NextRequest) {
 
     const result = await paystackService.verifyPayment(reference);
 
-    if (!result.status || result.data.status !== 'success') {
-      console.warn(`[Verify] Paystack reports non-success for ${reference}:`, result.data?.status);
+    // Paystack gateway-level failure (e.g. bad key, network error)
+    if (!result.status) {
+      console.warn(`[Verify] Paystack gateway error for ${reference}:`, result.message);
       return NextResponse.json(
-        { verified: false, error: result.message || 'Payment was not successful' },
+        { verified: false, error: result.message || 'Could not reach payment provider' },
+        { status: 400 }
+      );
+    }
+
+    const txStatus = result.data?.status;
+
+    // Transaction is still settling — tell the client to retry
+    if (txStatus === 'ongoing' || txStatus === 'processing' || txStatus === 'pending') {
+      console.log(`[Verify] Payment ${reference} is still ${txStatus} — asking client to retry`);
+      return NextResponse.json(
+        { verified: false, pending: true, error: `Payment is still ${txStatus}` },
+        { status: 202 }
+      );
+    }
+
+    // Any non-success terminal state (failed, abandoned, reversed, etc.)
+    if (txStatus !== 'success') {
+      console.warn(`[Verify] Paystack reports non-success for ${reference}: ${txStatus}`);
+      return NextResponse.json(
+        { verified: false, error: result.message || `Payment status: ${txStatus}` },
         { status: 400 }
       );
     }
