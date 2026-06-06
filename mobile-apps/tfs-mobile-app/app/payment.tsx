@@ -10,6 +10,7 @@ import {
 } from 'lucide-react-native';
 import { WebView } from 'react-native-webview';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useStore } from '@/lib/store';
 import api from '@/lib/api';
 
@@ -48,7 +49,7 @@ function buildPaystackHTML(publicKey: string, email: string, amountKobo: number,
 <body>
   <div class="loading">
     <div class="spinner"></div>
-    <div class="loading-title">Opening secure payment…</div>
+    <div class="loading-title">Opening secure payment\u2026</div>
     <div class="loading-sub">Please do not close this screen</div>
   </div>
   <script>
@@ -80,11 +81,11 @@ function buildPaystackHTML(publicKey: string, email: string, amountKobo: number,
 
 function StatusBadge({ status }: { status: PaymentStatus }) {
   const map: Record<string, { color: string; bg: string; label: string }> = {
-    initializing: { color: '#f59e0b', bg: '#fef3c7', label: 'Preparing…' },
+    initializing: { color: '#f59e0b', bg: '#fef3c7', label: 'Preparing\u2026' },
     webview:      { color: '#3b82f6', bg: '#dbeafe', label: 'In Progress' },
-    verifying:    { color: '#8b5cf6', bg: '#ede9fe', label: 'Verifying…' },
+    verifying:    { color: '#8b5cf6', bg: '#ede9fe', label: 'Verifying\u2026' },
     failed:       { color: '#ef4444', bg: '#fee2e2', label: 'Failed' },
-    refunding:    { color: '#f59e0b', bg: '#fef3c7', label: 'Refunding…' },
+    refunding:    { color: '#f59e0b', bg: '#fef3c7', label: 'Refunding\u2026' },
   };
   const s = map[status] || map.initializing;
   return (
@@ -188,13 +189,44 @@ export default function PaymentScreen() {
   };
 
   /**
-   * After Paystack confirms payment, we:
-   * 1. Verify with our backend (with retries for Paystack's settlement lag)
-   * 2. PATCH the order status to 'pending' — this triggers the confirmation
-   *    email on the server (the gate only blocked it at order creation time
-   *    when status was 'payment_pending')
-   * 3. Check stock, handle any OOS refund, then clear cart + navigate
+   * THE FIX for cart rehydration after payment:
+   *
+   * The bug: clearCart() sets items:[] in Zustand memory instantly, but the
+   * persist middleware writes to AsyncStorage asynchronously. router.replace()
+   * fires before that write completes. When order-preparing mounts, Zustand
+   * rehydrates from the stale AsyncStorage snapshot (still has the cart) and
+   * restores all the items.
+   *
+   * Fix: we manually patch the persisted JSON in AsyncStorage to zero out
+   * items BEFORE calling router.replace(). That way, even if rehydration runs,
+   * it reads an already-empty cart. clearCart() is still called to keep
+   * in-memory state consistent (updates the cart badge immediately).
    */
+  const clearCartAndNavigate = async (destination: string) => {
+    // Step 1: clear in-memory state so cart badge shows 0 immediately
+    clearCart();
+
+    // Step 2: directly patch the AsyncStorage snapshot so rehydration
+    // on the next screen reads an empty cart, not the stale full one.
+    try {
+      const STORE_KEY = 'tfs-customer-store';
+      const raw = await AsyncStorage.getItem(STORE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.state) {
+          parsed.state.items = [];
+          await AsyncStorage.setItem(STORE_KEY, JSON.stringify(parsed));
+        }
+      }
+    } catch (e) {
+      // Non-fatal — payment succeeded, don't block the user
+      console.warn('[clearCartAndNavigate] AsyncStorage patch failed:', e);
+    }
+
+    // Step 3: navigate only after the write has completed
+    router.replace(destination as any);
+  };
+
   const handleVerify = async (ref: string) => {
     setStatus('verifying');
 
@@ -210,7 +242,7 @@ export default function PaymentScreen() {
 
       if (attempt > 0) {
         const delay = RETRY_DELAYS[Math.min(attempt - 1, RETRY_DELAYS.length - 1)];
-        console.log(`[Verify] Attempt ${attempt + 1}/${MAX_ATTEMPTS} — waiting ${delay}ms before retry`);
+        console.log(`[Verify] Attempt ${attempt + 1}/${MAX_ATTEMPTS} — waiting ${delay}ms`);
         await new Promise<void>((resolve, reject) => {
           const t = setTimeout(resolve, delay);
           abortCtrl.signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('aborted')); });
@@ -223,7 +255,7 @@ export default function PaymentScreen() {
         const res = await api.post('/api/payment/verify', { reference: ref });
 
         if (res.status === 202 || res.data.pending || res.data.retryable) {
-          console.log(`[Verify] Attempt ${attempt + 1}: transient (${res.data.error}) — will retry`);
+          console.log(`[Verify] Attempt ${attempt + 1}: transient — will retry`);
           continue;
         }
 
@@ -234,10 +266,7 @@ export default function PaymentScreen() {
         if (res.data.verified) {
           if (abortCtrl.signal.aborted) return;
 
-          // ── FIX: PATCH order to 'pending' (paid) so the server sends the
-          // confirmation email and the order enters the normal fulfilment flow.
-          // The order was created with status:'payment_pending' which suppressed
-          // the email at creation time — this PATCH is what triggers it.
+          // Patch order to 'pending' (paid) — triggers confirmation email on server
           try {
             await api.patch(`/api/orders/${orderId}`, {
               status:           'pending',
@@ -246,7 +275,6 @@ export default function PaymentScreen() {
             });
             console.log(`[Verify] Order ${orderId} patched to pending/paid`);
           } catch (patchErr: any) {
-            // Non-fatal: log and continue — the payment succeeded, don't block the user
             console.error('[Verify] Failed to patch order status:', patchErr?.message);
           }
 
@@ -258,8 +286,7 @@ export default function PaymentScreen() {
             setStatus('refunding');
             await processRefund(ref, refundTotal, outOfStock);
           } else {
-            clearCart();
-            router.replace(`/order-preparing?orderId=${orderId}`);
+            await clearCartAndNavigate(`/order-preparing?orderId=${orderId}`);
           }
           return;
         }
@@ -279,11 +306,11 @@ export default function PaymentScreen() {
                             e?.retryable === true;
 
         if (isRetryable && attempt < MAX_ATTEMPTS - 1) {
-          console.warn(`[Verify] Attempt ${attempt + 1} retryable error (${e?.message}), continuing…`);
+          console.warn(`[Verify] Attempt ${attempt + 1} retryable error, continuing\u2026`);
           continue;
         }
 
-        console.error(`[Verify] Non-retryable or max attempts reached:`, e?.message);
+        console.error(`[Verify] Terminal failure:`, e?.message);
         setStatus('failed');
         setErrorMessage(
           serverData?.error ||
@@ -297,8 +324,7 @@ export default function PaymentScreen() {
     if (abortCtrl.signal.aborted) return;
     setStatus('failed');
     setErrorMessage(
-      `Verification timed out after multiple attempts. ` +
-      `If you were charged, please contact support with reference: ${ref}`
+      `Verification timed out. If you were charged, contact support with reference: ${ref}`
     );
   };
 
@@ -323,16 +349,11 @@ export default function PaymentScreen() {
         partialRefund: true, refundAmount: refundAmt,
         outOfStockItems: items.map((i) => i.name),
       });
-      clearCart();
-      router.replace(`/order-preparing?orderId=${orderId}`);
-    } catch {
-      clearCart();
-      Alert.alert(
-        'Refund Pending',
-        `Your order was placed but a refund of R${refundAmt.toFixed(2)} for out-of-stock items could not be processed automatically. Our team will contact you.`,
-        [{ text: 'OK', onPress: () => router.replace(`/order-preparing?orderId=${orderId}`) }]
-      );
+    } catch (e) {
+      console.error('[processRefund] Refund API failed:', e);
     }
+    // Always navigate regardless of refund API success/failure
+    await clearCartAndNavigate(`/order-preparing?orderId=${orderId}`);
   };
 
   // ── WebView ───────────────────────────────────────────────────────────────
@@ -366,9 +387,7 @@ export default function PaymentScreen() {
               url === 'about:blank' ||
               url.startsWith('data:') ||
               url.includes('paystack.co')
-            ) {
-              return true;
-            }
+            ) return true;
             if (url.startsWith('http')) {
               console.warn('[WebView] Blocking external URL:', url);
               return false;
@@ -378,7 +397,7 @@ export default function PaymentScreen() {
           renderLoading={() => (
             <View style={styles.webViewLoading}>
               <ActivityIndicator size="large" color="#FF6B35" />
-              <Text style={styles.webViewLoadingText}>Loading secure checkout…</Text>
+              <Text style={styles.webViewLoadingText}>Loading secure checkout\u2026</Text>
             </View>
           )}
         />
@@ -414,13 +433,13 @@ export default function PaymentScreen() {
 
   // ── Initializing / Verifying / Refunding ──────────────────────────────────
   const processingLabel =
-    status === 'initializing' ? 'Preparing your payment…' :
-    status === 'verifying'    ? 'Verifying payment…' :
-    'Processing refund…';
+    status === 'initializing' ? 'Preparing your payment\u2026' :
+    status === 'verifying'    ? 'Verifying payment\u2026' :
+    'Processing refund\u2026';
 
   const processingSubLabel =
     status === 'refunding'
-      ? 'Some items were out of stock. We\'re issuing an automatic refund.'
+      ? "Some items were out of stock. We're issuing an automatic refund."
       : 'Please do not close this screen.';
 
   return (
@@ -450,7 +469,7 @@ export default function PaymentScreen() {
             <View key={i} style={styles.itemRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.itemName}>
-                  {item.name}{item.variantName ? ` — ${item.variantName}` : ''}
+                  {item.name}{item.variantName ? ` \u2014 ${item.variantName}` : ''}
                 </Text>
                 <Text style={styles.itemQty}>Qty: {item.quantity}</Text>
               </View>
@@ -491,7 +510,6 @@ export default function PaymentScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9fafb' },
-
   header: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
     paddingTop: 12, paddingBottom: 16, paddingHorizontal: 16,
@@ -499,13 +517,10 @@ const styles = StyleSheet.create({
   },
   backBtn:     { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { flex: 1, fontSize: 20, fontWeight: '700', color: '#1f2937' },
-
   badge:     { flexDirection: 'row', alignItems: 'center', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, gap: 6 },
   badgeDot:  { width: 7, height: 7, borderRadius: 4 },
   badgeText: { fontSize: 11, fontWeight: '700' },
-
   scroll: { padding: 16, paddingBottom: 40 },
-
   card: {
     backgroundColor: '#fff', borderRadius: 18, padding: 18, marginBottom: 14,
     shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, elevation: 3,
@@ -523,14 +538,12 @@ const styles = StyleSheet.create({
   totalRow:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   totalLabel:  { fontSize: 16, fontWeight: '700', color: '#1f2937' },
   totalAmount: { fontSize: 22, fontWeight: '800', color: '#FF6B35' },
-
   securityRow: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 10,
     backgroundColor: '#f0fdf4', borderRadius: 12, padding: 14,
     borderWidth: 1, borderColor: '#bbf7d0', marginBottom: 12,
   },
   securityText: { flex: 1, fontSize: 12, color: '#15803d', lineHeight: 18 },
-
   trustRow:  { flexDirection: 'row', gap: 8, marginBottom: 20 },
   trustBadge: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
@@ -538,22 +551,20 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#e5e7eb',
   },
   trustLabel: { fontSize: 11, color: '#6b7280', fontWeight: '600' },
-
   processingCard: {
     backgroundColor: '#fff', borderRadius: 18, padding: 32, alignItems: 'center', gap: 12,
     shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, elevation: 3,
   },
   processingTitle: { fontSize: 18, fontWeight: '700', color: '#1f2937', textAlign: 'center' },
   processingText:  { fontSize: 13, color: '#6b7280', textAlign: 'center', lineHeight: 20 },
-
   webViewHeader: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
     paddingTop: 12, paddingBottom: 14, paddingHorizontal: 16,
     borderBottomWidth: 1, borderBottomColor: '#f3f4f6', gap: 12,
   },
-  webViewBack:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  webViewTitle:     { fontSize: 16, fontWeight: '700', color: '#1f2937' },
-  webViewSub:       { fontSize: 12, color: '#9ca3af' },
+  webViewBack:  { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  webViewTitle: { fontSize: 16, fontWeight: '700', color: '#1f2937' },
+  webViewSub:   { fontSize: 12, color: '#9ca3af' },
   lockBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: '#d1fae5', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
@@ -564,7 +575,6 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', backgroundColor: '#f9fafb',
   },
   webViewLoadingText: { color: '#6b7280', marginTop: 12, fontSize: 14 },
-
   resultContainer: {
     flex: 1, backgroundColor: '#f9fafb',
     alignItems: 'center', justifyContent: 'center', padding: 32,
