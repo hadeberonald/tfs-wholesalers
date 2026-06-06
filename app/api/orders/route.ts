@@ -15,16 +15,22 @@ import jwt from 'jsonwebtoken';
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const userId  = searchParams.get('userId');
-    const all     = searchParams.get('all');
-    const picking = searchParams.get('picking');
+    const userId        = searchParams.get('userId');
+    const all           = searchParams.get('all');
+    const picking       = searchParams.get('picking');
+    const needsNpsReview = searchParams.get('needsNpsReview') === 'true';
 
     const client = await clientPromise;
     const db     = client.db('tfs-wholesalers');
     const query: any = {};
 
     const authHeader = request.headers.get('authorization') || '';
-    if (authHeader.startsWith('Bearer ')) {
+
+    // ── Staff / picker app — Bearer token ────────────────────────────────────
+    // This branch handles the picker/driver app. It is NOT used for the
+    // customer needsNpsReview poll — that goes through the userId branch below,
+    // which now also accepts Bearer tokens from the customer app.
+    if (authHeader.startsWith('Bearer ') && !userId) {
       const mobileUser = await verifyMobileToken(authHeader.replace('Bearer ', ''));
       if (!mobileUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
@@ -40,27 +46,81 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ orders: orders.map(o => ({ ...o, _id: o._id.toString() })) });
     }
 
+    // ── Admin — fetch all orders ──────────────────────────────────────────────
     if (all === 'true') {
       const auth = await requirePermission('orders:read');
       if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
       if (!auth.isSuperAdmin && auth.branchId) query.branchId = auth.branchId;
-    } else if (userId) {
-      // SECURITY: verify the caller is authenticated and owns this userId,
-      // or has admin-level orders:read permission.
-      const cookieStore = await cookies();
-      const token = cookieStore.get('auth-token')?.value;
-      if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-      try {
-        const decoded = jwt.verify(token, process.env.NEXTAUTH_SECRET!) as any;
-        if (decoded.userId !== userId) {
-          // Not their own orders — require admin permission
-          const auth = await requirePermission('orders:read');
-          if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
+
+    // ── Customer app — fetch orders by userId ─────────────────────────────────
+    // Accepts both cookie auth (web) and Bearer token (mobile customer app).
+    // The needsNpsReview flag is only valid in this branch.
+    else if (userId) {
+      if (authHeader.startsWith('Bearer ')) {
+        // Customer mobile app sends Bearer token
+        const mobileUser = await verifyMobileToken(authHeader.replace('Bearer ', ''));
+        if (!mobileUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        // Verify the token belongs to the userId being requested
+        if (mobileUser.id !== userId) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
-      } catch {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      } else {
+        // Web — cookie auth
+        const cookieStore = await cookies();
+        const token = cookieStore.get('auth-token')?.value;
+        if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        try {
+          const decoded = jwt.verify(token, process.env.NEXTAUTH_SECRET!) as any;
+          if (decoded.userId !== userId) {
+            // Not their own orders — require admin permission
+            const auth = await requirePermission('orders:read');
+            if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+          }
+        } catch {
+          return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
       }
+
       query.userId = userId;
+
+      // ── needsNpsReview: return delivered orders with no NPS response ────────
+      // Used by the customer app on launch/foreground to detect orders that
+      // need a review even when the push notification was swiped away.
+      if (needsNpsReview) {
+        query.status = 'delivered';
+
+        const deliveredOrders = await db.collection('orders')
+          .find(query)
+          .sort({ updatedAt: -1 })
+          .limit(10)
+          .toArray();
+
+        if (!deliveredOrders.length) {
+          return NextResponse.json({ orders: [] });
+        }
+
+        // Cross-reference against nps_delivery_responses to exclude
+        // orders the customer has already reviewed
+        const orderIds = deliveredOrders.map(o => o._id.toString());
+        const alreadyReviewed = await db.collection('nps_delivery_responses')
+          .find(
+            { orderId: { $in: orderIds } },
+            { projection: { orderId: 1 } }
+          )
+          .toArray();
+
+        const reviewedSet = new Set(alreadyReviewed.map(r => r.orderId));
+        const unreviewed  = deliveredOrders.filter(o => !reviewedSet.has(o._id.toString()));
+
+        return NextResponse.json({
+          orders: unreviewed.map(o => ({
+            ...o,
+            _id:       o._id.toString(),
+            branchSlug: o.branchSlug ?? '',
+          })),
+        });
+      }
     }
 
     const orders = await db.collection('orders').find(query).sort({ createdAt: -1 }).toArray();
@@ -132,20 +192,19 @@ export async function POST(request: NextRequest) {
       })
     );
 
-    // Resolve branch name for the internal receipt (best-effort)
+    // Resolve branch name and slug for the internal receipt and NPS (best-effort)
     let branchName: string | undefined;
+    let branchSlug: string | undefined;
     try {
       const branchDoc = await db.collection('branches').findOne(
         { _id: new ObjectId(body.branchId) },
-        { projection: { displayName: 1, name: 1 } }
+        { projection: { displayName: 1, name: 1, slug: 1 } }
       );
       branchName = branchDoc?.displayName || branchDoc?.name || undefined;
+      branchSlug = branchDoc?.slug || undefined;
     } catch { /* non-critical */ }
 
-    // ── Look up till account number by customer email + branch ────────────
-    // Matches records in the online_customers collection created via the
-    // Online Customers admin page. Stored on the order document at creation
-    // time so it travels with the order permanently.
+    // Look up till account number by customer email + branch
     let tillAccountNumber: string | null = null;
     if (customerEmail) {
       try {
@@ -169,6 +228,10 @@ export async function POST(request: NextRequest) {
       ...body,
       items:             enrichedItems,
       branchId:          new ObjectId(body.branchId),
+      // Store branchSlug on the order so it's available for NPS polling
+      // without a second DB lookup. Safe to overwrite the caller-supplied
+      // value since we just fetched it from the authoritative branches collection.
+      branchSlug:        branchSlug ?? body.branchSlug ?? '',
       orderNumber,
       status:            orderStatus,
       deliveryFee,
@@ -185,16 +248,12 @@ export async function POST(request: NextRequest) {
     const orderId = result.insertedId.toString();
     console.log('✅ Order created:', orderId, '| customer:', customerEmail ?? 'guest', '| till:', tillAccountNumber ?? 'none', '| status:', orderStatus);
 
-    // ── Notify branch pickers (staff app only) ────────────────────────────
     notifyBranchPickers(body.branchId, {
       title: '🛒 New Order',
       body:  `Order ${orderNumber} is ready to pick — ${enrichedItems.length} item(s)`,
       data:  { type: 'new_order', orderId, orderNumber },
     }).catch(() => {});
 
-    // ── Customer confirmation email ───────────────────────────────────────
-    // Not sent for payment_pending or payment_failed — these are declined or
-    // cancelled transactions. Confirmation is only meaningful once paid.
     const isPaid = !['payment_pending', 'payment_failed'].includes(orderStatus);
 
     if (customerEmail && isPaid) {
@@ -211,8 +270,6 @@ export async function POST(request: NextRequest) {
       sendTransactionalEmail(customerEmailPayload).catch(() => {});
     }
 
-    // ── Internal POS receipt — always sent regardless of payment status ───
-    // Allows staff to ring the order up on the POS system.
     const internalReceiptPayload = buildInternalReceiptEmail({
       orderNumber,
       customerName:      customerName  ?? 'Unknown Customer',

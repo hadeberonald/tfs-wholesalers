@@ -29,6 +29,7 @@ async function findOrder(db: any, orderId: string) {
 }
 
 // ─── Consolidated OOS refund emails ──────────────────────────────────────────
+
 async function sendOosRefundEmails(order: any): Promise<void> {
   try {
     const oosItems: {
@@ -98,10 +99,6 @@ async function sendOosRefundEmails(order: any): Promise<void> {
 }
 
 // ─── Payment confirmation email ───────────────────────────────────────────────
-// Fired when an order transitions from 'payment_pending' → 'pending' (paid).
-// At order creation time the email was suppressed because status was
-// 'payment_pending'. The PATCH after successful Paystack verification is what
-// triggers this so the customer gets their confirmation.
 
 async function sendPaymentConfirmationEmail(order: any): Promise<void> {
   const customerEmail = order.customerEmail || order.customerInfo?.email || null;
@@ -138,14 +135,14 @@ async function triggerStatusNotifications(order: any, newStatus: string, previou
   const customerEmail = order.customerEmail || order.customerInfo?.email || null;
   const customerName  = order.customerName  || order.customerInfo?.name  || 'Customer';
 
-  // ── FIX: send confirmation email when payment is confirmed ───────────────
-  // The order was created with status 'payment_pending' which suppressed the
-  // confirmation email at creation time. When the mobile app patches to
-  // 'pending' after Paystack verification succeeds, we fire it here exactly once.
+  // branchSlug is stored on the order document (written at order creation).
+  // It is included in the 'delivered' push data so the customer app can
+  // queue the NPS review without a second lookup — the NPS submission
+  // requires it and will fail validation without it.
+  const branchSlug = order.branchSlug ?? '';
+
   if (newStatus === 'pending' && previousStatus === 'payment_pending') {
     await sendPaymentConfirmationEmail(order);
-
-    // Also notify branch staff about the new confirmed/paid order
     if (branchId) {
       notifyBranchPickers(branchId, {
         title: '🛒 New Order (Paid)',
@@ -158,7 +155,6 @@ async function triggerStatusNotifications(order: any, newStatus: string, previou
         data:  { type: 'new_order', orderId, orderNumber, status: newStatus },
       }).catch(() => {});
     }
-    // Return early — no further status email needed for 'pending'
     return;
   }
 
@@ -166,38 +162,67 @@ async function triggerStatusNotifications(order: any, newStatus: string, previou
     case 'confirmed':
       if (branchId) {
         notifyBranchPickers(branchId, { title: '📋 Order Confirmed', body: `${orderNumber} confirmed — ready to pick`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
-        notifyBranchWeb(branchId, { title: '📋 Order Confirmed', body: `${orderNumber} confirmed — ready to pick`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
+        notifyBranchWeb(branchId,     { title: '📋 Order Confirmed', body: `${orderNumber} confirmed — ready to pick`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
       }
       break;
+
     case 'packaging':
       if (branchId) {
         notifyBranchPickers(branchId, { title: '📦 Packaging', body: `${orderNumber} is being packaged`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
-        notifyBranchWeb(branchId, { title: '📦 Packaging', body: `${orderNumber} is being packaged`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
+        notifyBranchWeb(branchId,     { title: '📦 Packaging', body: `${orderNumber} is being packaged`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
       }
       await sendOosRefundEmails(order);
       break;
+
     case 'ready_for_delivery':
       if (branchId) {
         notifyBranchPickers(branchId, { title: '🚀 Ready for Delivery', body: `${orderNumber} is packed — driver needed`, data: { type: 'ready_for_delivery', orderId, orderNumber, status: newStatus } }).catch(() => {});
-        notifyBranchWeb(branchId, { title: '🚀 Ready for Delivery', body: `${orderNumber} is packed — driver needed`, data: { type: 'ready_for_delivery', orderId, orderNumber, status: newStatus } }).catch(() => {});
+        notifyBranchWeb(branchId,     { title: '🚀 Ready for Delivery', body: `${orderNumber} is packed — driver needed`, data: { type: 'ready_for_delivery', orderId, orderNumber, status: newStatus } }).catch(() => {});
       }
       break;
+
     case 'collecting':
     case 'out_for_delivery':
       if (customerId) {
-        notifyUser(customerId, { title: '🚗 On the Way!', body: `Your order ${orderNumber} is out for delivery`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
+        notifyUser(customerId,    { title: '🚗 On the Way!', body: `Your order ${orderNumber} is out for delivery`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
         notifyUserWeb(customerId, { title: '🚗 On the Way!', body: `Your order ${orderNumber} is out for delivery`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
       }
       break;
+
     case 'delivered':
       if (customerId) {
-        notifyUser(customerId, { title: '✅ Order Delivered', body: `${orderNumber} has been delivered. Enjoy!`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
-        notifyUserWeb(customerId, { title: '✅ Order Delivered', body: `${orderNumber} has been delivered. Enjoy!`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
+        // ── branchSlug is included here so the customer app can queue the
+        // NPS review directly from the push payload without a DB lookup.
+        // The notificationService.ts maybeQueueDeliveryReview() function
+        // reads data.branchSlug, data.orderId, and data.orderNumber.
+        notifyUser(customerId, {
+          title: '✅ Order Delivered',
+          body:  `${orderNumber} has been delivered. Enjoy!`,
+          data:  {
+            type:        'order_update',
+            orderId,
+            orderNumber,
+            branchSlug,       // ← required by NPS queue
+            status:      newStatus,
+          },
+        }).catch(() => {});
+        notifyUserWeb(customerId, {
+          title: '✅ Order Delivered',
+          body:  `${orderNumber} has been delivered. Enjoy!`,
+          data:  {
+            type:        'order_update',
+            orderId,
+            orderNumber,
+            branchSlug,
+            status:      newStatus,
+          },
+        }).catch(() => {});
       }
       break;
+
     case 'cancelled':
       if (customerId) {
-        notifyUser(customerId, { title: '❌ Order Cancelled', body: `${orderNumber} has been cancelled`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
+        notifyUser(customerId,    { title: '❌ Order Cancelled', body: `${orderNumber} has been cancelled`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
         notifyUserWeb(customerId, { title: '❌ Order Cancelled', body: `${orderNumber} has been cancelled`, data: { type: 'order_update', orderId, orderNumber, status: newStatus } }).catch(() => {});
       }
       break;
@@ -289,9 +314,6 @@ export async function PATCH(request: NextRequest, { params }: { params: { orderI
       const mobileUser = await verifyMobileToken(authHeader.replace('Bearer ', ''));
       if (!mobileUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-      // ── FIX: capture the previous status before applying the update so
-      // triggerStatusNotifications can detect the payment_pending → pending
-      // transition and fire the confirmation email exactly once.
       const orderBefore = await findOrder(db, params.orderId);
       if (!orderBefore) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
@@ -314,7 +336,6 @@ export async function PATCH(request: NextRequest, { params }: { params: { orderI
     const auth = await requirePermission('orders:write');
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-    // ── Same previous-status capture for admin PATCH ─────────────────────
     const orderBefore = await findOrder(db, params.orderId);
     if (!orderBefore) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 

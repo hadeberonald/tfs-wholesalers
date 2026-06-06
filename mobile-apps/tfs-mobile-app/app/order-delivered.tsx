@@ -1,10 +1,4 @@
 // app/order-delivered.tsx
-// Same as your existing file — only addition is the call to
-// setPendingDeliveryReview() when the order is confirmed delivered,
-// so the NPS modal fires the NEXT time the app is opened.
-//
-// The in-app confetti / star rating stays exactly as before.
-// The NPS modal is a separate, deeper survey that pops on next open.
 
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import {
@@ -16,8 +10,6 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { CheckCircle, Star, Home, Package } from 'lucide-react-native';
 import { useOrderSocket } from '@/hooks/useOrderSocket';
 import api from '@/lib/api';
-
-// ── NEW import ────────────────────────────────────────────────────────────────
 import { setPendingDeliveryReview } from '@/hooks/usePendingDeliveryReview';
 import { useStore } from '@/lib/store';
 
@@ -29,9 +21,11 @@ interface Order {
   items: { name: string; quantity: number; price: number; autoAdded?: boolean }[];
   deliveredAt?: string; driverInfo?: { name: string };
   branchSlug?: string;
+  status?: string;
 }
 
-// ── Confetti (unchanged) ───────────────────────────────────────────────────────
+// ── Confetti ───────────────────────────────────────────────────────────────────
+
 function ConfettiParticle({ delay, x, color, size }: { delay: number; x: number; color: string; size: number }) {
   const y   = useRef(new Animated.Value(-30)).current;
   const rot = useRef(new Animated.Value(0)).current;
@@ -104,8 +98,11 @@ export default function OrderDeliveredScreen() {
   useOrderSocket(orderId, useCallback((o: Order) => {
     setOrder(o);
 
-    // ── NEW: queue the delivery NPS for next app open ─────────────────────
-    if (!reviewQueued && o.orderNumber) {
+    // ── Only queue the NPS when the order is actually delivered ──────────────
+    // The socket fires on every status change — without this guard the review
+    // gets queued for every update (confirmed, packaging, out_for_delivery…)
+    // not just the final delivered state.
+    if (!reviewQueued && o.status === 'delivered' && o.orderNumber) {
       setReviewQueued(true);
       setPendingDeliveryReview({
         orderId:     o._id,
@@ -162,7 +159,7 @@ export default function OrderDeliveredScreen() {
 
           <Animated.View style={{ opacity: contentOp, transform: [{ translateY: contentY }] }}>
 
-            {/* Quick star rating (unchanged) */}
+            {/* Quick star rating */}
             <View style={s.card}>
               <Text style={s.cardLabel}>HOW WAS YOUR DELIVERY?</Text>
               <Text style={s.cardSub}>
@@ -171,7 +168,7 @@ export default function OrderDeliveredScreen() {
               <StarRating rating={rating} onRate={handleRate} />
             </View>
 
-            {/* NPS teaser — lets the user know a fuller survey will pop up */}
+            {/* NPS teaser */}
             <View style={s.npsTeaser}>
               <Text style={s.npsTeaserText}>
                 📋 A short delivery survey will appear next time you open the app — your feedback helps us improve!
@@ -240,14 +237,11 @@ const s = StyleSheet.create({
   card:     CARD,
   cardLabel:{ color: '#9ca3af', fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 6 },
   cardSub:  { color: '#6b7280', fontSize: 14, marginBottom: 16 },
-
-  // ── NEW: NPS teaser ───────────────────────────────────────────────────────
   npsTeaser: {
     backgroundColor: '#fff7ed', borderRadius: 16, padding: 14,
     borderWidth: 1, borderColor: '#fed7aa', marginBottom: 14,
   },
   npsTeaserText: { fontSize: 13, color: '#92400e', lineHeight: 20 },
-
   savingsCard: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#fffbeb', borderRadius: 20, padding: 20, marginBottom: 14, borderWidth: 1, borderColor: '#fde68a' },
   savingsTitle:{ color: '#1f2937', fontSize: 16, fontWeight: '700' },
   savingsSub:  { color: '#6b7280', fontSize: 12, marginTop: 3 },

@@ -2,6 +2,7 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { setPendingDeliveryReview } from '../hooks/usePendingDeliveryReview';
 
 const API_URL = 'https://tfs-wholesalers-ifad.onrender.com';
 
@@ -32,9 +33,6 @@ export async function saveTokenToBackend(
   userId?: string | null,
 ): Promise<void> {
   try {
-    // Always re-read auth token from storage so we have the latest value.
-    // This is critical for linkPushTokenAfterLogin — by the time it calls
-    // this function, auth_token is already written to AsyncStorage.
     const authToken = await AsyncStorage.getItem('auth_token');
 
     const res = await fetch(`${API_URL}/api/users/push-token`, {
@@ -99,8 +97,6 @@ export async function registerForPushNotifications(): Promise<string | null> {
     const token = tokenData.data;
     await AsyncStorage.setItem('push_token', token);
 
-    // At registration time the user may not be logged in yet.
-    // Save as guest — linkPushTokenAfterLogin will upgrade it after login.
     const userStr = await AsyncStorage.getItem('user');
     const user    = userStr ? JSON.parse(userStr) : null;
 
@@ -113,15 +109,6 @@ export async function registerForPushNotifications(): Promise<string | null> {
 }
 
 // ─── Link token after login ───────────────────────────────────────────────────
-//
-// ⚠️  IMPORTANT — call this AFTER both storage writes are complete:
-//
-//   await AsyncStorage.setItem('auth_token', token);
-//   await AsyncStorage.setItem('user', JSON.stringify(user));
-//   await linkPushTokenAfterLogin(user.id);   ← must be last
-//
-// If you call it before auth_token is in AsyncStorage, the Bearer header
-// will be missing and the token will be saved as a guest (userId: null).
 
 export async function linkPushTokenAfterLogin(userId: string): Promise<void> {
   try {
@@ -130,7 +117,6 @@ export async function linkPushTokenAfterLogin(userId: string): Promise<void> {
       console.warn('[Notifications] linkPushTokenAfterLogin: no push token stored yet');
       return;
     }
-    // auth_token is now in storage — saveTokenToBackend will pick it up
     await saveTokenToBackend(token, userId);
     console.log('[Notifications] Token linked to userId:', userId);
   } catch (err) {
@@ -138,15 +124,42 @@ export async function linkPushTokenAfterLogin(userId: string): Promise<void> {
   }
 }
 
+// ─── Queue delivery review from a push notification data payload ──────────────
+// Called from both the foreground receive listener AND the tap handler so the
+// review is queued regardless of whether the customer taps the notification or
+// just has the app open when the push arrives.
+
+async function maybeQueueDeliveryReview(data: any): Promise<void> {
+  if (data?.type === 'order_update' && data?.status === 'delivered' && data?.orderId) {
+    try {
+      await setPendingDeliveryReview({
+        orderId:     data.orderId,
+        orderNumber: data.orderNumber ?? '',
+        branchSlug:  data.branchSlug  ?? '',
+        deliveredAt: new Date().toISOString(),
+      });
+      console.log('[Notifications] Delivery review queued for order:', data.orderId);
+    } catch (err) {
+      console.error('[Notifications] Failed to queue delivery review:', err);
+    }
+  }
+}
+
 // ─── Listeners ────────────────────────────────────────────────────────────────
 
 export function addNotificationListeners(): () => void {
-  const receivedSub = Notifications.addNotificationReceivedListener(notification => {
+  // Fires when a push arrives while the app is in the foreground.
+  // We queue the review here so it's captured even if the customer never taps.
+  const receivedSub = Notifications.addNotificationReceivedListener(async notification => {
     console.log('[Notifications] Received in foreground:', notification.request.content.title);
+    const data = notification.request.content.data as any;
+    await maybeQueueDeliveryReview(data);
   });
 
-  const responseSub = Notifications.addNotificationResponseReceivedListener(response => {
+  // Fires when the customer taps a notification (foreground or background).
+  const responseSub = Notifications.addNotificationResponseReceivedListener(async response => {
     const data = response.notification.request.content.data as any;
+    await maybeQueueDeliveryReview(data);
     handleNotificationTap(data);
   });
 
@@ -199,7 +212,6 @@ export async function unregisterPushNotifications(): Promise<void> {
         Authorization:  `Bearer ${authToken}`,
         'Content-Type': 'application/json',
       },
-      // Send specific token so only this device is removed, not all devices
       body: JSON.stringify({ pushToken }),
     });
 
