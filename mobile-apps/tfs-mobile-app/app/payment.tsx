@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  ActivityIndicator, Alert, Platform,
+  ActivityIndicator, Alert, BackHandler, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -62,9 +62,12 @@ function buildPaystackHTML(publicKey: string, email: string, amountKobo: number,
           currency: 'ZAR',
           ref: '${reference}',
           onClose: function() {
+            // User manually dismissed Paystack popup (tapped X or back inside popup).
+            // We notify RN so it can decide what to do — NOT auto-close the screen.
             window.ReactNativeWebView.postMessage(JSON.stringify({ event: 'closed' }));
           },
           callback: function(response) {
+            // Payment completed successfully — auto-proceed immediately.
             window.ReactNativeWebView.postMessage(JSON.stringify({ event: 'success', reference: response.reference }));
           }
         });
@@ -116,6 +119,37 @@ export default function PaymentScreen() {
   const amount      = parseFloat(params?.amount || '0');
   const orderNumber = params?.orderNumber || '';
 
+  // ── Hardware back button interception ─────────────────────────────────────
+  // Re-registers whenever `status` changes so it always has the current value.
+  useEffect(() => {
+    const onBackPress = () => {
+      if (status === 'verifying' || status === 'refunding') {
+        // Block back entirely — payment is in-flight, navigating away is dangerous
+        Alert.alert(
+          'Please Wait',
+          'Your payment is being processed. Please do not go back.',
+          [{ text: 'OK' }]
+        );
+        return true; // consumed — default back suppressed
+      }
+
+      if (status === 'webview') {
+        // Treat hardware back same as popup close — attempt verify in case they paid.
+        // onWebViewMessage 'closed' won't fire from a hardware back, so we handle it here.
+        setPaystackHtml(null);
+        setStatus('verifying');
+        handleVerify(reference);
+        return true;
+      }
+
+      // initializing / failed → allow default back
+      return false;
+    };
+
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [status]);
+
   useEffect(() => {
     if (orderId) loadOrderItems();
     return () => { verifyAbortRef.current?.abort(); };
@@ -127,6 +161,8 @@ export default function PaymentScreen() {
       initPayment();
     }
   }, [orderId, user?.email]);
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   const loadOrderItems = async () => {
     try {
@@ -174,12 +210,25 @@ export default function PaymentScreen() {
   const onWebViewMessage = async (event: any) => {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
+
       if (msg.event === 'closed') {
-        router.back();
+        // Paystack popup closed — this fires whether the user cancelled OR
+        // whether the payment completed but the callback didn't fire (network
+        // race, popup auto-dismissed, etc.). We always attempt verification
+        // using the reference we already have. If the payment went through,
+        // verify succeeds and we proceed. If it genuinely wasn't paid, verify
+        // returns unverified and we show the failed screen with a retry option.
+        // This means the user never has to do anything after paying — it just works.
+        setPaystackHtml(null);
+        setStatus('verifying');
+        await handleVerify(reference);
+
       } else if (msg.event === 'success') {
+        // Payment completed — auto-close WebView and proceed to verify immediately.
         setPaystackHtml(null);
         setStatus('verifying');
         await handleVerify(msg.reference);
+
       } else if (msg.event === 'error') {
         setStatus('failed');
         setErrorMessage(msg.message || 'Payment encountered an error.');
@@ -361,6 +410,7 @@ export default function PaymentScreen() {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top']}>
         <View style={styles.webViewHeader}>
+          {/* Header back chevron — goes back; if user already paid, closed event will have triggered verify */}
           <TouchableOpacity onPress={() => router.back()} style={styles.webViewBack}>
             <ChevronLeft color="#1f2937" size={24} />
           </TouchableOpacity>
@@ -434,12 +484,14 @@ export default function PaymentScreen() {
   // ── Initializing / Verifying / Refunding ──────────────────────────────────
   const processingLabel =
     status === 'initializing' ? 'Preparing your payment\u2026' :
-    status === 'verifying'    ? 'Verifying payment\u2026' :
+    status === 'verifying'    ? 'Confirming your payment\u2026' :
     'Processing refund\u2026';
 
   const processingSubLabel =
     status === 'refunding'
       ? "Some items were out of stock. We're issuing an automatic refund."
+      : status === 'verifying'
+      ? 'Your payment is being confirmed. This only takes a moment.'
       : 'Please do not close this screen.';
 
   return (
