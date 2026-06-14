@@ -1,7 +1,7 @@
-// hooks/useOrderSocket.ts  (tfs-mobile-app)
+// hooks/useOrderSocket.ts  (web app)
 
 import { useEffect, useRef } from 'react';
-import { connectSocket, joinOrderRoom } from '@/lib/socket';
+import { connectSocket, joinOrderRoom } from '@/lib/socket-client';
 import api from '@/lib/api';
 
 interface ItemScannedPayload {
@@ -37,49 +37,43 @@ export function useOrderSocket(
     // 1. Fetch immediately so screen has data right away
     fetchCurrentState();
 
-    let socket: any = null;
+    // 2. Connect socket — synchronous, cookies sent automatically
+    const socket = connectSocket();
 
-    // 2. Connect socket (now async — reads token from AsyncStorage)
-    connectSocket().then((s) => {
-      socket = s;
+    const handleOrderUpdate = (payload: any) => {
+      console.log(`[Socket] order:updated → ${payload.status}`);
+      onUpdateRef.current(payload.order);
+    };
 
-      const handleOrderUpdate = (payload: any) => {
-        console.log(`[Socket] order:updated → ${payload.status}`);
+    const handleItemScanned = (payload: ItemScannedPayload) => {
+      console.log(`[Socket] item:scanned → ${payload.name}`);
+      if (onItemScanRef.current) {
+        onItemScanRef.current(payload);
+      } else {
         onUpdateRef.current(payload.order);
-      };
-
-      const handleItemScanned = (payload: ItemScannedPayload) => {
-        console.log(`[Socket] item:scanned → ${payload.name}`);
-        if (onItemScanRef.current) {
-          onItemScanRef.current(payload);
-        } else {
-          onUpdateRef.current(payload.order);
-        }
-      };
-
-      // 3. On (re)connect: rejoin room AND re-fetch to catch any missed events
-      const handleConnect = () => {
-        console.log('[Socket] Connected — joining order room and syncing state');
-        joinOrderRoom(orderId);
-        fetchCurrentState();
-      };
-
-      socket.on('order:updated', handleOrderUpdate);
-      socket.on('item:scanned',  handleItemScanned);
-      socket.on('connect',       handleConnect);
-
-      // 4. If already connected when this hook mounts, join immediately
-      if (socket.connected) {
-        joinOrderRoom(orderId);
       }
-    });
+    };
+
+    // 3. On (re)connect: rejoin room AND re-fetch to catch any missed events
+    const handleConnect = () => {
+      console.log('[Socket] Connected — joining order room and syncing state');
+      joinOrderRoom(orderId);
+      fetchCurrentState();
+    };
+
+    socket.on('order:updated', handleOrderUpdate);
+    socket.on('item:scanned',  handleItemScanned);
+    socket.on('connect',       handleConnect);
+
+    // 4. If already connected when hook mounts, join immediately
+    if (socket.connected) {
+      joinOrderRoom(orderId);
+    }
 
     return () => {
-      if (socket) {
-        socket.off('order:updated');
-        socket.off('item:scanned');
-        socket.off('connect');
-      }
+      socket.off('order:updated', handleOrderUpdate);
+      socket.off('item:scanned',  handleItemScanned);
+      socket.off('connect',       handleConnect);
     };
   }, [orderId]);
 }
