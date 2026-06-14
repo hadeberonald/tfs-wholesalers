@@ -2,8 +2,8 @@
 // Singleton Socket.IO client. Uses the same base URL as the axios instance.
 
 import { io, Socket } from 'socket.io-client';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Same URL used in your existing axios calls
 const API_URL =
   process.env.NODE_ENV === 'production'
     ? 'https://tfs-wholesalers-ifad.onrender.com'
@@ -16,7 +16,7 @@ export function getSocket(): Socket | null {
   return socket;
 }
 
-export function connectPickerSocket(branchId: string): Socket {
+export async function connectPickerSocket(branchId: string): Promise<Socket> {
   // Already connected to this branch — reuse
   if (socket?.connected && currentBranchId === branchId) return socket;
 
@@ -28,12 +28,15 @@ export function connectPickerSocket(branchId: string): Socket {
 
   currentBranchId = branchId;
 
+  const token = await AsyncStorage.getItem('auth_token');
+
   socket = io(API_URL, {
     transports: ['websocket', 'polling'],
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,
+    auth: token ? { token } : undefined,
   });
 
   // Re-join branch room on every (re)connect automatically

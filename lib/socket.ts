@@ -1,16 +1,52 @@
-// lib/socket.ts
-// Thin singleton wrapper so any API route can call getIO() to emit events.
-// The actual `io` instance is set by server.ts at startup.
+// lib/socket.ts  (tfs-mobile-app)
+//
+// ⚠️  IMPORTANT: This URL must match api.ts exactly.
+// api.ts uses: https://tfs-wholesalers-ifad.onrender.com
 
-import type { Server as SocketIOServer } from 'socket.io';
+import { io, Socket } from 'socket.io-client';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Use globalThis so the reference survives Next.js hot-reload in dev
-const g = globalThis as any;
+const API_URL = 'https://tfs-wholesalers-ifad.onrender.com';
 
-export function setIO(instance: SocketIOServer) {
-  g.__socketIO = instance;
+let socket: Socket | null = null;
+
+export function getSocket(): Socket | null {
+  return socket;
 }
 
-export function getIO(): SocketIOServer | null {
-  return g.__socketIO ?? null;
+export async function connectSocket(): Promise<Socket> {
+  if (socket?.connected) return socket;
+
+  const token = await AsyncStorage.getItem('auth_token');
+
+  socket = io(API_URL, {
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+    auth: token ? { token } : undefined,
+  });
+
+  socket.on('connect', () => {
+    console.log('[Socket] Customer connected:', socket?.id);
+  });
+  socket.on('disconnect', (reason) => {
+    console.log('[Socket] Customer disconnected:', reason);
+  });
+  socket.on('connect_error', (err) => {
+    console.warn('[Socket] Customer connect error:', err.message);
+  });
+
+  return socket;
+}
+
+export async function joinOrderRoom(orderId: string) {
+  const s = await connectSocket();
+  s.emit('join:order', { orderId });
+}
+
+export function disconnectSocket() {
+  socket?.disconnect();
+  socket = null;
 }

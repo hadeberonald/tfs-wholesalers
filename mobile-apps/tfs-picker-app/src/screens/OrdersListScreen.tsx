@@ -63,22 +63,35 @@ export default function OrdersListScreen({ navigation }: any) {
     useCallback(() => {
       const branchId = activeBranch?._id || activeBranch?.id;
       if (!branchId) return;
+
       fetchOrders();
-      const socket = connectPickerSocket(branchId);
-      const handleOrderUpdated = ({ order, status }: { order: Order; status: string }) => {
-        setOrders(prev => {
-          if (EXCLUDED_STATUSES.includes(status)) return prev.filter(o => o._id !== order._id);
-          const exists = prev.find(o => o._id === order._id);
-          if (exists) return prev.map(o => o._id === order._id ? { ...o, ...order } : o);
-          return [order, ...prev];
-        });
-      };
-      socket.on('order:updated', handleOrderUpdated);
-      const handleReconnect = () => fetchOrders(true);
-      socket.on('connect', handleReconnect);
+
+      let socket: any = null;
+
+      // connectPickerSocket is now async — reads JWT from AsyncStorage
+      connectPickerSocket(branchId).then((s) => {
+        socket = s;
+
+        const handleOrderUpdated = ({ order, status }: { order: Order; status: string }) => {
+          setOrders(prev => {
+            if (EXCLUDED_STATUSES.includes(status)) return prev.filter(o => o._id !== order._id);
+            const exists = prev.find(o => o._id === order._id);
+            if (exists) return prev.map(o => o._id === order._id ? { ...o, ...order } : o);
+            return [order, ...prev];
+          });
+        };
+
+        const handleReconnect = () => fetchOrders(true);
+
+        socket.on('order:updated', handleOrderUpdated);
+        socket.on('connect', handleReconnect);
+      });
+
       return () => {
-        socket.off('order:updated', handleOrderUpdated);
-        socket.off('connect', handleReconnect);
+        if (socket) {
+          socket.off('order:updated');
+          socket.off('connect');
+        }
       };
     }, [activeBranch?._id, fetchOrders])
   );
@@ -95,7 +108,6 @@ export default function OrdersListScreen({ navigation }: any) {
     const pickerName    = getPickerName(item);
     const isMe          = isPicking && !!user?.id && pickerId === user.id;
     const isSomeoneElse = isPicking && !!pickerId && !isMe;
-    // Edge case: status is picking but no picker id stored yet
     const isPickingUnknown = isPicking && !pickerId;
 
     const cardStyle = [
@@ -108,7 +120,6 @@ export default function OrdersListScreen({ navigation }: any) {
       if (!isSomeoneElse) navigation.navigate('Picking', { orderId: item._id });
     };
 
-    // Badge label — never say "Someone"
     const pickerLabel = isMe
       ? 'You are picking this'
       : pickerName
@@ -121,7 +132,6 @@ export default function OrdersListScreen({ navigation }: any) {
         onPress={handlePress}
         activeOpacity={isSomeoneElse ? 1 : 0.7}
       >
-        {/* Picker banner — only shown when actively being picked */}
         {isPicking && (
           <View style={[styles.pickerBadge, isMe ? styles.pickerBadgeMe : styles.pickerBadgeOther]}>
             <Ionicons name="person" size={12} color="#fff" />
