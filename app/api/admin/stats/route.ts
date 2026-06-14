@@ -15,11 +15,12 @@ export async function GET(request: NextRequest) {
     const db = client.db('tfs-wholesalers');
 
     const branchQuery = auth.isSuperAdmin ? {} : { branchId: auth.branchId };
+    const paidQuery = { ...branchQuery, paymentStatus: 'paid' };
 
     const totalOrders = await db.collection('orders').countDocuments(branchQuery);
 
     const revenueAgg = await db.collection('orders')
-      .aggregate([{ $match: branchQuery }, { $group: { _id: null, total: { $sum: '$total' } } }])
+      .aggregate([{ $match: paidQuery }, { $group: { _id: null, total: { $sum: '$total' } } }])
       .toArray();
     const totalRevenue = revenueAgg[0]?.total || 0;
 
@@ -39,7 +40,7 @@ export async function GET(request: NextRequest) {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     const previousRevenue = await db.collection('orders')
-      .aggregate([{ $match: { ...branchQuery, createdAt: { $lt: thirtyDaysAgo } } }, { $group: { _id: null, total: { $sum: '$total' } } }])
+      .aggregate([{ $match: { ...paidQuery, createdAt: { $lt: thirtyDaysAgo } } }, { $group: { _id: null, total: { $sum: '$total' } } }])
       .toArray();
     const revenueGrowth = previousRevenue[0]?.total
       ? Math.round(((totalRevenue - previousRevenue[0].total) / previousRevenue[0].total) * 100) : 0;

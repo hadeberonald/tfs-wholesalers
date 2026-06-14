@@ -15,9 +15,7 @@ import {
   Edit,
   AlertTriangle,
   DollarSign,
-  CreditCard,
   ExternalLink,
-  RefreshCw,
   TrendingDown,
   TrendingUp,
 } from 'lucide-react';
@@ -33,16 +31,6 @@ interface POResolution {
   affectedItems: { productName: string; quantity: number }[];
   priority: string;
   createdAt: string;
-}
-
-interface Settlement {
-  _id?: string;
-  amount: number;
-  paystackReference?: string;
-  paystackTransferId?: string;
-  status: 'pending' | 'processing' | 'success' | 'failed';
-  settledAt?: string;
-  notes?: string;
 }
 
 interface PurchaseOrder {
@@ -75,7 +63,6 @@ interface PurchaseOrder {
   approvedAt?: string;
   sentAt?: string;
   receivedAt?: string;
-  settlement?: Settlement;
 }
 
 const RESOLUTION_ACTION_LABELS: Record<string, string> = {
@@ -114,15 +101,7 @@ export default function PurchaseOrderDetailPage() {
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [resolutions, setResolutions] = useState<POResolution[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'details' | 'resolutions' | 'settlement'>('details');
-
-  // Settlement state
-  const [settling, setSettling] = useState(false);
-  const [settlementAmount, setSettlementAmount] = useState('');
-  const [settlementNotes, setSettlementNotes] = useState('');
-  const [supplierAccountNumber, setSupplierAccountNumber] = useState('');
-  const [supplierBankCode, setSupplierBankCode] = useState('');
-  const [supplierAccountName, setSupplierAccountName] = useState('');
+  const [activeTab, setActiveTab] = useState<'details' | 'resolutions'>('details');
 
   useEffect(() => {
     fetchPO();
@@ -136,7 +115,6 @@ export default function PurchaseOrderDetailPage() {
       if (res.ok) {
         const data = await res.json();
         setPo(data.purchaseOrder);
-        setSettlementAmount(data.purchaseOrder.total?.toFixed(2) || '');
       } else {
         toast.error('Purchase order not found');
         router.push(`/${slug}/admin/purchase-orders`);
@@ -175,45 +153,6 @@ export default function PurchaseOrderDetailPage() {
       }
     } catch {
       toast.error('An error occurred');
-    }
-  };
-
-  const handleSettlement = async () => {
-    if (!supplierAccountNumber || !supplierBankCode || !supplierAccountName) {
-      toast.error('Please fill in all supplier bank details');
-      return;
-    }
-    if (!settlementAmount || parseFloat(settlementAmount) <= 0) {
-      toast.error('Please enter a valid settlement amount');
-      return;
-    }
-
-    setSettling(true);
-    try {
-      const res = await fetch(`/api/purchase-orders/${id}/settle`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount: parseFloat(settlementAmount),
-          supplierAccountNumber,
-          supplierBankCode,
-          supplierAccountName,
-          notes: settlementNotes,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        toast.success('Payment transfer initiated successfully!');
-        fetchPO();
-      } else {
-        toast.error(data.error || 'Settlement failed');
-      }
-    } catch {
-      toast.error('An error occurred');
-    } finally {
-      setSettling(false);
     }
   };
 
@@ -305,7 +244,6 @@ export default function PurchaseOrderDetailPage() {
   const { original, adjusted, difference, hasAdjustment } = getAdjustedTotal();
   const openResolutions = resolutions.filter((r) => r.status === 'open' || r.status === 'in_progress');
   const resolvedResolutions = resolutions.filter((r) => r.status === 'resolved');
-  const settlementDone = po.settlement?.status === 'success';
 
   return (
     <div className="min-h-screen bg-gray-50 pt-32 md:pt-28">
@@ -359,25 +297,12 @@ export default function PurchaseOrderDetailPage() {
                 <p className="font-semibold text-yellow-800">
                   {openResolutions.length} unresolved issue{openResolutions.length !== 1 ? 's' : ''} on this PO
                 </p>
-                <p className="text-sm text-yellow-700">Settlement amount may need adjustment</p>
+                <p className="text-sm text-yellow-700">These may affect the final amount owed to the supplier</p>
               </div>
             </div>
             <button onClick={() => setActiveTab('resolutions')} className="text-sm text-yellow-700 font-medium hover:underline flex-shrink-0 ml-4">
               View Issues →
             </button>
-          </div>
-        )}
-
-        {/* Settlement success badge */}
-        {settlementDone && (
-          <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-5 flex items-center space-x-3">
-            <CheckCircle className="w-5 h-5 text-green-600" />
-            <div>
-              <p className="font-semibold text-green-800">Payment Settled</p>
-              <p className="text-sm text-green-700">
-                {formatCurrency(po.settlement!.amount)} transferred on {po.settlement?.settledAt ? formatDate(po.settlement.settledAt) : '—'}
-              </p>
-            </div>
           </div>
         )}
 
@@ -390,12 +315,6 @@ export default function PurchaseOrderDetailPage() {
               label: `Resolutions${resolutions.length > 0 ? ` (${resolutions.length})` : ''}`, 
               icon: AlertTriangle,
               alert: openResolutions.length > 0,
-            },
-            { 
-              id: 'settlement', 
-              label: 'Settlement', 
-              icon: DollarSign,
-              done: settlementDone,
             },
           ].map((tab) => (
             <button
@@ -411,9 +330,6 @@ export default function PurchaseOrderDetailPage() {
               <span>{tab.label}</span>
               {tab.alert && activeTab !== tab.id && (
                 <span className="w-2 h-2 bg-yellow-500 rounded-full" />
-              )}
-              {tab.done && activeTab !== tab.id && (
-                <span className="w-2 h-2 bg-green-500 rounded-full" />
               )}
             </button>
           ))}
@@ -647,196 +563,13 @@ export default function PurchaseOrderDetailPage() {
                         </span>
                       </div>
                       <div className="flex justify-between pt-2 border-t border-orange-200">
-                        <span className="font-bold text-brand-black">Adjusted Amount to Pay</span>
+                        <span className="font-bold text-brand-black">Adjusted Total</span>
                         <span className="font-bold text-brand-orange text-lg">{formatCurrency(adjusted)}</span>
                       </div>
                     </div>
-                    <button
-                      onClick={() => { setSettlementAmount(adjusted.toFixed(2)); setActiveTab('settlement'); }}
-                      className="mt-3 w-full btn-primary text-sm"
-                    >
-                      Proceed to Settlement with Adjusted Amount →
-                    </button>
                   </div>
                 )}
               </>
-            )}
-          </div>
-        )}
-
-        {/* ── TAB: SETTLEMENT ── */}
-        {activeTab === 'settlement' && (
-          <div className="space-y-5">
-            {/* Amount summary */}
-            <div className="bg-white rounded-2xl shadow-sm p-6">
-              <h2 className="text-lg font-bold text-brand-black mb-4">Settlement Amount</h2>
-              <div className="space-y-2 mb-4">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Original PO Total</span>
-                  <span className="font-semibold">{formatCurrency(original)}</span>
-                </div>
-                {hasAdjustment && (
-                  <div className={`flex justify-between text-sm ${difference < 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    <span>Resolution Adjustment</span>
-                    <span className="font-semibold">
-                      {difference < 0 ? '-' : '+'}{formatCurrency(Math.abs(difference))}
-                    </span>
-                  </div>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Amount to Transfer (R) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  className="input-field text-lg font-bold"
-                  value={settlementAmount}
-                  onChange={(e) => setSettlementAmount(e.target.value)}
-                />
-                {hasAdjustment && parseFloat(settlementAmount) !== adjusted && (
-                  <p className="text-xs text-orange-600 mt-1">
-                    ⚠ Adjusted suggested amount is {formatCurrency(adjusted)}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Existing settlement */}
-            {po.settlement && (
-              <div className={`rounded-2xl p-5 border ${
-                po.settlement.status === 'success'
-                  ? 'bg-green-50 border-green-200'
-                  : po.settlement.status === 'processing'
-                  ? 'bg-blue-50 border-blue-200'
-                  : po.settlement.status === 'failed'
-                  ? 'bg-red-50 border-red-200'
-                  : 'bg-gray-50 border-gray-200'
-              }`}>
-                <h3 className="font-bold mb-3 flex items-center space-x-2">
-                  <CreditCard className="w-5 h-5" />
-                  <span>Previous Settlement</span>
-                </h3>
-                <div className="space-y-1 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Amount:</span>
-                    <span className="font-semibold">{formatCurrency(po.settlement.amount)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Status:</span>
-                    <span className={`font-semibold capitalize ${
-                      po.settlement.status === 'success' ? 'text-green-600' :
-                      po.settlement.status === 'failed' ? 'text-red-600' : 'text-blue-600'
-                    }`}>{po.settlement.status}</span>
-                  </div>
-                  {po.settlement.paystackReference && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Reference:</span>
-                      <span className="font-mono text-xs">{po.settlement.paystackReference}</span>
-                    </div>
-                  )}
-                  {po.settlement.settledAt && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Date:</span>
-                      <span>{formatDate(po.settlement.settledAt)}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Supplier bank details */}
-            {!settlementDone && (
-              <div className="bg-white rounded-2xl shadow-sm p-6">
-                <h2 className="text-lg font-bold text-brand-black mb-4 flex items-center space-x-2">
-                  <CreditCard className="w-5 h-5 text-brand-orange" />
-                  <span>Supplier Bank Details</span>
-                </h2>
-                <p className="text-sm text-gray-500 mb-4">
-                  Payment will be sent via Paystack transfer directly to the supplier's bank account.
-                </p>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Account Holder Name *</label>
-                    <input
-                      type="text"
-                      className="input-field"
-                      placeholder="e.g. Supplier Trading (Pty) Ltd"
-                      value={supplierAccountName}
-                      onChange={(e) => setSupplierAccountName(e.target.value)}
-                    />
-                  </div>
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">Account Number *</label>
-                      <input
-                        type="text"
-                        className="input-field"
-                        placeholder="e.g. 1234567890"
-                        value={supplierAccountNumber}
-                        onChange={(e) => setSupplierAccountNumber(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">Bank Code *</label>
-                      <select
-                        className="input-field"
-                        value={supplierBankCode}
-                        onChange={(e) => setSupplierBankCode(e.target.value)}
-                      >
-                        <option value="">Select bank...</option>
-                        <option value="057">ABSA Bank (057)</option>
-                        <option value="632005">FNB (632005)</option>
-                        <option value="051">Standard Bank (051)</option>
-                        <option value="198765">Capitec Bank (198765)</option>
-                        <option value="580105">Nedbank (580105)</option>
-                        <option value="679000">African Bank (679000)</option>
-                        <option value="442">Investec (442)</option>
-                        <option value="470010">Discovery Bank (470010)</option>
-                        <option value="250655">TymeBank (250655)</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Notes (optional)</label>
-                    <textarea
-                      rows={2}
-                      className="input-field"
-                      placeholder="e.g. Payment for PO-2024-00045, invoice #INV-001"
-                      value={settlementNotes}
-                      onChange={(e) => setSettlementNotes(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                <div className="mt-6 pt-5 border-t border-gray-100">
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <p className="font-bold text-brand-black text-lg">
-                        {formatCurrency(parseFloat(settlementAmount) || 0)}
-                      </p>
-                      <p className="text-xs text-gray-500">will be transferred via Paystack</p>
-                    </div>
-                    <button
-                      onClick={handleSettlement}
-                      disabled={settling}
-                      className="btn-primary flex items-center space-x-2"
-                    >
-                      {settling ? (
-                        <><RefreshCw className="w-4 h-4 animate-spin" /><span>Processing...</span></>
-                      ) : (
-                        <><CreditCard className="w-4 h-4" /><span>Send Payment</span></>
-                      )}
-                    </button>
-                  </div>
-                  <p className="text-xs text-gray-400 flex items-start space-x-1">
-                    <span>⚠</span>
-                    <span>Payments are processed via Paystack. Ensure bank details are correct before proceeding. This action cannot be undone.</span>
-                  </p>
-                </div>
-              </div>
             )}
           </div>
         )}
