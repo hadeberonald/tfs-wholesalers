@@ -2,7 +2,6 @@
 
 import { useEffect, useRef } from 'react';
 import { connectSocket, joinOrderRoom } from '@/lib/socket-client';
-import api from '@/lib/api';
 
 interface ItemScannedPayload {
   orderId:   string;
@@ -29,8 +28,9 @@ export function useOrderSocket(
     if (!orderId) return;
 
     const fetchCurrentState = () => {
-      api.get(`/api/orders/${orderId}`)
-        .then(res => onUpdateRef.current(res.data.order))
+      fetch(`/api/orders/${orderId}`)
+        .then(res => res.json())
+        .then(data => { if (data.order) onUpdateRef.current(data.order); })
         .catch(() => {});
     };
 
