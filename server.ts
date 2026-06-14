@@ -9,6 +9,7 @@ import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
 import { setIO } from './lib/socket';
 import { verifyEmailTransport } from './lib/sendPushNotification';
+import jwt from 'jsonwebtoken';
 
 const dev  = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -28,18 +29,42 @@ app.prepare().then(() => {
     transports: ['websocket', 'polling'],
   });
 
+  // ── Auth middleware — rejects any connection without a valid JWT ────────────
+  // Mobile/web clients must connect with: io(url, { auth: { token: jwtToken } })
+  io.use((socket, next) => {
+    const token = socket.handshake.auth?.token as string | undefined;
+    if (!token) {
+      return next(new Error('Unauthorized: no token provided'));
+    }
+    const secret = process.env.NEXTAUTH_SECRET;
+    if (!secret) {
+      return next(new Error('Server misconfiguration'));
+    }
+    try {
+      const decoded = jwt.verify(token, secret) as any;
+      (socket as any).user = decoded;
+      next();
+    } catch {
+      next(new Error('Unauthorized: invalid or expired token'));
+    }
+  });
+
   setIO(io);
 
   // ── Verify SMTP on startup ──────────────────────────────────────────────────
-  // This surfaces missing env vars or wrong credentials immediately in logs
-  // rather than silently failing on first email send.
   verifyEmailTransport();
 
   // ── Rooms & events ──────────────────────────────────────────────────────────
   io.on('connection', (socket) => {
-    console.log(`[Socket] Connected: ${socket.id}`);
+    const user = (socket as any).user;
+    console.log(`[Socket] Connected: ${socket.id} (${user?.role ?? 'unknown'})`);
 
     socket.on('join:branch', ({ branchId }: { branchId: string }) => {
+      // Only staff roles may join branch rooms and receive order updates
+      if (!['admin', 'picker', 'delivery', 'super-admin'].includes(user?.role)) {
+        socket.emit('error', 'Forbidden');
+        return;
+      }
       const room = `branch:${branchId}`;
       socket.join(room);
       console.log(`[Socket] ${socket.id} → ${room}`);

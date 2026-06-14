@@ -79,22 +79,35 @@ export default function DeliveriesListScreen({ navigation }: any) {
     useCallback(() => {
       const branchId = activeBranch?._id || activeBranch?.id;
       if (!branchId) return;
+
       fetchDeliveries();
-      const socket = connectPickerSocket(branchId);
-      const handleOrderUpdated = ({ order, status }: { order: Order; status: string }) => {
-        setAllOrders(prev => {
-          if (!DELIVERY_STATUSES.includes(status)) return prev.filter(o => o._id !== order._id);
-          const exists = prev.find(o => o._id === order._id);
-          if (exists) return prev.map(o => o._id === order._id ? { ...o, ...order } : o);
-          return [order, ...prev];
-        });
-      };
-      socket.on('order:updated', handleOrderUpdated);
-      const handleReconnect = () => fetchDeliveries(true);
-      socket.on('connect', handleReconnect);
+
+      let socket: any = null;
+
+      // connectPickerSocket is now async — reads JWT from AsyncStorage
+      connectPickerSocket(branchId).then((s) => {
+        socket = s;
+
+        const handleOrderUpdated = ({ order, status }: { order: Order; status: string }) => {
+          setAllOrders(prev => {
+            if (!DELIVERY_STATUSES.includes(status)) return prev.filter(o => o._id !== order._id);
+            const exists = prev.find(o => o._id === order._id);
+            if (exists) return prev.map(o => o._id === order._id ? { ...o, ...order } : o);
+            return [order, ...prev];
+          });
+        };
+
+        const handleReconnect = () => fetchDeliveries(true);
+
+        socket.on('order:updated', handleOrderUpdated);
+        socket.on('connect', handleReconnect);
+      });
+
       return () => {
-        socket.off('order:updated', handleOrderUpdated);
-        socket.off('connect', handleReconnect);
+        if (socket) {
+          socket.off('order:updated');
+          socket.off('connect');
+        }
       };
     }, [activeBranch?._id, fetchDeliveries])
   );
@@ -105,7 +118,6 @@ export default function DeliveriesListScreen({ navigation }: any) {
   const availableOrders = allOrders.filter(o => !o.assignedDriverId);
   const displayOrders   = activeTab === 'mine' ? myOrders : availableOrders;
 
-  // Orders that are collected and ready but not yet out for delivery
   const readyToDeliverCount = myOrders.filter(
     o => o.status === 'collecting' || o.status === 'ready_for_delivery'
   ).length;
@@ -223,7 +235,6 @@ export default function DeliveriesListScreen({ navigation }: any) {
         <View style={styles.headerLeft}>
           <Text style={styles.headerTitle}>Deliveries</Text>
           <Text style={styles.headerSubtitle}>{activeBranch?.name || ''}</Text>
-          {/* Pooling status — shows when driver has collected orders ready to go */}
           {readyToDeliverCount > 0 && (
             <View style={styles.poolBanner}>
               <Package size={13} color="#92400e" />
@@ -295,7 +306,6 @@ const styles = StyleSheet.create({
   container:   { flex: 1, backgroundColor: '#f5f5f5' },
   centered:    { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { marginTop: 12, fontSize: 16, color: '#666' },
-
   header: {
     backgroundColor: '#fff', padding: 20, paddingTop: 60,
     borderBottomWidth: 1, borderBottomColor: '#e5e5e5',
@@ -304,8 +314,6 @@ const styles = StyleSheet.create({
   headerLeft:     { flex: 1, marginRight: 12 },
   headerTitle:    { fontSize: 28, fontWeight: 'bold', color: '#1a1a1a' },
   headerSubtitle: { fontSize: 14, color: '#666', marginTop: 4 },
-
-  // Pooling banner — visible when driver has collected orders waiting
   poolBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     marginTop: 8, backgroundColor: '#fef3c7',
@@ -313,11 +321,9 @@ const styles = StyleSheet.create({
     borderRadius: 8, alignSelf: 'flex-start',
   },
   poolBannerText: { fontSize: 12, fontWeight: '600', color: '#92400e', flexShrink: 1 },
-
   liveIndicator:  { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#fff3e0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginTop: 4 },
   liveDot:        { width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444' },
   liveText:       { fontSize: 12, fontWeight: '800', color: '#FF6B35' },
-
   tabs:               { flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e5e5e5' },
   tab:                { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, gap: 6, borderBottomWidth: 3, borderBottomColor: 'transparent' },
   tabActive:          { borderBottomColor: '#FF6B35' },
@@ -327,42 +333,34 @@ const styles = StyleSheet.create({
   tabBadgeActive:     { backgroundColor: '#fff3e0' },
   tabBadgeText:       { fontSize: 11, fontWeight: '800', color: '#6b7280' },
   tabBadgeTextActive: { color: '#FF6B35' },
-
   list: { padding: 16 },
-
   card: {
     backgroundColor: '#fff', borderRadius: 14, padding: 16, marginBottom: 12,
     borderWidth: 1, borderColor: '#e5e7eb',
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 6, elevation: 2,
   },
   cardMine: { borderLeftWidth: 4, borderLeftColor: '#10b981' },
-
   cardHeader:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   orderNumber:  { fontSize: 17, fontWeight: 'bold', color: '#1a1a1a' },
   myStatusText: { fontSize: 12, color: '#10b981', fontWeight: '600' },
-
   cardBody:      { gap: 7, marginBottom: 14 },
   infoRow:       { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
   infoText:      { fontSize: 13, color: '#6b7280', flex: 1 },
   phoneText:     { fontSize: 13, color: '#FF6B35', fontWeight: '600' },
   addressText:   { fontSize: 13, color: '#374151', fontWeight: '500', flex: 1, lineHeight: 18 },
   noAddressText: { fontSize: 13, color: '#d1d5db', fontStyle: 'italic' },
-
   cardFooter: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     borderTopWidth: 1, borderTopColor: '#f3f4f6', paddingTop: 12,
   },
   total: { fontSize: 17, fontWeight: 'bold', color: '#FF6B35' },
-
   actionBtn:     { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#10B981', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 8 },
   actionBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-
   btnGroup:     { flexDirection: 'row', gap: 8 },
   viewBtn:      { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1.5, borderColor: '#FF6B35', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
   viewBtnText:  { color: '#FF6B35', fontSize: 13, fontWeight: '700' },
   claimBtn:     { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FF6B35', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 8 },
   claimBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-
   emptyState:        { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
   emptyTitle:        { fontSize: 24, fontWeight: 'bold', color: '#1a1a1a', marginTop: 16 },
   emptyText:         { fontSize: 16, color: '#666', marginTop: 8, textAlign: 'center' },
