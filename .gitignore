@@ -33,3 +33,4 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 mobile-apps/tfs-picker-app/credentials.json 
+public/apk/*.apk 
