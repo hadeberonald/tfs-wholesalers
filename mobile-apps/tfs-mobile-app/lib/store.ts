@@ -73,6 +73,7 @@ export interface CartItem {
   comboId?: string;
   comboName?: string;
   comboItems?: { productName: string; quantity: number }[];
+  comboItemCount?: number;
 }
 
 export interface WishlistItem {

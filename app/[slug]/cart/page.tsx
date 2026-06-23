@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useCartStore } from '@/lib/store';
 import { useBranch } from '@/lib/branch-context';
+import { useCartValidation } from '@/hooks/useCartValidation';
 import {
   ShoppingCart, Trash2, Plus, Minus, ArrowRight, Tag,
   AlertCircle, ShoppingBag, Loader2, Lock, Gift, Package,
@@ -17,6 +18,9 @@ export default function CartPage() {
   const { items, removeItem, updateQuantity, clearCart, getTotal, getSubtotal, getTotalSavings, setSpecials, recalculateSpecials } = useCartStore();
 
   const [loading, setLoading] = useState(true);
+
+  // ── Validate prices + stock on mount, once branch is known ────────────────
+  const { validating } = useCartValidation(branch?.id);
 
   useEffect(() => {
     if (branch && !branchLoading) fetchSpecials();
@@ -106,11 +110,13 @@ export default function CartPage() {
   const totalSavings = getTotalSavings();
   const total        = getTotal();
 
-  // ── Split items into display groups ─────────────────────────────────────────
   const regularItems    = items.filter((i) => !i.autoAdded && !i.isCombo);
   const comboItems      = items.filter((i) => !i.autoAdded && i.isCombo);
   const freeItems       = items.filter((i) => i.autoAdded && i.isFreeItem);
   const multibuyBonuses = items.filter((i) => i.autoAdded && i.isMultibuyBonus);
+
+  // Show spinner while either specials are loading OR validation is running
+  const isChecking = loading || validating;
 
   return (
     <div className="min-h-screen bg-gray-50 pt-32 md:pt-28">
@@ -132,10 +138,12 @@ export default function CartPage() {
 
         <div className="grid lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-4">
-            {loading ? (
+            {isChecking ? (
               <div className="bg-white rounded-2xl p-8 text-center">
                 <Loader2 className="w-8 h-8 text-brand-orange animate-spin mx-auto mb-3" />
-                <p className="text-gray-600">Loading specials...</p>
+                <p className="text-gray-600">
+                  {validating ? 'Checking prices & availability…' : 'Loading specials...'}
+                </p>
               </div>
             ) : (
               <>
@@ -252,16 +260,12 @@ export default function CartPage() {
                       return (
                         <div key={`${item.id}-combo`} className="bg-gradient-to-r from-purple-50 to-violet-50 rounded-2xl p-6 border-2 border-purple-200">
                           <div className="flex items-start space-x-4">
-                            {/* Image with COMBO badge */}
                             <div className="relative w-24 h-24 bg-white rounded-xl overflow-hidden flex-shrink-0 border-2 border-purple-300">
                               <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
                               <div className="absolute top-1 right-1">
-                                <span className="bg-purple-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full shadow-lg">
-                                  COMBO
-                                </span>
+                                <span className="bg-purple-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full shadow-lg">COMBO</span>
                               </div>
                             </div>
-
                             <div className="flex-1 min-w-0">
                               <div className="flex items-start justify-between mb-2">
                                 <div className="flex-1 min-w-0 pr-4">
@@ -280,29 +284,17 @@ export default function CartPage() {
                                   <Trash2 className="w-5 h-5" />
                                 </button>
                               </div>
-
-                              {/* Pricing */}
                               <div className="bg-white/60 border border-purple-300 rounded-xl px-4 py-3 mb-3">
                                 <div className="flex items-center space-x-3 mb-1">
                                   <span className="text-2xl font-bold text-brand-orange">R{itemTotal.toFixed(2)}</span>
-                                  {savings > 0 && (
-                                    <span className="text-base text-gray-500 line-through">R{itemOriginalTotal.toFixed(2)}</span>
-                                  )}
+                                  {savings > 0 && <span className="text-base text-gray-500 line-through">R{itemOriginalTotal.toFixed(2)}</span>}
                                   {discountPercent > 0 && (
-                                    <span className="text-sm font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-full">
-                                      -{discountPercent}%
-                                    </span>
+                                    <span className="text-sm font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-full">-{discountPercent}%</span>
                                   )}
                                 </div>
-                                {savings > 0 && (
-                                  <p className="text-sm font-semibold text-purple-700">
-                                    Bundle Deal — Save R{savings.toFixed(2)}!
-                                  </p>
-                                )}
+                                {savings > 0 && <p className="text-sm font-semibold text-purple-700">Bundle Deal — Save R{savings.toFixed(2)}!</p>}
                                 <p className="text-sm text-gray-600 mt-1">{item.quantity} × R{itemPrice.toFixed(2)} each</p>
                               </div>
-
-                              {/* Quantity */}
                               <div className="flex items-center space-x-3">
                                 <span className="text-sm font-medium text-gray-700">Quantity:</span>
                                 <div className="flex items-center space-x-2">
@@ -337,7 +329,6 @@ export default function CartPage() {
                         {multibuyBonuses.length} active
                       </span>
                     </div>
-
                     {multibuyBonuses.map((item) => {
                       const savings = item.specialDiscount || 0;
                       return (
@@ -382,7 +373,6 @@ export default function CartPage() {
                         </div>
                       );
                     })}
-
                     <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
                       <div className="flex items-start space-x-3">
                         <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
@@ -405,13 +395,11 @@ export default function CartPage() {
                         {freeItems.length} {freeItems.length === 1 ? 'item' : 'items'}
                       </span>
                     </div>
-
                     {freeItems.map((item) => {
                       const itemPrice         = item.price || 0;
                       const itemOriginalPrice = item.originalPrice || 0;
                       const itemTotal         = itemPrice * item.quantity;
                       const savings           = (itemOriginalPrice - itemPrice) * item.quantity;
-
                       return (
                         <div key={`${item.id}-${item.variantId || ''}-free`} className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-2xl p-6 border-2 border-green-200">
                           <div className="flex items-start space-x-4">
@@ -465,7 +453,6 @@ export default function CartPage() {
                         </div>
                       );
                     })}
-
                     <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
                       <div className="flex items-start space-x-3">
                         <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
@@ -519,9 +506,22 @@ export default function CartPage() {
                 )}
               </div>
 
-              <button onClick={handleCheckout} className="btn-primary w-full text-lg py-4 flex items-center justify-center space-x-2 group">
-                <span>Proceed to Checkout</span>
-                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              <button
+                onClick={handleCheckout}
+                disabled={validating}
+                className="btn-primary w-full text-lg py-4 flex items-center justify-center space-x-2 group disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {validating ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>Checking cart…</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Proceed to Checkout</span>
+                    <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                  </>
+                )}
               </button>
 
               <Link href={`/${branch.slug}/shop`} className="block text-center text-brand-orange hover:text-brand-orange/80 font-medium mt-4 transition-colors">
@@ -550,9 +550,12 @@ export default function CartPage() {
               <p className="text-2xl font-bold text-brand-orange">R{total.toFixed(2)}</p>
               {totalSavings > 0 && <p className="text-xs text-green-600 font-medium">Save R{totalSavings.toFixed(2)}</p>}
             </div>
-            <button onClick={handleCheckout} className="btn-primary px-6 py-3 flex items-center space-x-2">
-              <span>Checkout</span>
-              <ArrowRight className="w-4 h-4" />
+            <button
+              onClick={handleCheckout}
+              disabled={validating}
+              className="btn-primary px-6 py-3 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {validating ? <Loader2 className="w-4 h-4 animate-spin" /> : <><span>Checkout</span><ArrowRight className="w-4 h-4" /></>}
             </button>
           </div>
         </div>
