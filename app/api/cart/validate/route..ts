@@ -82,6 +82,14 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { branchId, items } = body as { branchId: string; items: IncomingItem[] };
 
+    // ── Request log ──────────────────────────────────────────────────────────
+    console.log(
+      '[Cart Validate] Hit —',
+      new Date().toISOString(),
+      '| branchId:', branchId,
+      '| items:', items?.length ?? 0,
+    );
+
     // ── Guard: missing / empty payload ──────────────────────────────────────
     if (!branchId || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ valid: true, corrections: [] });
@@ -320,10 +328,10 @@ export async function POST(request: NextRequest) {
         }
 
         corrections.push({
-          id:                  item.id,
-          variantId:           item.variantId,
-          action:              'update',
-          currentPrice:        roundedCurrent,
+          id:                   item.id,
+          variantId:            item.variantId,
+          action:               'update',
+          currentPrice:         roundedCurrent,
           currentOriginalPrice: roundedBase,
           reason,
         });
@@ -343,6 +351,12 @@ export async function POST(request: NextRequest) {
         });
       }
     }
+
+    console.log(
+      '[Cart Validate] Done —',
+      'valid:', corrections.length === 0,
+      '| corrections:', corrections.length,
+    );
 
     return NextResponse.json({
       valid:       corrections.length === 0,
