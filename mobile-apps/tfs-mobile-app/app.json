@@ -27,7 +27,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.tfswholesalers.app",
-      "buildNumber": "5",
+      "buildNumber": "6",
 
       "config": {
         "googleMapsApiKey": "AIzaSyBnssZMeuqy3Y074vdvp_4-BePD6cGwaTM"
@@ -90,6 +90,26 @@
           "icon": "./assets/icon.png",
           "color": "#FF6B35",
           "sounds": []
+        }
+      ],
+
+      [
+        "@sefatunckanat/expo-dynamic-app-icon",
+        {
+          "dundee": {
+            "ios": "./assets/icons/tfs-dundee.png",
+            "android": {
+              "foregroundImage": "./assets/icons/tfs-dundee.png",
+              "backgroundColor": "#FF6B35"
+            }
+          },
+          "vryheid": {
+            "ios": "./assets/icons/tfs-vryheid.png",
+            "android": {
+              "foregroundImage": "./assets/icons/tfs-vryheid.png",
+              "backgroundColor": "#FF6B35"
+            }
+          }
         }
       ]
     ],

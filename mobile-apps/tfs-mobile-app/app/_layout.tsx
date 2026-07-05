@@ -1,8 +1,4 @@
 // app/_layout.tsx
-// Same as your existing layout — only additions are:
-//   1. usePendingDeliveryReview hook
-//   2. <DeliveryNpsModal /> mounted at the root
-
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
@@ -16,10 +12,6 @@ import {
   registerForPushNotifications,
   addNotificationListeners,
 } from '@/lib/notificationService';
-
-// ── NEW imports ───────────────────────────────────────────────────────────────
-// Relative import avoids the TS alias resolution issue in the nested app structure:
-// mobile-apps/tfs-mobile-app/app/_layout.tsx → ./DeliveryNpsModal
 import DeliveryNpsModal from './DeliveryNpsModal';
 import { usePendingDeliveryReview } from '../hooks/usePendingDeliveryReview';
 
@@ -29,7 +21,6 @@ export default function RootLayout() {
   const setBranch = useStore((state) => state.setBranch);
   const [isLoading, setIsLoading] = useState(true);
 
-  // ── NEW: delivery review state ────────────────────────────────────────────
   const { pendingReview, dismiss } = usePendingDeliveryReview();
 
   useEffect(() => { loadStoredData(); }, []);
@@ -82,6 +73,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="shop" />
         <Stack.Screen name="specials" />
+        <Stack.Screen name="catalogues" />
         <Stack.Screen name="cart" />
         <Stack.Screen name="profile" />
         <Stack.Screen name="wishlist" />
@@ -103,7 +95,6 @@ export default function RootLayout() {
         <Stack.Screen name="order-being-picked" />
       </Stack>
 
-      {/* ── Delivery NPS modal — renders on top of all screens ── */}
       <DeliveryNpsModal
         pendingReview={pendingReview}
         onDismiss={dismiss}

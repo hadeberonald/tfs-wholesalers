@@ -11,6 +11,9 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/lib/store';
 import api from '@/lib/api';
+import { getIconKeyForBranchSlug } from '@/lib/branch-icon-map';
+import { switchAppIcon } from '@/lib/icon-switcher';
+import { useOnboardingIconDetection } from '@/hooks/useOnboardingIconDetection';
 
 interface Branch {
   _id: string;
@@ -20,6 +23,8 @@ interface Branch {
   status: string;
   settings?: {
     storeLocation: {
+      lat: number;
+      lng: number;
       address: string;
     };
     contactPhone: string;
@@ -33,6 +38,12 @@ export default function BranchSelect() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Fires once, ever - guarded internally by an AsyncStorage flag. Safe to
+  // leave here even if this screen shows up again on a later launch (e.g.
+  // if the user hasn't picked a branch yet, or you route back here for some
+  // other reason) - it checks the flag and no-ops after the first run.
+  useOnboardingIconDetection();
+
   useEffect(() => {
     fetchBranches();
   }, []);
@@ -41,11 +52,11 @@ export default function BranchSelect() {
     try {
       setLoading(true);
       setError(null);
-      
+
       console.log('[BRANCH SELECT] Fetching from:', api.defaults.baseURL);
       const response = await api.get('/api/mobile/branches');
       console.log('[BRANCH SELECT] Got response:', response.data);
-      
+
       if (response.data.success && response.data.branches) {
         console.log('[BRANCH SELECT] Setting', response.data.branches.length, 'branches');
         setBranches(response.data.branches);
@@ -64,6 +75,13 @@ export default function BranchSelect() {
     try {
       console.log('[BRANCH SELECT] Selecting branch:', branch.name);
       await setBranch(branch);
+
+      // Deliberate user action -> the resulting iOS icon-change alert (if
+      // the icon actually changes) is expected here, unlike the onboarding
+      // auto-detection flow.
+      const iconKey = getIconKeyForBranchSlug(branch.slug);
+      await switchAppIcon(iconKey);
+
       console.log('[BRANCH SELECT] Navigating to tabs');
       router.replace('/(tabs)');
     } catch (error: any) {
@@ -109,7 +127,6 @@ export default function BranchSelect() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
-        
         <Text style={styles.title}>Welcome to TFS Wholesalers</Text>
         <Text style={styles.subtitle}>Select your nearest branch to continue</Text>
       </View>

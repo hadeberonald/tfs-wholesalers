@@ -46,6 +46,7 @@ import {
   ShieldCheck,
   Receipt,
   Contact2,
+  BookOpen,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -186,6 +187,13 @@ export const ROUTE_MANIFEST: RouteManifestEntry[] = [
     group: 'Marketing',
     icon: Gift,
     href: '/admin/combos',
+  },
+  {
+    key: 'catalogues',
+    label: 'Catalogues',
+    group: 'Marketing',
+    icon: BookOpen,
+    href: '/admin/catalogues',
   },
   {
     key: 'nps',

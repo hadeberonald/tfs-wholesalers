@@ -16,6 +16,7 @@ import {
   Home,
   ShoppingBag,
   Tag,
+  FileText,
   Heart,
   LogOut,
   Store,
@@ -217,11 +218,15 @@ export default function Header({ showBack, title }: HeaderProps) {
                   label="All Products"
                   onPress={() => navigate('/(tabs)/shop')}
                 />
-                {/* Specials → navigates to shop screen, specials tab is selected via param */}
                 <MenuRow
                   icon={<Tag color="#FF6B35" size={18} />}
                   label="Specials & Combos"
                   onPress={() => navigate({ pathname: '/(tabs)/shop', params: { tab: 'specials' } })}
+                />
+                <MenuRow
+                  icon={<FileText color="#FF6B35" size={18} />}
+                  label="Catalogues"
+                  onPress={() => navigate('/catalogues')}
                 />
               </AccordionSection>
 
