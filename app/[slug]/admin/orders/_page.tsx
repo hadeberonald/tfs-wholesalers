@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Search, Filter, Eye, Package, Loader2, Hash } from 'lucide-react';
+import { Search, Filter, Eye, Package, Loader2, Hash, ArrowRightLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import OrderHandlingLog from '@/components/admin/OrderHandlingLog';
 
@@ -20,19 +20,34 @@ interface Order {
   status: string;
   paymentStatus: string;
   tillAccountNumber?: string | null;
+  branchId?: string;
   createdAt: string;
+}
+
+interface Branch {
+  _id: string;
+  name?: string;
+  displayName?: string;
+  slug?: string;
 }
 
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showModal, setShowModal] = useState(false);
 
+  // Reassign flow state
+  const [reassignTarget, setReassignTarget] = useState('');
+  const [confirmingReassign, setConfirmingReassign] = useState(false);
+  const [reassigning, setReassigning] = useState(false);
+
   useEffect(() => {
     fetchOrders();
+    fetchBranches();
   }, []);
 
   const fetchOrders = async () => {
@@ -47,6 +62,24 @@ export default function AdminOrdersPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchBranches = async () => {
+    try {
+      const res = await fetch('/api/branches');
+      if (res.ok) {
+        const data = await res.json();
+        setBranches(data.branches || []);
+      }
+    } catch (error) {
+      console.error('Failed to load branches', error);
+    }
+  };
+
+  const branchLabel = (branchId?: string) => {
+    if (!branchId) return '—';
+    const b = branches.find(b => b._id === branchId);
+    return b?.displayName || b?.name || branchId;
   };
 
   const updateOrderStatus = async (orderId: string, status: string) => {
@@ -68,6 +101,37 @@ export default function AdminOrdersPage() {
       }
     } catch (error) {
       toast.error('An error occurred');
+    }
+  };
+
+  const openReassign = (branchId: string) => {
+    setReassignTarget(branchId);
+    setConfirmingReassign(!!branchId && branchId !== selectedOrder?.branchId);
+  };
+
+  const confirmReassign = async () => {
+    if (!selectedOrder || !reassignTarget) return;
+    setReassigning(true);
+    try {
+      const res = await fetch(`/api/orders/${selectedOrder._id}/reassign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ branchId: reassignTarget }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(`Order moved to ${branchLabel(reassignTarget)}`);
+        setSelectedOrder(prev => prev ? { ...prev, ...data.order, branchId: data.order.branchId } : prev);
+        setConfirmingReassign(false);
+        setReassignTarget('');
+        fetchOrders();
+      } else {
+        toast.error(data.error || 'Failed to reassign order');
+      }
+    } catch (error) {
+      toast.error('An error occurred while reassigning');
+    } finally {
+      setReassigning(false);
     }
   };
 
@@ -252,6 +316,8 @@ export default function AdminOrdersPage() {
                         <button
                           onClick={() => {
                             setSelectedOrder(order);
+                            setReassignTarget('');
+                            setConfirmingReassign(false);
                             setShowModal(true);
                           }}
                           className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
@@ -332,6 +398,65 @@ export default function AdminOrdersPage() {
                   </div>
                 </div>
 
+                {/* Branch / Reassignment */}
+                <div className="border border-gray-200 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <ArrowRightLeft className="w-4 h-4 text-gray-500" />
+                    <h3 className="font-semibold text-brand-black">Branch</h3>
+                  </div>
+                  <p className="text-sm text-gray-600 mb-3">
+                    Currently at: <span className="font-semibold text-gray-900">{branchLabel(selectedOrder.branchId)}</span>
+                  </p>
+
+                  {['delivered', 'cancelled'].includes(selectedOrder.status) ? (
+                    <p className="text-xs text-gray-400 italic">
+                      This order is {selectedOrder.status} and can't be reassigned.
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <select
+                        className="input-field text-sm max-w-xs"
+                        value={reassignTarget}
+                        onChange={(e) => openReassign(e.target.value)}
+                      >
+                        <option value="">Move to branch…</option>
+                        {branches
+                          .filter(b => b._id !== selectedOrder.branchId)
+                          .map(b => (
+                            <option key={b._id} value={b._id}>
+                              {b.displayName || b.name}
+                            </option>
+                          ))}
+                      </select>
+
+                      {confirmingReassign && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={confirmReassign}
+                            disabled={reassigning}
+                            className="px-3 py-1.5 text-sm font-semibold rounded-lg bg-brand-orange text-white disabled:opacity-50"
+                          >
+                            {reassigning ? 'Reassigning…' : `Confirm move to ${branchLabel(reassignTarget)}`}
+                          </button>
+                          <button
+                            onClick={() => { setConfirmingReassign(false); setReassignTarget(''); }}
+                            disabled={reassigning}
+                            className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {['picking', 'packaging'].includes(selectedOrder.status) && (
+                    <p className="text-xs text-amber-600 mt-2">
+                      This order is mid-pick — reassigning will reset it to "Confirmed" and unassign the current picker so the new branch can start fresh.
+                    </p>
+                  )}
+                </div>
+
                 {/* Customer Info */}
                 <div>
                   <h3 className="font-semibold text-brand-black mb-3">Customer Information</h3>
@@ -374,7 +499,6 @@ export default function AdminOrdersPage() {
 
                 {/* Totals breakdown */}
                 <div className="border-t pt-4 space-y-2">
-                  {/* Subtotal (items only) */}
                   {selectedOrder.subtotal != null ? (
                     <div className="flex justify-between text-sm text-gray-600">
                       <span>Subtotal</span>
@@ -382,7 +506,6 @@ export default function AdminOrdersPage() {
                     </div>
                   ) : null}
 
-                  {/* Delivery fee as its own line */}
                   {(selectedOrder.deliveryFee ?? 0) > 0 && (
                     <div className="flex justify-between text-sm text-gray-600">
                       <span>Delivery Fee</span>

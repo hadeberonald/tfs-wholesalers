@@ -11,7 +11,8 @@ export type HandlingEventType =
   | 'package_sealed'
   | 'package_collected'
   | 'delivery_started'
-  | 'delivery_completed';
+  | 'delivery_completed'
+  | 'order_reassigned';
 
 export interface LogEventPayload {
   eventType:   HandlingEventType;

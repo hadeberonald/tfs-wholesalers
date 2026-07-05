@@ -23,6 +23,7 @@ interface Order {
   _id: string; orderNumber: string;
   customerInfo?: { name: string };
   items: any[]; total: number; status: string; createdAt: string;
+  branchId?: string;
   assignedPickerId?:   string;
   assignedPickerName?: string;
   pickerId?:           string;
@@ -66,8 +67,15 @@ export default function OrdersListScreen({ navigation }: any) {
       fetchOrders();
       const socket = connectPickerSocket(branchId);
       const handleOrderUpdated = ({ order, status }: { order: Order; status: string }) => {
+        // An order can arrive via this branch's room either because it belongs
+        // here, or because it was JUST reassigned away from here — in which
+        // case the payload's branchId will point elsewhere and it must be dropped.
+        const belongsToThisBranch = !order.branchId || String(order.branchId) === String(branchId);
+
         setOrders(prev => {
-          if (EXCLUDED_STATUSES.includes(status)) return prev.filter(o => o._id !== order._id);
+          if (EXCLUDED_STATUSES.includes(status) || !belongsToThisBranch) {
+            return prev.filter(o => o._id !== order._id);
+          }
           const exists = prev.find(o => o._id === order._id);
           if (exists) return prev.map(o => o._id === order._id ? { ...o, ...order } : o);
           return [order, ...prev];

@@ -20,6 +20,7 @@ import BarcodeScanner from '../components/BarcodeScanner';
 import StatusStepper from '../components/StatusStepper';
 import { useAppModal } from '../components/AppModal';
 import { logHandlingEvent } from '../lib/handlingLog';
+import { connectPickerSocket } from '../services/socketService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import {
@@ -294,7 +295,7 @@ function GroupSection({ group, scanKeys, pickCounts, oosSet, onManual, onOOS, is
 
 export default function PickingScreen({ route, navigation: navProp }: any) {
   const { orderId } = route.params;
-  const { token, user } = useAuthStore();
+  const { token, user, activeBranch } = useAuthStore();
   const navigation  = navProp as any;
   const { showModal } = useAppModal();
   const insets = useSafeAreaInsets();
@@ -329,6 +330,33 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
     const n = await getPendingCount();
     setPendingCount(n);
   };
+
+  // ── Reassignment guard ────────────────────────────────────────────────
+  // If an admin moves this order to a different branch while the picker is
+  // actively inside this screen, the branch socket room will emit the
+  // updated order. If it no longer belongs to this branch, kick the picker
+  // back out — their local pick progress is stale for a different branch's
+  // team now.
+  useEffect(() => {
+    const branchId = activeBranch?._id || activeBranch?.id;
+    if (!branchId || !orderId) return;
+
+    const socket = connectPickerSocket(branchId);
+    const handleOrderUpdated = ({ order: updated }: { order: any; status?: string }) => {
+      if (!updated || updated._id !== orderId) return;
+      const stillOurs = !updated.branchId || String(updated.branchId) === String(branchId);
+      if (!stillOurs) {
+        clearPickStorage(orderId).catch(() => {});
+        showModal({
+          title: 'Order Reassigned',
+          message: 'This order has been moved to another branch and can no longer be picked here.',
+          buttons: [{ text: 'OK', onPress: () => navigation.navigate('Main', { screen: 'Orders' }) }],
+        });
+      }
+    };
+    socket.on('order:updated', handleOrderUpdated);
+    return () => { socket.off('order:updated', handleOrderUpdated); };
+  }, [activeBranch?._id, activeBranch?.id, orderId, navigation, showModal]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
   const addLoadingKey    = (k: string) => setLoadingKeys(prev => new Set([...prev, k]));
