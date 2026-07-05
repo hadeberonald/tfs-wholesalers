@@ -11,19 +11,17 @@
 //                            claim it automatically — see the matching
 //                            PickingScreen.tsx change)
 //
-// ASSUMPTIONS (verify these):
-//   1. Permission string 'orders:write' — swap if your app uses a
-//      different key for order-management actions.
-//   2. notifyBranchPickers(branchId, order, status) — reused from wherever
-//      your existing branch-reassign route calls it. If the real signature
-//      differs, adjust the call below; this is the one part I couldn't see
-//      directly.
+// ASSUMPTION: permission string 'orders:write' — swap if your app uses a
+// different key for order-management actions.
+//
+// No socket push here — just the DB write + audit log. The picker app
+// picks up the change next time it fetches (screen focus, pull-to-refresh,
+// or socket reconnect), same as it already does for other order edits.
 
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 import { requirePermission, isPermissionError } from '@/lib/with-permission';
-import { notifyBranchPickers } from '@/lib/socket';
 
 export async function POST(
   request: NextRequest,
@@ -69,8 +67,11 @@ export async function POST(
     // client-side, but a stale dropdown or a direct API call shouldn't be
     // able to hand an order to someone from a different branch.
     if (pickerId) {
+      if (!ObjectId.isValid(pickerId)) {
+        return NextResponse.json({ error: 'Invalid picker ID' }, { status: 400 });
+      }
       const pickerUser = await db.collection('users').findOne({
-        _id: ObjectId.isValid(pickerId) ? new ObjectId(pickerId) : pickerId,
+        _id: new ObjectId(pickerId),
       });
       const pickerBranchId = pickerUser?.activeBranchId ?? pickerUser?.branchId ?? null;
       if (!pickerUser || (existing.branchId && String(pickerBranchId) !== String(existing.branchId))) {
@@ -124,15 +125,6 @@ export async function POST(
     await db.collection('orders').updateOne(filter, {
       $push: { handlingLog: reassignEvent } as any,
     });
-
-    // ── Live push to the picker app ──────────────────────────────────────
-    try {
-      if (updatedOrder.branchId) {
-        await notifyBranchPickers(String(updatedOrder.branchId), updatedOrder, updatedOrder.status);
-      }
-    } catch (err) {
-      console.warn('[reassign-picker] socket notify failed (non-fatal):', err);
-    }
 
     return NextResponse.json({ success: true, order: updatedOrder });
   } catch (err) {
