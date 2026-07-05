@@ -3,7 +3,7 @@ import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '@/lib/api';
 import { findNearestWithinRadius } from '@/lib/geo';
-import { getIconKeyForBranchSlug, DEFAULT_RADIUS_KM } from '@/lib/branch-icon-map';
+import { getIconKeyForBranchSlug, DEFAULT_ICON_KEY, DEFAULT_RADIUS_KM } from '@/lib/branch-icon-map';
 import { switchAppIcon } from '@/lib/icon-switcher';
 
 // Bump the version suffix if you ever need to force re-detection for
@@ -21,11 +21,11 @@ interface BranchWithLocation {
  * branch-select). It:
  *   1. Checks whether detection has already run - if so, does nothing.
  *   2. Requests foreground location permission.
- *   3. Fetches live branches from /api/mobile/branches (same endpoint
- *      branch-select already uses) and reads each branch's real
- *      settings.storeLocation.lat / .lng - no hardcoded coordinates here.
+ *   3. Fetches live branches from /api/mobile/branches and reads each
+ *      branch's real settings.storeLocation.lat / .lng.
  *   4. Resolves the nearest branch within DEFAULT_RADIUS_KM.
- *   5. Sets the icon accordingly (or falls back to the default icon).
+ *   5. Sets the icon accordingly, falling back to DEFAULT_ICON_KEY (null -
+ *      the neutral TFS Wholesalers icon) if nothing matches.
  *   6. Marks detection as complete so this never runs again automatically.
  *
  * This is the one expected icon-change alert on iOS - it happens on first
@@ -59,7 +59,7 @@ export function useOnboardingIconDetection() {
 
       if (status !== 'granted') {
         console.log('[ONBOARDING ICON] Permission denied - using default icon');
-        await switchAppIcon(null);
+        await switchAppIcon(DEFAULT_ICON_KEY);
         return;
       }
 
@@ -94,14 +94,12 @@ export function useOnboardingIconDetection() {
         await switchAppIcon(getIconKeyForBranchSlug(match.slug));
       } else {
         console.log('[ONBOARDING ICON] Outside all branch radii - using default icon');
-        await switchAppIcon(null);
+        await switchAppIcon(DEFAULT_ICON_KEY);
       }
     } catch (err) {
       console.error('[ONBOARDING ICON] Detection failed, falling back to default:', err);
-      await switchAppIcon(null);
+      await switchAppIcon(DEFAULT_ICON_KEY);
     } finally {
-      // Mark as done regardless of outcome - this is a "detect once" flow,
-      // not a "retry until successful" flow.
       try {
         await AsyncStorage.setItem(ONBOARDING_FLAG_KEY, 'true');
       } catch (err) {

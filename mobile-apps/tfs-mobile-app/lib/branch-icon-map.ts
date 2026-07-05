@@ -1,25 +1,28 @@
 /**
  * The only thing that still needs to live in app code: which icon each
- * branch maps to. Coordinates and radius no longer need to be duplicated
- * here - they come straight from /api/mobile/branches at detection time
- * (see settings.storeLocation.lat / .lng on the branch object), so this
- * file can't go stale relative to the backend.
+ * branch maps to. Coordinates and radius come live from
+ * /api/mobile/branches (settings.storeLocation.lat / .lng), not from here.
  *
- * `iconKey` must match a key registered in the expo-dynamic-app-icon
- * plugin config in app.json. `null` means "use the default app icon"
- * (tfs-main.png) - that branch doesn't need a plugin entry at all.
+ * iconKey: null means "use the default/neutral icon" - this is the
+ * library's own real, documented reset mechanism (setAppIcon(null) /
+ * setAppIcon('DEFAULT') are equivalent). @praneeth26/expo-dynamic-app-identity
+ * generates a dedicated MainActivityDEFAULT alias specifically so this
+ * always has somewhere valid to reset to - unlike the previous fork we
+ * tried, which had no reset-capable component in its generated manifest.
  */
 
 export type IconKey = 'dundee' | 'vryheid' | null;
+
+export const DEFAULT_ICON_KEY: IconKey = null;
 
 export const DEFAULT_RADIUS_KM = 30;
 
 const ICON_KEY_BY_SLUG: Record<string, IconKey> = {
   'wholesalers': null, // TODO: CONFIRM against actual Mongo doc - treated as default/neutral
-  'dundee': 'dundee', // confirmed from Mongo document (status: "paused" - see note)
+  'dundee': 'dundee', // confirmed from Mongo document (status: "paused" - see chat notes)
   'vryheid': 'vryheid', // confirmed from Mongo document
 };
 
 export function getIconKeyForBranchSlug(slug: string): IconKey {
-  return ICON_KEY_BY_SLUG[slug] ?? null;
+  return ICON_KEY_BY_SLUG[slug] ?? DEFAULT_ICON_KEY;
 }

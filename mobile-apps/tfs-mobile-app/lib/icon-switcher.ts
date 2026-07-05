@@ -1,6 +1,5 @@
 import Constants from 'expo-constants';
-// If you end up on the @howincodes fork instead, this import path is the same.
-import * as DynamicAppIcon from '@sefatunckanat/expo-dynamic-app-icon';
+import * as DynamicAppIcon from '@praneeth26/expo-dynamic-app-identity';
 import type { IconKey } from './branch-icon-map';
 
 const isExpoGo = Constants.appOwnership === 'expo';
@@ -8,7 +7,8 @@ const isExpoGo = Constants.appOwnership === 'expo';
 /**
  * Switches the home-screen icon.
  *
- * iconKey: 'dundee' | 'vryheid' | null (null = reset to the default/main icon).
+ * iconKey: 'dundee' | 'vryheid' | null (null = reset to the default/main
+ * icon, via this library's dedicated MainActivityDEFAULT alias).
  *
  * This is intentionally the ONLY place in the app that touches the native
  * icon API, so every call site (onboarding detection, manual branch picker)
