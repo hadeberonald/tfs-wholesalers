@@ -332,11 +332,16 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
   };
 
   // ── Reassignment guard ────────────────────────────────────────────────
-  // If an admin moves this order to a different branch while the picker is
-  // actively inside this screen, the branch socket room will emit the
-  // updated order. If it no longer belongs to this branch, kick the picker
-  // back out — their local pick progress is stale for a different branch's
-  // team now.
+  // Two things can happen to this order while a picker is actively inside
+  // this screen, and both are pushed over the same branch socket room:
+  //   1. An admin moves the order to a different branch entirely.
+  //   2. An admin reassigns the *picker* — either to a specific other
+  //      person, or clears it back to the open pool.
+  // Case 1 and an explicit reassignment to someone else both mean this
+  // picker's local progress is no longer theirs to act on, so we bail them
+  // out. Clearing the picker (assignedPickerId -> null) is NOT treated as a
+  // kick-out — that's "anyone can pick this," and the person already here
+  // keeps working; see the claim-on-open logic in fetchOrder below.
   useEffect(() => {
     const branchId = activeBranch?._id || activeBranch?.id;
     if (!branchId || !orderId) return;
@@ -344,19 +349,34 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
     const socket = connectPickerSocket(branchId);
     const handleOrderUpdated = ({ order: updated }: { order: any; status?: string }) => {
       if (!updated || updated._id !== orderId) return;
-      const stillOurs = !updated.branchId || String(updated.branchId) === String(branchId);
-      if (!stillOurs) {
+
+      const stillOurBranch = !updated.branchId || String(updated.branchId) === String(branchId);
+      if (!stillOurBranch) {
         clearPickStorage(orderId).catch(() => {});
         showModal({
           title: 'Order Reassigned',
           message: 'This order has been moved to another branch and can no longer be picked here.',
           buttons: [{ text: 'OK', onPress: () => navigation.navigate('Main', { screen: 'Orders' }) }],
         });
+        return;
+      }
+
+      const myId       = user?.id ? String(user.id) : null;
+      const assignedTo = updated.assignedPickerId ? String(updated.assignedPickerId) : null;
+      const reassignedAwayFromMe = !!assignedTo && !!myId && assignedTo !== myId;
+
+      if (reassignedAwayFromMe) {
+        clearPickStorage(orderId).catch(() => {});
+        showModal({
+          title: 'Reassigned to Another Picker',
+          message: `This order has been reassigned to ${updated.assignedPickerName || 'another picker'}. You can no longer pick it.`,
+          buttons: [{ text: 'OK', onPress: () => navigation.navigate('Main', { screen: 'Orders' }) }],
+        });
       }
     };
     socket.on('order:updated', handleOrderUpdated);
     return () => { socket.off('order:updated', handleOrderUpdated); };
-  }, [activeBranch?._id, activeBranch?.id, orderId, navigation, showModal]);
+  }, [activeBranch?._id, activeBranch?.id, orderId, user?.id, navigation, showModal]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
   const addLoadingKey    = (k: string) => setLoadingKeys(prev => new Set([...prev, k]));
@@ -378,7 +398,7 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
   // ── Fetch order (network first, cache fallback) ───────────────────────────
   const fetchOrder = useCallback(async () => {
     try {
-      let orderData: Order;
+      let orderData: Order & { assignedPickerId?: string | null; assignedPickerName?: string | null };
 
       try {
         const res = await axios.get(`${API_URL}/api/orders/${orderId}`, {
@@ -416,14 +436,23 @@ export default function PickingScreen({ route, navigation: navProp }: any) {
       if (Object.keys(savedCounts).length > 0) setPickCounts(savedCounts);
       if (savedOOS.size > 0) setOos(savedOOS);
 
-      // ── Mark as picking (enqueue so it works offline too) ────────────────
-      if (orderData.status === 'pending' || orderData.status === 'confirmed') {
-        const patchPayload = {
+      // ── Mark as picking / claim an orphaned order (enqueue so it works
+      // offline too) ────────────────────────────────────────────────────
+      // Fires when: the order hasn't started picking yet, OR it's already
+      // 'picking' but nobody is currently assigned to it — e.g. an admin
+      // unassigned the previous picker and this person just opened it.
+      // In the orphaned case we don't touch pickingStartedAt, since picking
+      // genuinely started earlier under someone else.
+      const isOrphanedPicking = orderData.status === 'picking' && !orderData.assignedPickerId;
+      if (orderData.status === 'pending' || orderData.status === 'confirmed' || isOrphanedPicking) {
+        const patchPayload: any = {
           status:             'picking',
-          pickingStartedAt:   new Date().toISOString(),
           assignedPickerId:   user?.id,
           assignedPickerName: user?.name,
         };
+        if (!isOrphanedPicking) {
+          patchPayload.pickingStartedAt = new Date().toISOString();
+        }
         await enqueueAction('picking_started' as any, orderId, patchPayload);
         // Also try live if online
         try {
