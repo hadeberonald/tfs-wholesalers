@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Search, Filter, Eye, Package, Loader2, Hash, ArrowRightLeft } from 'lucide-react';
+import { Search, Filter, Eye, Package, Loader2, Hash, ArrowRightLeft, UserCog } from 'lucide-react';
 import toast from 'react-hot-toast';
 import OrderHandlingLog from '@/components/admin/OrderHandlingLog';
 
@@ -21,6 +21,8 @@ interface Order {
   paymentStatus: string;
   tillAccountNumber?: string | null;
   branchId?: string;
+  assignedPickerId?: string;
+  assignedPickerName?: string;
   createdAt: string;
 }
 
@@ -29,6 +31,13 @@ interface Branch {
   name?: string;
   displayName?: string;
   slug?: string;
+}
+
+interface Staff {
+  _id: string;
+  name: string;
+  activeBranchId?: string;
+  active?: boolean;
 }
 
 export default function AdminOrdersPage() {
@@ -40,15 +49,34 @@ export default function AdminOrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showModal, setShowModal] = useState(false);
 
-  // Reassign flow state
+  // Branch reassign flow state
   const [reassignTarget, setReassignTarget] = useState('');
   const [confirmingReassign, setConfirmingReassign] = useState(false);
   const [reassigning, setReassigning] = useState(false);
+
+  // Picker reassign flow state
+  const [pickers, setPickers] = useState<Staff[]>([]);
+  const [pickerReassignTarget, setPickerReassignTarget] = useState('');
+  const [confirmingPickerReassign, setConfirmingPickerReassign] = useState(false);
+  const [reassigningPicker, setReassigningPicker] = useState(false);
 
   useEffect(() => {
     fetchOrders();
     fetchBranches();
   }, []);
+
+  // Load pickers for the selected order's branch whenever the modal opens
+  // on a (possibly different) order, and reset any in-progress picker
+  // reassignment UI state so it doesn't leak between orders.
+  useEffect(() => {
+    setPickerReassignTarget('');
+    setConfirmingPickerReassign(false);
+    if (showModal && selectedOrder?.branchId) {
+      fetchPickers(selectedOrder.branchId);
+    } else {
+      setPickers([]);
+    }
+  }, [showModal, selectedOrder?._id, selectedOrder?.branchId]);
 
   const fetchOrders = async () => {
     try {
@@ -73,6 +101,26 @@ export default function AdminOrdersPage() {
       }
     } catch (error) {
       console.error('Failed to load branches', error);
+    }
+  };
+
+  const fetchPickers = async (branchId: string) => {
+    try {
+      // /api/admin/users doesn't take a branchId query param — for a
+      // super-admin it returns pickers from every branch, so we filter to
+      // this order's branch client-side. For a branch-scoped admin the API
+      // has already narrowed it to their own branch, and this filter is a
+      // no-op as long as that matches the order's branch.
+      const res = await fetch('/api/admin/users?role=picker');
+      if (res.ok) {
+        const data = await res.json();
+        const branchPickers = (data.users || []).filter(
+          (u: Staff) => u.active !== false && String(u.activeBranchId) === String(branchId)
+        );
+        setPickers(branchPickers);
+      }
+    } catch (error) {
+      console.error('Failed to load pickers', error);
     }
   };
 
@@ -104,6 +152,7 @@ export default function AdminOrdersPage() {
     }
   };
 
+  // ── Branch reassignment ────────────────────────────────────────────────
   const openReassign = (branchId: string) => {
     setReassignTarget(branchId);
     setConfirmingReassign(!!branchId && branchId !== selectedOrder?.branchId);
@@ -132,6 +181,43 @@ export default function AdminOrdersPage() {
       toast.error('An error occurred while reassigning');
     } finally {
       setReassigning(false);
+    }
+  };
+
+  // ── Picker reassignment ─────────────────────────────────────────────────
+  const openPickerReassign = (pickerId: string) => {
+    setPickerReassignTarget(pickerId);
+    const currentPickerId = selectedOrder?.assignedPickerId || '';
+    setConfirmingPickerReassign(pickerId !== currentPickerId);
+  };
+
+  const confirmPickerReassign = async () => {
+    if (!selectedOrder) return;
+    setReassigningPicker(true);
+    try {
+      const target = pickers.find(p => p._id === pickerReassignTarget);
+      const res = await fetch(`/api/orders/${selectedOrder._id}/reassign-picker`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pickerId:   pickerReassignTarget || null,
+          pickerName: target?.name ?? null,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(pickerReassignTarget ? `Order assigned to ${target?.name}` : 'Picker unassigned');
+        setSelectedOrder(prev => prev ? { ...prev, ...data.order } : prev);
+        setConfirmingPickerReassign(false);
+        setPickerReassignTarget('');
+        fetchOrders();
+      } else {
+        toast.error(data.error || 'Failed to reassign picker');
+      }
+    } catch (error) {
+      toast.error('An error occurred while reassigning the picker');
+    } finally {
+      setReassigningPicker(false);
     }
   };
 
@@ -454,6 +540,68 @@ export default function AdminOrdersPage() {
                     <p className="text-xs text-amber-600 mt-2">
                       This order is mid-pick — reassigning will reset it to "Confirmed" and unassign the current picker so the new branch can start fresh.
                     </p>
+                  )}
+                </div>
+
+                {/* Picker Reassignment */}
+                <div className="border border-gray-200 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <UserCog className="w-4 h-4 text-gray-500" />
+                    <h3 className="font-semibold text-brand-black">Picker</h3>
+                  </div>
+                  <p className="text-sm text-gray-600 mb-3">
+                    Currently assigned:{' '}
+                    <span className="font-semibold text-gray-900">
+                      {selectedOrder.assignedPickerName || 'Unassigned'}
+                    </span>
+                  </p>
+
+                  {['delivered', 'cancelled'].includes(selectedOrder.status) ? (
+                    <p className="text-xs text-gray-400 italic">
+                      This order is {selectedOrder.status} and can't be reassigned.
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <select
+                        className="input-field text-sm max-w-xs"
+                        value={pickerReassignTarget}
+                        onChange={(e) => openPickerReassign(e.target.value)}
+                      >
+                        <option value="">Unassign / no picker</option>
+                        {pickers.map(p => (
+                          <option key={p._id} value={p._id}>{p.name}</option>
+                        ))}
+                      </select>
+
+                      {confirmingPickerReassign && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={confirmPickerReassign}
+                            disabled={reassigningPicker}
+                            className="px-3 py-1.5 text-sm font-semibold rounded-lg bg-brand-orange text-white disabled:opacity-50"
+                          >
+                            {reassigningPicker
+                              ? 'Saving…'
+                              : pickerReassignTarget
+                                ? `Confirm assign to ${pickers.find(p => p._id === pickerReassignTarget)?.name ?? ''}`
+                                : 'Confirm unassign'}
+                          </button>
+                          <button
+                            onClick={() => { setConfirmingPickerReassign(false); setPickerReassignTarget(''); }}
+                            disabled={reassigningPicker}
+                            className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+
+                      {pickers.length === 0 && (
+                        <p className="text-xs text-gray-400 italic">
+                          No pickers found for this branch.
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
 
