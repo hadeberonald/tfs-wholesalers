@@ -8,20 +8,25 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const category    = searchParams.get('category');
-    const special     = searchParams.get('special');
-    const featured    = searchParams.get('featured');
-    const slug        = searchParams.get('slug');
-    const limit       = searchParams.get('limit');
-    const page        = searchParams.get('page');
-    const sort        = searchParams.get('sort');
-    const all         = searchParams.get('all');
-    const barcode     = searchParams.get('barcode');
-    const branchId    = searchParams.get('branchId');
-    const search      = searchParams.get('search');
-    const excludeId   = searchParams.get('excludeId');
+    const category      = searchParams.get('category');
+    const special       = searchParams.get('special');
+    const featured      = searchParams.get('featured');
+    const slug          = searchParams.get('slug');
+    const limit         = searchParams.get('limit');
+    const page          = searchParams.get('page');
+    const sort          = searchParams.get('sort');
+    const all           = searchParams.get('all');
+    const barcode       = searchParams.get('barcode');
+    const branchId      = searchParams.get('branchId');
+    const search        = searchParams.get('search');
+    const excludeId     = searchParams.get('excludeId');
     const excludeLinked = searchParams.get('excludeLinked');
-    const excludeIds  = searchParams.get('excludeIds');
+    const excludeIds    = searchParams.get('excludeIds');
+
+    // ── New: admin table filters ────────────────────────────────────────────
+    const status    = searchParams.get('status');    // 'active' | 'hidden' | null
+    const hasImage  = searchParams.get('hasImage');  // 'true' | 'false' | null
+    const sortStock = searchParams.get('sortStock'); // 'asc' | 'desc' | null
 
     const client = await clientPromise;
     const db = client.db('tfs-wholesalers');
@@ -31,6 +36,13 @@ export async function GET(request: NextRequest) {
       const auth = await requirePermission('products:read');
       if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
       if (!auth.isSuperAdmin && auth.branchId) query.branchId = auth.branchId;
+
+      // Admin table should never show linked-variant children as top-level rows
+      query.isLinkedVariant = { $ne: true };
+
+      // Status filter (Active / Hidden)
+      if (status === 'active') query.active = true;
+      if (status === 'hidden') query.active = false;
     } else {
       query.active = true;
       query.isLinkedVariant = { $ne: true };
@@ -127,6 +139,15 @@ export async function GET(request: NextRequest) {
     if (slug)    query.slug    = slug;
     if (barcode) query.$or     = [{ barcode }, { 'variants.barcode': barcode }];
 
+    // ── Image presence filter ──────────────────────────────────────────────
+    if (hasImage === 'true' || hasImage === 'false') {
+      const imgExpr = hasImage === 'true'
+        ? { $gt: [{ $size: { $ifNull: ['$images', []] } }, 0] }
+        : { $eq: [{ $size: { $ifNull: ['$images', []] } }, 0] };
+
+      query.$expr = query.$expr ? { $and: [query.$expr, imgExpr] } : imgExpr;
+    }
+
     const pageNum        = page  ? parseInt(page)  : 1;
     const limitNum       = limit ? parseInt(limit) : 25;
     const effectiveLimit = search ? Math.min(parseInt(limit || '200'), 500) : limitNum;
@@ -153,22 +174,55 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // ── Standard sorts ─────────────────────────────────────────────────────
-    let sortOption: any = { createdAt: -1, _id: -1 };
-    if      (sort === 'name')       sortOption = { name:  1, _id:  1 };
-    else if (sort === 'price-asc')  sortOption = { price: 1, _id:  1 };
-    else if (sort === 'price-desc') sortOption = { price: -1, _id: 1 };
+    const skip  = search ? 0 : (pageNum - 1) * limitNum;
+    const total = await db.collection('products').countDocuments(query);
 
-    const skip = search ? 0 : (pageNum - 1) * limitNum;
+    let products: any[];
 
-    const total    = await db.collection('products').countDocuments(query);
-    const products = await db
-      .collection('products')
-      .find(query)
-      .sort(sortOption)
-      .skip(skip)
-      .limit(effectiveLimit)
-      .toArray();
+    // ── Stock-level sort (needs aggregation: variant products sum their
+    // variants' stock levels, simple products use stockLevel directly) ──────
+    if (sortStock === 'asc' || sortStock === 'desc') {
+      const pipeline: any[] = [
+        { $match: query },
+        {
+          $addFields: {
+            totalStock: {
+              $cond: [
+                { $eq: ['$hasVariants', true] },
+                {
+                  $sum: {
+                    $map: {
+                      input: { $ifNull: ['$variants', []] },
+                      as: 'v',
+                      in: { $ifNull: ['$$v.stockLevel', 0] },
+                    },
+                  },
+                },
+                { $ifNull: ['$stockLevel', 0] },
+              ],
+            },
+          },
+        },
+        { $sort: { totalStock: sortStock === 'asc' ? 1 : -1, _id: 1 } },
+        { $skip: skip },
+        { $limit: effectiveLimit },
+      ];
+      products = await db.collection('products').aggregate(pipeline).toArray();
+    } else {
+      // ── Standard sorts ────────────────────────────────────────────────────
+      let sortOption: any = { createdAt: -1, _id: -1 };
+      if      (sort === 'name')       sortOption = { name:  1, _id:  1 };
+      else if (sort === 'price-asc')  sortOption = { price: 1, _id:  1 };
+      else if (sort === 'price-desc') sortOption = { price: -1, _id: 1 };
+
+      products = await db
+        .collection('products')
+        .find(query)
+        .sort(sortOption)
+        .skip(skip)
+        .limit(effectiveLimit)
+        .toArray();
+    }
 
     if (barcode && products.length > 0) {
       const product = products[0];

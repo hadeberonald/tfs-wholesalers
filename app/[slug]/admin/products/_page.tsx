@@ -75,6 +75,10 @@ interface Category {
   children?: Category[];
 }
 
+type StatusFilter = 'all' | 'active' | 'hidden';
+type ImageFilter  = 'all' | 'with' | 'without';
+type StockSort    = 'none' | 'asc' | 'desc';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Empty form
 // ─────────────────────────────────────────────────────────────────────────────
@@ -135,6 +139,11 @@ export default function AdminProductsPage() {
   const [totalProducts, setTotalProducts]   = useState(0);
   const [totalPages, setTotalPages]         = useState(0);
 
+  // Table filters / sort (server-side)
+  const [statusFilter, setStatusFilter]     = useState<StatusFilter>('all');
+  const [imageFilter, setImageFilter]       = useState<ImageFilter>('all');
+  const [stockSort, setStockSort]           = useState<StockSort>('none');
+
   // ── Link modal state ────────────────────────────────────────────────────────
   const [showLinkModal, setShowLinkModal]           = useState(false);
   const [linkingVariantIndex, setLinkingVariantIndex] = useState<number | null>(null);
@@ -152,6 +161,19 @@ export default function AdminProductsPage() {
   const [formData, setFormData] = useState({ ...emptyForm });
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Filter query-string helper
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const buildFilterParams = useCallback(() => {
+    const p = new URLSearchParams();
+    if (statusFilter !== 'all') p.set('status', statusFilter);
+    if (imageFilter === 'with') p.set('hasImage', 'true');
+    if (imageFilter === 'without') p.set('hasImage', 'false');
+    if (stockSort !== 'none') p.set('sortStock', stockSort);
+    return p.toString();
+  }, [statusFilter, imageFilter, stockSort]);
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Data fetching
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -161,6 +183,18 @@ export default function AdminProductsPage() {
       fetchCategories();
     }
   }, [branchLoading, branch, currentPage, itemsPerPage]);
+
+  // Re-fetch (from page 1) whenever a filter/sort changes
+  useEffect(() => {
+    if (branchLoading || !branch) return;
+    setCurrentPage(1);
+    if (isSearchMode) {
+      performSearch(searchTerm);
+    } else {
+      fetchProducts();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, imageFilter, stockSort]);
 
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
@@ -177,7 +211,10 @@ export default function AdminProductsPage() {
     setSearchLoading(true);
     setIsSearchMode(true);
     try {
-      const res = await fetch(`/api/products?all=true&search=${encodeURIComponent(query)}&limit=200`);
+      const filterQs = buildFilterParams();
+      const res = await fetch(
+        `/api/products?all=true&search=${encodeURIComponent(query)}&limit=200${filterQs ? '&' + filterQs : ''}`
+      );
       if (res.ok) {
         const data = await res.json();
         setProducts(data.products || []);
@@ -192,7 +229,10 @@ export default function AdminProductsPage() {
     if (!branch) return;
     try {
       setLoading(true);
-      const res = await fetch(`/api/products?all=true&page=${currentPage}&limit=${itemsPerPage}`);
+      const filterQs = buildFilterParams();
+      const res = await fetch(
+        `/api/products?all=true&page=${currentPage}&limit=${itemsPerPage}${filterQs ? '&' + filterQs : ''}`
+      );
       if (res.ok) {
         const data = await res.json();
         setProducts(data.products || []);
@@ -212,6 +252,14 @@ export default function AdminProductsPage() {
       }
     } catch { console.error('Failed to load categories'); }
   };
+
+  const clearFilters = () => {
+    setStatusFilter('all');
+    setImageFilter('all');
+    setStockSort('none');
+  };
+
+  const filtersActive = statusFilter !== 'all' || imageFilter !== 'all' || stockSort !== 'none';
 
   // ─────────────────────────────────────────────────────────────────────────
   // Link modal — paginated fetch
@@ -701,8 +749,8 @@ export default function AdminProductsPage() {
 
         {/* Search & Controls */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-6">
-          <div className="flex flex-col md:flex-row gap-3">
-            <div className="relative flex-1">
+          <div className="flex flex-col md:flex-row flex-wrap gap-3">
+            <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               {searchLoading && (
                 <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-orange-400 animate-spin" />
@@ -723,6 +771,58 @@ export default function AdminProductsPage() {
                 </button>
               )}
             </div>
+
+            {/* Status filter */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500 whitespace-nowrap">Status:</span>
+              <select
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value as StatusFilter)}
+                className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+              >
+                <option value="all">All</option>
+                <option value="active">Active</option>
+                <option value="hidden">Hidden</option>
+              </select>
+            </div>
+
+            {/* Image filter */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500 whitespace-nowrap">Image:</span>
+              <select
+                value={imageFilter}
+                onChange={e => setImageFilter(e.target.value as ImageFilter)}
+                className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+              >
+                <option value="all">All</option>
+                <option value="with">Has image</option>
+                <option value="without">No image</option>
+              </select>
+            </div>
+
+            {/* Stock sort */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500 whitespace-nowrap">Stock:</span>
+              <select
+                value={stockSort}
+                onChange={e => setStockSort(e.target.value as StockSort)}
+                className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+              >
+                <option value="none">Default order</option>
+                <option value="asc">Low → High</option>
+                <option value="desc">High → Low</option>
+              </select>
+            </div>
+
+            {filtersActive && (
+              <button
+                onClick={clearFilters}
+                className="text-xs text-orange-500 hover:text-orange-700 font-semibold flex items-center gap-1 px-2"
+              >
+                <RefreshCw className="w-3 h-3" /> Clear filters
+              </button>
+            )}
+
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-500 whitespace-nowrap">Show:</span>
               <select
@@ -736,6 +836,7 @@ export default function AdminProductsPage() {
               </select>
               <span className="text-sm text-gray-500 whitespace-nowrap">per page</span>
             </div>
+
             {!isSuperAdmin && (
               <div className="flex items-center gap-1.5 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl">
                 <Lock className="w-3.5 h-3.5 text-amber-600" />
@@ -769,17 +870,29 @@ export default function AdminProductsPage() {
           <div className="bg-white rounded-2xl p-16 text-center border border-gray-200">
             <Package className="w-14 h-14 text-gray-300 mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-gray-900 mb-2">
-              {searchTerm ? `No results for "${searchTerm}"` : 'No products yet'}
+              {searchTerm ? `No results for "${searchTerm}"` : filtersActive ? 'No products match these filters' : 'No products yet'}
             </h3>
             <p className="text-gray-500 text-sm mb-6">
-              {searchTerm ? 'Try different keywords or tags' : 'Add your first product to get started'}
+              {searchTerm
+                ? 'Try different keywords or tags'
+                : filtersActive
+                ? 'Try adjusting or clearing your filters'
+                : 'Add your first product to get started'}
             </p>
-            {!searchTerm && (
+            {!searchTerm && !filtersActive && (
               <button
                 onClick={() => setShowModal(true)}
                 className="inline-flex items-center gap-2 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl transition-colors"
               >
                 <Plus className="w-4 h-4" /> Add Product
+              </button>
+            )}
+            {filtersActive && (
+              <button
+                onClick={clearFilters}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-colors"
+              >
+                <RefreshCw className="w-4 h-4" /> Clear filters
               </button>
             )}
           </div>
@@ -802,7 +915,8 @@ export default function AdminProductsPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {products
-                      // Hide child linked variants from the table — they appear under their parent
+                      // isLinkedVariant children are already excluded server-side for all=true,
+                      // this filter is kept as a defensive fallback.
                       .filter(p => !p.isLinkedVariant)
                       .map((product) => {
                         const stock = getTotalStock(product);
