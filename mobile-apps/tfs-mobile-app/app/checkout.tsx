@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
   MapPin, ChevronLeft, ChevronRight, Package, ShoppingBag,
-  Truck, AlertCircle, CheckCircle, Tag, Phone, XCircle,
+  Truck, AlertCircle, CheckCircle, Tag, Phone, XCircle, X,
 } from 'lucide-react-native';
 import { useStore } from '@/lib/store';
 import api from '@/lib/api';
@@ -40,6 +40,14 @@ function specialTypeBadge(type?: string) {
 function isValidPhone(phone: string): boolean {
   const cleaned = phone.replace(/[\s\-()]/g, '');
   return /^(0\d{9}|\+27\d{9})$/.test(cleaned);
+}
+
+interface AppliedPromo {
+  id: string;
+  code: string;
+  type: 'free_delivery' | 'percentage' | 'fixed_amount';
+  discountAppliesTo: 'delivery' | 'subtotal';
+  discountAmount: number;
 }
 
 // ─── Out-of-range modal ───────────────────────────────────────────────────────
@@ -109,6 +117,12 @@ export default function CheckoutScreen() {
   const [phoneError, setPhoneError]           = useState<string>('');
   const [showOutOfRange, setShowOutOfRange]   = useState(false);
 
+  // ── Promo code state ──────────────────────────────────────────────────────
+  const [promoInput, setPromoInput]       = useState('');
+  const [appliedPromo, setAppliedPromo]   = useState<AppliedPromo | null>(null);
+  const [promoError, setPromoError]       = useState('');
+  const [applyingPromo, setApplyingPromo] = useState(false);
+
   // Pull the max delivery radius from branch settings
   const maxDeliveryRadius: number =
     (branch?.settings as any)?.deliveryPricing?.farRadius ?? 15;
@@ -132,11 +146,15 @@ export default function CheckoutScreen() {
   );
 
   const subtotal = getTotal();
-  const total    = subtotal + deliveryFee;
 
   const totalSavings = items.reduce(
     (s, i) => s + ((i.specialDiscount || 0) * i.quantity), 0,
   );
+
+  // ── Promo-adjusted totals ─────────────────────────────────────────────────
+  const effectiveDeliveryFee = appliedPromo?.type === 'free_delivery' ? 0 : deliveryFee;
+  const subtotalDiscount = appliedPromo && appliedPromo.type !== 'free_delivery' ? appliedPromo.discountAmount : 0;
+  const total = Math.max(0, subtotal - subtotalDiscount + effectiveDeliveryFee);
 
   const regularItems = items.filter(i => !i.isBonusItem && !i.isFreeItem && !i.isMultibuyBonus && !i.isComboItem);
   const bonusItems   = items.filter(i => i.isBonusItem || i.isFreeItem || i.isMultibuyBonus);
@@ -150,6 +168,52 @@ export default function CheckoutScreen() {
   const handlePhoneChange = (text: string) => {
     setPhone(text);
     if (phoneError) setPhoneError('');
+  };
+
+  // ── Promo code handlers ───────────────────────────────────────────────────
+  const handleApplyPromo = async () => {
+    const code = promoInput.trim();
+    if (!code) {
+      setPromoError('Please enter a promo code');
+      return;
+    }
+    const branchId = branch?._id || branch?.id;
+    if (!branchId) {
+      setPromoError('Branch not loaded — please try again');
+      return;
+    }
+
+    setApplyingPromo(true);
+    setPromoError('');
+
+    try {
+      const res = await api.post('/api/promo-codes/validate', {
+        branchId,
+        code,
+        subtotal,
+        email: user?.email,
+      });
+
+      const data = res.data;
+      setAppliedPromo({
+        id: data.promoCode.id,
+        code: data.promoCode.code,
+        type: data.promoCode.type,
+        discountAppliesTo: data.discountAppliesTo,
+        discountAmount: data.discountAmount,
+      });
+      setPromoInput('');
+    } catch (e: any) {
+      setAppliedPromo(null);
+      setPromoError(e?.response?.data?.error || 'Invalid promo code');
+    } finally {
+      setApplyingPromo(false);
+    }
+  };
+
+  const handleRemovePromo = () => {
+    setAppliedPromo(null);
+    setPromoError('');
   };
 
   const placeOrder = async () => {
@@ -243,7 +307,18 @@ export default function CheckoutScreen() {
           country:    deliveryAddress.country,
         },
         subtotal:         parseFloat(subtotal.toFixed(2)),
-        deliveryFee:      parseFloat(deliveryFee.toFixed(2)),
+        deliveryFee:      parseFloat(effectiveDeliveryFee.toFixed(2)),
+        // Promo details — the /api/orders route uses this to increment
+        // usedCount and log a promoCodeUsages record. null if none applied.
+        promoCode: appliedPromo ? {
+          id: appliedPromo.id,
+          code: appliedPromo.code,
+          type: appliedPromo.type,
+          discountAppliesTo: appliedPromo.discountAppliesTo,
+          discountAmount: appliedPromo.discountAppliesTo === 'delivery'
+            ? (deliveryFee - effectiveDeliveryFee)
+            : subtotalDiscount,
+        } : null,
         total:            parseFloat(total.toFixed(2)),
         totalSavings:     parseFloat(totalSavings.toFixed(2)),
         deliveryAddress:  deliveryAddress.formattedAddress,
@@ -484,6 +559,63 @@ export default function CheckoutScreen() {
             </View>
           )}
 
+          {/* ── Promo code ───────────────────────────────────────────────── */}
+          <View style={styles.sectionCard}>
+            <View style={styles.promoHeaderRow}>
+              <Tag color="#FF6B35" size={16} />
+              <Text style={styles.sectionTitle}>Promo Code</Text>
+            </View>
+
+            {appliedPromo ? (
+              <View style={styles.promoAppliedBox}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.promoAppliedCode}>{appliedPromo.code}</Text>
+                  <Text style={styles.promoAppliedDesc}>
+                    {appliedPromo.type === 'free_delivery'
+                      ? 'Free delivery applied'
+                      : `R${appliedPromo.discountAmount.toFixed(2)} off applied`}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={handleRemovePromo} style={styles.promoRemoveBtn}>
+                  <X color="#059669" size={18} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                <View style={styles.promoInputRow}>
+                  <TextInput
+                    style={styles.promoInput}
+                    placeholder="Enter code"
+                    placeholderTextColor="#9ca3af"
+                    autoCapitalize="characters"
+                    value={promoInput}
+                    onChangeText={(t) => { setPromoInput(t.toUpperCase()); if (promoError) setPromoError(''); }}
+                    returnKeyType="done"
+                    onSubmitEditing={handleApplyPromo}
+                  />
+                  <TouchableOpacity
+                    onPress={handleApplyPromo}
+                    disabled={applyingPromo || !promoInput.trim()}
+                    style={[
+                      styles.promoApplyBtn,
+                      (applyingPromo || !promoInput.trim()) && styles.promoApplyBtnDisabled,
+                    ]}
+                  >
+                    {applyingPromo
+                      ? <ActivityIndicator color="#fff" size="small" />
+                      : <Text style={styles.promoApplyBtnText}>Apply</Text>}
+                  </TouchableOpacity>
+                </View>
+                {promoError ? (
+                  <View style={styles.phoneErrorRow}>
+                    <AlertCircle size={13} color="#ef4444" />
+                    <Text style={styles.phoneErrorText}>{promoError}</Text>
+                  </View>
+                ) : null}
+              </>
+            )}
+          </View>
+
           {/* ── Order summary ─────────────────────────────────────────────── */}
           <View style={styles.sectionCard}>
             <Text style={styles.sectionTitle}>Order Summary</Text>
@@ -497,9 +629,22 @@ export default function CheckoutScreen() {
                 <Text style={[styles.summaryValue, { color: '#10b981' }]}>-R{totalSavings.toFixed(2)}</Text>
               </View>
             )}
+            {subtotalDiscount > 0 && (
+              <View style={styles.summaryRow}>
+                <Text style={[styles.summaryLabel, { color: '#10b981' }]}>Promo Discount</Text>
+                <Text style={[styles.summaryValue, { color: '#10b981' }]}>-R{subtotalDiscount.toFixed(2)}</Text>
+              </View>
+            )}
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Delivery</Text>
-              <Text style={styles.summaryValue}>R{deliveryFee.toFixed(2)}</Text>
+              {appliedPromo?.type === 'free_delivery' ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={styles.deliveryStrikethrough}>R{deliveryFee.toFixed(2)}</Text>
+                  <Text style={[styles.summaryValue, { color: '#10b981' }]}>FREE</Text>
+                </View>
+              ) : (
+                <Text style={styles.summaryValue}>R{effectiveDeliveryFee.toFixed(2)}</Text>
+              )}
             </View>
             <View style={[styles.summaryRow, styles.summaryTotal]}>
               <Text style={styles.summaryTotalLabel}>Total</Text>
@@ -668,12 +813,36 @@ const styles = StyleSheet.create({
   },
   bonusNoticeText: { flex: 1, fontSize: 13, color: '#92400e' },
 
+  // ── Promo code ─────────────────────────────────────────────────────────────
+  promoHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
+  promoAppliedBox: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#f0fdf4', borderWidth: 1.5, borderColor: '#bbf7d0',
+    borderRadius: 12, padding: 14,
+  },
+  promoAppliedCode: { fontSize: 14, fontWeight: '700', color: '#065f46' },
+  promoAppliedDesc: { fontSize: 12, color: '#059669', marginTop: 2 },
+  promoRemoveBtn:   { padding: 6 },
+  promoInputRow:    { flexDirection: 'row', gap: 8 },
+  promoInput: {
+    flex: 1, fontSize: 14, color: '#1f2937', fontWeight: '500',
+    borderWidth: 1.5, borderColor: '#e5e7eb', borderRadius: 10,
+    paddingHorizontal: 14, paddingVertical: 10, backgroundColor: '#f9fafb',
+  },
+  promoApplyBtn: {
+    backgroundColor: '#1f2937', borderRadius: 10, paddingHorizontal: 18,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  promoApplyBtnDisabled: { opacity: 0.5 },
+  promoApplyBtnText:     { color: '#fff', fontWeight: '700', fontSize: 13 },
+
   summaryRow:        { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
   summaryLabel:      { fontSize: 14, color: '#6b7280' },
   summaryValue:      { fontSize: 14, fontWeight: '600', color: '#1f2937' },
   summaryTotal:      { borderTopWidth: 1, borderTopColor: '#e5e7eb', paddingTop: 12, marginTop: 4, marginBottom: 0 },
   summaryTotalLabel: { fontSize: 16, fontWeight: '700', color: '#1f2937' },
   summaryTotalValue: { fontSize: 22, fontWeight: '800', color: '#FF6B35' },
+  deliveryStrikethrough: { fontSize: 13, color: '#9ca3af', textDecorationLine: 'line-through' },
 
   deliveryInfoRow: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 10,

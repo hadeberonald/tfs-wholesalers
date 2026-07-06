@@ -47,6 +47,7 @@ import {
   Receipt,
   Contact2,
   BookOpen,
+  Percent,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -194,6 +195,13 @@ export const ROUTE_MANIFEST: RouteManifestEntry[] = [
     group: 'Marketing',
     icon: BookOpen,
     href: '/admin/catalogues',
+  },
+  {
+    key: 'promo-codes',
+    label: 'Promo Codes',
+    group: 'Marketing',
+    icon: Percent,
+    href: '/admin/promo-codes',
   },
   {
     key: 'nps',
