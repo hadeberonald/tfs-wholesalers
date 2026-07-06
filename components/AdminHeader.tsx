@@ -235,6 +235,14 @@ export default function AdminHeader() {
     [groupedRoutes],
   );
 
+  // Tallest column determines how much room the nav needs when expanded,
+  // so it scales automatically instead of clipping when a group grows.
+  const maxItemsPerGroup = useMemo(
+    () => Math.max(0, ...activeGroups.map(g => groupedRoutes[g]?.length ?? 0)),
+    [activeGroups, groupedRoutes],
+  );
+  const navMaxHeight = 18 + maxItemsPerGroup * 26 + 16 + 8;
+
   const isActive = (href: string) => {
     const full = slug ? `/${slug}${href}` : href;
     if (href === '/admin') return pathname === full;
@@ -357,9 +365,13 @@ export default function AdminHeader() {
           {/* ── Desktop nav ── */}
           {!loading && activeGroups.length > 0 && (
             <div
-              className={`hidden md:block overflow-hidden transition-all duration-200 ease-in-out border-t border-white/10 ${
-                isNavExpanded ? 'max-h-40 py-2 opacity-100' : 'max-h-0 py-0 opacity-0'
-              }`}
+              className="hidden md:block overflow-hidden transition-all duration-200 ease-in-out border-t border-white/10"
+              style={{
+                maxHeight: isNavExpanded ? `${navMaxHeight}px` : '0px',
+                paddingTop: isNavExpanded ? '0.5rem' : 0,
+                paddingBottom: isNavExpanded ? '0.5rem' : 0,
+                opacity: isNavExpanded ? 1 : 0,
+              }}
             >
               <div
                 className="grid gap-x-4 gap-y-0.5"
