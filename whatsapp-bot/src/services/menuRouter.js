@@ -2,6 +2,7 @@ const menus = require("../data/menus");
 const { sendText, sendList, sendDocument } = require("./whatsapp");
 const { getSession, setSession } = require("./sessionStore");
 const handoff = require("./handoff");
+const PromoDocument = require("../models/PromoDocument");
 
 const GREETING_WORDS = ["hi", "hello", "hey", "menu", "start", "hi there"];
 const MENU_OVERRIDE_WORDS = ["menu", "main menu"]; // wins even mid-handoff
@@ -14,6 +15,24 @@ function extractSelection(message) {
     return { kind: "text", value: message.text.body.trim() };
   }
   return { kind: "unknown" };
+}
+
+/**
+ * Sends whichever file an admin most recently uploaded for `key` (via
+ * /api/admin/promo-files on the main app), falling back to plain text if
+ * nothing has been uploaded yet so this never breaks the menu flow.
+ */
+async function sendPromoDocument(waId, key, fallbackText) {
+  const doc = await PromoDocument.findOne({ key }).lean();
+  if (doc) {
+    await sendDocument(waId, {
+      mediaLink: doc.fileUrl,
+      filename: doc.filename,
+      caption: doc.caption || undefined,
+    });
+  } else {
+    await sendText(waId, fallbackText);
+  }
 }
 
 /**
@@ -89,15 +108,10 @@ async function routeRowSelection(waId, rowId) {
 
     case "retail_promo":
     case "wholesale_promo": {
-      const doc = menus.documentReplies[rowId];
-      if (doc) {
-        await sendDocument(waId, {
-          mediaLink: doc.mediaLink,
-          mediaId: doc.mediaId,
-          filename: doc.filename,
-          caption: doc.caption,
-        });
-      }
+      const fallback =
+        menus.textReplies[rowId] ||
+        "Sorry, this promotion isn't available right now. Please check back soon.";
+      await sendPromoDocument(waId, rowId, fallback);
       await sendList(waId, menus.mainMenu);
       await setSession(waId, { currentMenu: "main_menu" });
       return;
@@ -115,10 +129,14 @@ async function routeRowSelection(waId, rowId) {
       await handoff.startHandoff(waId, "support", "Customer requested support from the main menu.");
       return;
 
-    case "location":
-    case "specials": {
-      const text = menus.textReplies[rowId];
-      await sendText(waId, text || menus.fallbackText);
+    case "specials":
+      await sendPromoDocument(waId, "daily_specials", menus.textReplies.specials);
+      await sendList(waId, menus.mainMenu);
+      await setSession(waId, { currentMenu: "main_menu" });
+      return;
+
+    case "location": {
+      await sendText(waId, menus.textReplies.location || menus.fallbackText);
       await sendList(waId, menus.mainMenu);
       await setSession(waId, { currentMenu: "main_menu" });
       return;
