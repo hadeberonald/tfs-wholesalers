@@ -1,0 +1,134 @@
+const menus = require("../data/menus");
+const { sendText, sendList, sendDocument } = require("./whatsapp");
+const { getSession, setSession } = require("./sessionStore");
+const handoff = require("./handoff");
+
+const GREETING_WORDS = ["hi", "hello", "hey", "menu", "start", "hi there"];
+const MENU_OVERRIDE_WORDS = ["menu", "main menu"]; // wins even mid-handoff
+
+function extractSelection(message) {
+  if (message.type === "interactive" && message.interactive?.type === "list_reply") {
+    return { kind: "list_reply", id: message.interactive.list_reply.id };
+  }
+  if (message.type === "text") {
+    return { kind: "text", value: message.text.body.trim() };
+  }
+  return { kind: "unknown" };
+}
+
+/**
+ * Main entry point for messages coming FROM CUSTOMERS (agent messages are
+ * routed separately in webhook.js, straight to handoff.relayAgentToCustomer).
+ */
+async function handleIncomingMessage(waId, message) {
+  const selection = extractSelection(message);
+  const session = await getSession(waId);
+
+  // "menu" always wins, even mid-conversation with a human agent —
+  // this is the fix for the "stuck until reset" problem.
+  if (selection.kind === "text" && MENU_OVERRIDE_WORDS.includes(selection.value.toLowerCase())) {
+    if (session.mode === "handoff") {
+      await handoff.customerExitsHandoff(waId);
+    }
+    await sendList(waId, menus.mainMenu);
+    await setSession(waId, { currentMenu: "main_menu" });
+    return;
+  }
+
+  // While in a human handoff, everything else the customer types just
+  // relays straight to whichever agent owns the conversation.
+  if (session.mode === "handoff") {
+    if (selection.kind === "text") {
+      await handoff.relayCustomerToAgent(waId, selection.value);
+    }
+    return;
+  }
+
+  // Mid order-name-capture: the next free text IS their name, not a menu tap
+  if (session.currentMenu === "awaiting_order_name" && selection.kind === "text") {
+    const name = selection.value;
+    await setSession(waId, { orderName: name });
+    await handoff.startHandoff(
+      waId,
+      "orders",
+      `Order request from ${name}. Waiting on order details.`,
+      { name }
+    );
+    return;
+  }
+
+  // Greeting / explicit "menu" from a fresh bot-mode session
+  if (selection.kind === "text" && GREETING_WORDS.includes(selection.value.toLowerCase())) {
+    await sendText(waId, menus.welcomeText);
+    await sendList(waId, menus.mainMenu);
+    await setSession(waId, { currentMenu: "main_menu" });
+    return;
+  }
+
+  if (selection.kind === "list_reply") {
+    await routeRowSelection(waId, selection.id);
+    return;
+  }
+
+  // Free text with no active flow -> fallback
+  await sendText(waId, menus.fallbackText);
+  await sendList(waId, menus.mainMenu);
+}
+
+async function routeRowSelection(waId, rowId) {
+  switch (rowId) {
+    case "main_menu":
+      await sendList(waId, menus.mainMenu);
+      await setSession(waId, { currentMenu: "main_menu" });
+      return;
+
+    case "promotions":
+      await sendList(waId, menus.promotionsMenu);
+      await setSession(waId, { currentMenu: "promotions_menu" });
+      return;
+
+    case "retail_promo":
+    case "wholesale_promo": {
+      const doc = menus.documentReplies[rowId];
+      if (doc) {
+        await sendDocument(waId, {
+          mediaLink: doc.mediaLink,
+          mediaId: doc.mediaId,
+          filename: doc.filename,
+          caption: doc.caption,
+        });
+      }
+      await sendList(waId, menus.mainMenu);
+      await setSession(waId, { currentMenu: "main_menu" });
+      return;
+    }
+
+    // Order flow starts here — ask for name, wait for the reply as free text
+    case "order":
+      await sendText(waId, menus.textReplies.order);
+      await setSession(waId, { currentMenu: "awaiting_order_name" });
+      return;
+
+    // Support hands off immediately — no menu prompt needed first
+    case "support":
+      await sendText(waId, menus.textReplies.support);
+      await handoff.startHandoff(waId, "support", "Customer requested support from the main menu.");
+      return;
+
+    case "location":
+    case "specials": {
+      const text = menus.textReplies[rowId];
+      await sendText(waId, text || menus.fallbackText);
+      await sendList(waId, menus.mainMenu);
+      await setSession(waId, { currentMenu: "main_menu" });
+      return;
+    }
+
+    default:
+      await sendText(waId, menus.fallbackText);
+      await sendList(waId, menus.mainMenu);
+      await setSession(waId, { currentMenu: "main_menu" });
+  }
+}
+
+module.exports = { handleIncomingMessage };

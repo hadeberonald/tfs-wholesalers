@@ -1,0 +1,19 @@
+{
+  "name": "whatsapp-cloud-api-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp Cloud API chatbot with interactive menus (Node.js/Express)",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node test/simulate.js && node test/simulate_queue.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "form-data": "^4.0.0",
+    "mongoose": "^8.5.0"
+  }
+}
