@@ -15,26 +15,34 @@ interface PromoDoc {
   uploadedAt: string;
 }
 
-const SLOTS: { key: PromoKey; label: string; hint: string }[] = [
+const SLOTS: { key: PromoKey; label: string; hint: string; defaultCaption: string }[] = [
   {
     key: 'retail_promo',
     label: 'Retail Promotion',
     hint: 'Sent when a customer selects Promotions → Retail Promotion',
+    defaultCaption: 'Retail Promotion',
   },
   {
     key: 'wholesale_promo',
     label: 'Wholesale Promotion',
     hint: 'Sent when a customer selects Promotions → Wholesale Promotion',
+    defaultCaption: 'Wholesale Promotion',
   },
   {
     key: 'daily_specials',
     label: 'Daily Specials',
     hint: 'Sent when a customer selects Daily Specials from the main menu',
+    defaultCaption: 'Daily Specials',
   },
 ];
 
 export default function PromoFilesPage() {
   const [docs, setDocs] = useState<Record<string, PromoDoc>>({});
+  const [captions, setCaptions] = useState<Record<PromoKey, string>>({
+    retail_promo: '',
+    wholesale_promo: '',
+    daily_specials: '',
+  });
   const [loading, setLoading] = useState(true);
   const [uploadingKey, setUploadingKey] = useState<PromoKey | null>(null);
 
@@ -52,6 +60,11 @@ export default function PromoFilesPage() {
           byKey[d.key] = d;
         });
         setDocs(byKey);
+        setCaptions(prev => ({
+          retail_promo: byKey.retail_promo?.caption ?? prev.retail_promo,
+          wholesale_promo: byKey.wholesale_promo?.caption ?? prev.wholesale_promo,
+          daily_specials: byKey.daily_specials?.caption ?? prev.daily_specials,
+        }));
       } else {
         toast.error('Failed to load promo files');
       }
@@ -97,6 +110,7 @@ export default function PromoFilesPage() {
           key,
           fileUrl,
           filename: file.name,
+          caption: captions[key],
         }),
       });
 
@@ -107,6 +121,7 @@ export default function PromoFilesPage() {
 
       const data = await res.json();
       setDocs(prev => ({ ...prev, [key]: data.document }));
+      setCaptions(prev => ({ ...prev, [key]: data.document.caption }));
       toast.success('File uploaded — the bot will send this immediately');
     } catch (error: any) {
       toast.error(error.message || 'Upload failed');
@@ -153,6 +168,21 @@ export default function PromoFilesPage() {
                 ) : (
                   <span className="text-sm text-amber-600">No file uploaded yet — bot will send a fallback text message</span>
                 )}
+
+                <div className="mt-2">
+                  <label className="block text-xs text-gray-500 mb-1">
+                    Caption (shown under the file on WhatsApp)
+                  </label>
+                  <input
+                    type="text"
+                    value={captions[slot.key]}
+                    onChange={e =>
+                      setCaptions(prev => ({ ...prev, [slot.key]: e.target.value }))
+                    }
+                    placeholder={slot.defaultCaption}
+                    className="w-full max-w-xs text-sm border rounded-md px-2 py-1"
+                  />
+                </div>
               </div>
 
               <label className="shrink-0 cursor-pointer inline-flex items-center gap-2 px-3 py-2 rounded-md border text-sm hover:bg-gray-50">

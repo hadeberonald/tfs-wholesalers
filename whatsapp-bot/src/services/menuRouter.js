@@ -1,5 +1,11 @@
 const menus = require("../data/menus");
-const { sendText, sendList, sendDocument } = require("./whatsapp");
+const {
+  sendText,
+  sendList,
+  sendDocument,
+  uploadMediaFromUrl,
+  inferMimeType,
+} = require("./whatsapp");
 const { getSession, setSession } = require("./sessionStore");
 const handoff = require("./handoff");
 const PromoDocument = require("../models/PromoDocument");
@@ -21,17 +27,38 @@ function extractSelection(message) {
  * Sends whichever file an admin most recently uploaded for `key` (via
  * /api/admin/promo-files on the main app), falling back to plain text if
  * nothing has been uploaded yet so this never breaks the menu flow.
+ *
+ * We download the file from Cloudinary and upload it to Meta's Media API
+ * first, then send it by media_id — sending by public `link` directly can
+ * silently fail to deliver (Meta's fetcher can reject the URL for reasons
+ * that never show up as an error in our own logs), so this is the reliable
+ * path. If anything in that chain fails, we log it clearly and let the
+ * customer know instead of the message just vanishing.
  */
 async function sendPromoDocument(waId, key, fallbackText) {
   const doc = await PromoDocument.findOne({ key }).lean();
-  if (doc) {
+  if (!doc) {
+    await sendText(waId, fallbackText);
+    return;
+  }
+
+  try {
+    const mimeType = inferMimeType(doc.filename);
+    const mediaId = await uploadMediaFromUrl(doc.fileUrl, mimeType, doc.filename);
     await sendDocument(waId, {
-      mediaLink: doc.fileUrl,
+      mediaId,
       filename: doc.filename,
       caption: doc.caption || undefined,
     });
-  } else {
-    await sendText(waId, fallbackText);
+  } catch (err) {
+    console.error(
+      `sendPromoDocument failed for key="${key}":`,
+      err.response?.data || err.message || err
+    );
+    await sendText(
+      waId,
+      "Sorry, we couldn't send that file right now. Please try again shortly, or type \"menu\" to go back."
+    );
   }
 }
 

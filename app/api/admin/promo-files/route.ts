@@ -6,6 +6,15 @@ export const dynamic = 'force-dynamic';
 const VALID_KEYS = ['retail_promo', 'wholesale_promo', 'daily_specials'] as const;
 type PromoKey = (typeof VALID_KEYS)[number];
 
+// Matches the captions that used to be hardcoded in menus.js — used whenever
+// the admin doesn't type a custom caption, so the delivered message looks
+// the same as it always has by default.
+const DEFAULT_CAPTIONS: Record<PromoKey, string> = {
+  retail_promo: 'Retail Promotion',
+  wholesale_promo: 'Wholesale Promotion',
+  daily_specials: 'Daily Specials',
+};
+
 /**
  * The WhatsApp bot's Mongoose models/connection live in whatsapp-bot/src.
  * Since server.ts runs Next.js and the bot in the SAME Node process,
@@ -54,7 +63,13 @@ export async function POST(request: NextRequest) {
   const PromoDocument = await getPromoDocumentModel();
   const doc = await PromoDocument.findOneAndUpdate(
     { key: key as PromoKey },
-    { key, fileUrl, filename, caption: caption || '', uploadedAt: new Date() },
+    {
+      key,
+      fileUrl,
+      filename,
+      caption: caption || DEFAULT_CAPTIONS[key as PromoKey],
+      uploadedAt: new Date(),
+    },
     { upsert: true, new: true }
   ).lean();
 

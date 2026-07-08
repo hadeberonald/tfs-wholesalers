@@ -75,8 +75,55 @@ async function uploadMedia(filePath, mimeType = "application/pdf") {
 }
 
 /**
+ * Download a file from a public URL (e.g. a Cloudinary secure_url) and
+ * upload it straight to Meta's Media API, returning a media_id.
+ *
+ * Prefer this over sending documents by public `link` — link-based delivery
+ * can silently fail to reach the customer if Meta's fetcher can't retrieve
+ * the URL cleanly (redirects, unexpected Content-Type, etc.), and that
+ * failure never surfaces as an error in our logs since the initial
+ * /messages call still returns 200 regardless. Uploading the bytes
+ * directly to Meta first avoids that whole class of failure.
+ */
+async function uploadMediaFromUrl(url, mimeType, filename) {
+  const downloadRes = await axios.get(url, { responseType: "arraybuffer" });
+
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append("file", Buffer.from(downloadRes.data), {
+    contentType: mimeType,
+    filename: filename || "file",
+  });
+
+  const res = await axios.post(`${BASE_URL}/media`, form, {
+    headers: {
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      ...form.getHeaders(),
+    },
+  });
+  return res.data.id; // media_id
+}
+
+/**
+ * Guess a WhatsApp-acceptable MIME type from a filename's extension —
+ * used when we only have a filename (e.g. from the PromoDocument record)
+ * and need to tell Meta's Media API what content type it's receiving.
+ */
+function inferMimeType(filename = "") {
+  const ext = (filename.split(".").pop() || "").toLowerCase();
+  const map = {
+    pdf: "application/pdf",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp",
+  };
+  return map[ext] || "application/octet-stream";
+}
+
+/**
  * Send a document either by a public mediaLink URL, or by mediaId
- * (from uploadMedia) if you're hosting the PDF privately.
+ * (from uploadMedia / uploadMediaFromUrl) if you're hosting the file privately.
  */
 async function sendDocument(to, { mediaLink, mediaId, filename, caption }) {
   const documentPayload = filename ? { filename } : {};
@@ -104,4 +151,12 @@ async function markAsRead(messageId) {
   });
 }
 
-module.exports = { sendText, sendList, sendDocument, uploadMedia, markAsRead };
+module.exports = {
+  sendText,
+  sendList,
+  sendDocument,
+  uploadMedia,
+  uploadMediaFromUrl,
+  inferMimeType,
+  markAsRead,
+};

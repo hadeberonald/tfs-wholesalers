@@ -71,7 +71,7 @@ module.exports = {
     support:
       "How can we help you?\n\nPlease reply with any request/account query/complaint below, and our support team will receive your message.",
     specials:
-      "🥳 Daily specials\nCheck back each morning — today's specials will be posted here.",
+      "*Daily Specials* 🥳\nCheck back each morning — today's specials will be posted here.",
     retail_promo:
       "Sorry, the retail promotion isn't available right now. Please check back soon.",
     wholesale_promo:
