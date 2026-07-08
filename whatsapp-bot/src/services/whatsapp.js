@@ -86,7 +86,27 @@ async function uploadMedia(filePath, mimeType = "application/pdf") {
  * directly to Meta first avoids that whole class of failure.
  */
 async function uploadMediaFromUrl(url, mimeType, filename) {
-  const downloadRes = await axios.get(url, { responseType: "arraybuffer" });
+  let downloadRes;
+  try {
+    downloadRes = await axios.get(url, {
+      responseType: "arraybuffer",
+      // Cloudinary (and some hosts) return an HTML/JSON error body with a
+      // non-2xx status instead of throwing at the network layer — treat
+      // that the same as a thrown error so it's caught below.
+      validateStatus: (status) => status >= 200 && status < 300,
+    });
+  } catch (err) {
+    // When responseType is "arraybuffer", axios puts the ERROR body in the
+    // same format too — so err.response.data is a raw Buffer, not JSON,
+    // and logging it directly just prints an unreadable "<Buffer ...>".
+    // Decode it back to text so the real message (e.g. Cloudinary's
+    // "401 Unauthorized: PDF/ZIP delivery disabled") is actually visible.
+    const raw = err.response?.data;
+    const readable = Buffer.isBuffer(raw) ? raw.toString("utf-8").slice(0, 500) : err.message;
+    throw new Error(
+      `Failed to download file from ${url} (status ${err.response?.status || "?"}): ${readable}`
+    );
+  }
 
   const form = new FormData();
   form.append("messaging_product", "whatsapp");
@@ -95,13 +115,19 @@ async function uploadMediaFromUrl(url, mimeType, filename) {
     filename: filename || "file",
   });
 
-  const res = await axios.post(`${BASE_URL}/media`, form, {
-    headers: {
-      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-      ...form.getHeaders(),
-    },
-  });
-  return res.data.id; // media_id
+  try {
+    const res = await axios.post(`${BASE_URL}/media`, form, {
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+        ...form.getHeaders(),
+      },
+    });
+    return res.data.id; // media_id
+  } catch (err) {
+    throw new Error(
+      `Meta media upload failed: ${JSON.stringify(err.response?.data || err.message)}`
+    );
+  }
 }
 
 /**

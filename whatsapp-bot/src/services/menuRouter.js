@@ -51,10 +51,7 @@ async function sendPromoDocument(waId, key, fallbackText) {
       caption: doc.caption || undefined,
     });
   } catch (err) {
-    console.error(
-      `sendPromoDocument failed for key="${key}":`,
-      err.response?.data || err.message || err
-    );
+    console.error(`sendPromoDocument failed for key="${key}": ${err.message || err}`);
     await sendText(
       waId,
       "Sorry, we couldn't send that file right now. Please try again shortly, or type \"menu\" to go back."
