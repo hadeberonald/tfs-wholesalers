@@ -1,6 +1,8 @@
 const axios = require("axios");
 const FormData = require("form-data");
 const fs = require("fs");
+const { ORDERS_AGENT, SUPPORT_AGENT } = require("../config/agents");
+const { logEvent } = require("./analytics");
 
 const {
   WHATSAPP_TOKEN,
@@ -18,6 +20,24 @@ const client = axios.create({
   },
 });
 
+// Messages TO agents are already counted via agent_message/customer_message
+// in handoff.js — logging them again here would double-count "messages sent".
+const AGENT_SET = new Set([ORDERS_AGENT, SUPPORT_AGENT].filter(Boolean));
+
+/**
+ * Fire-and-forget outbound logging. Never let analytics logging break an
+ * actual send — logEvent already swallows its own errors internally, but
+ * we still wrap in case that contract ever changes.
+ */
+async function logOutbound(to, kind, messageType) {
+  if (AGENT_SET.has(to)) return; // agent-directed, not customer-facing analytics
+  try {
+    await logEvent("message_sent", { waId: to, meta: { kind, messageType } });
+  } catch (err) {
+    console.error("logOutbound failed:", err.message);
+  }
+}
+
 /**
  * Send a plain text message. Returns the sent message's id (wamid) so
  * callers can remember "this message was about customer X" — needed for
@@ -30,6 +50,7 @@ async function sendText(to, body) {
     type: "text",
     text: { body },
   });
+  await logOutbound(to, "chatbot", "text");
   return res.data?.messages?.[0]?.id || null;
 }
 
@@ -53,6 +74,7 @@ async function sendList(to, menuDef) {
       },
     },
   });
+  await logOutbound(to, "chatbot", "list");
   return res.data?.messages?.[0]?.id || null;
 }
 
@@ -163,6 +185,29 @@ async function sendDocument(to, { mediaLink, mediaId, filename, caption }) {
     type: "document",
     document: documentPayload,
   });
+  await logOutbound(to, "chatbot", "document");
+  return res.data?.messages?.[0]?.id || null;
+}
+
+/**
+ * Send a Meta-approved template message (business-initiated, outside the
+ * 24h session window). Nothing else in the codebase calls this yet — it
+ * exists so "template messages sent" has a real code path to populate it,
+ * rather than being a chart that's permanently zero. Wire this up wherever
+ * you build a re-engagement/broadcast flow.
+ */
+async function sendTemplate(to, templateName, languageCode = "en_US", components = []) {
+  const res = await client.post("/messages", {
+    messaging_product: "whatsapp",
+    to,
+    type: "template",
+    template: {
+      name: templateName,
+      language: { code: languageCode },
+      components,
+    },
+  });
+  await logOutbound(to, "template", "template");
   return res.data?.messages?.[0]?.id || null;
 }
 
@@ -181,6 +226,7 @@ module.exports = {
   sendText,
   sendList,
   sendDocument,
+  sendTemplate,
   uploadMedia,
   uploadMediaFromUrl,
   inferMimeType,

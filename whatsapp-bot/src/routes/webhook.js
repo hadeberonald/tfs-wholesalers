@@ -3,6 +3,7 @@ const router = express.Router();
 const { handleIncomingMessage } = require("../services/menuRouter");
 const { markAsRead } = require("../services/whatsapp");
 const handoff = require("../services/handoff");
+const { logEvent } = require("../services/analytics");
 
 const { VERIFY_TOKEN } = process.env;
 
@@ -39,11 +40,39 @@ router.post("/", async (req, res) => {
     const change = entry?.changes?.[0];
     const value = change?.value;
 
-    // Ignore status callbacks (sent/delivered/read receipts for OUR messages)
+    // Delivery/read/failed receipts for messages WE sent. This is the only
+    // place Meta gives us pricing data (category + billable), so this can't
+    // be dropped the way the old handler dropped it — it's the sole source
+    // for both "messages delivered" and all pricing analytics.
+    if (value?.statuses) {
+      for (const status of value.statuses) {
+        if (handoff.isAgentNumber(status.recipient_id)) continue; // agent-directed, not customer analytics
+        await logEvent("message_status", {
+          waId: status.recipient_id || null,
+          meta: {
+            status: status.status, // sent | delivered | read | failed
+            pricingCategory: status.pricing?.category || null,
+            billable: status.pricing?.billable ?? null,
+            conversationOrigin: status.conversation?.origin?.type || null,
+          },
+        });
+      }
+      return;
+    }
+
+    // Ignore anything that's neither a status callback nor an inbound message.
     if (!value?.messages) return;
 
     const message = value.messages[0];
     const waId = message.from; // sender's WhatsApp ID (phone number, no +)
+
+    // Log inbound BEFORE the agent/customer branch so agent replies aren't
+    // double-counted as customer "messages received" — isAgentNumber below
+    // still routes correctly either way, but this keeps the metric to
+    // customer-originated traffic to match "messages received" as sold.
+    if (!handoff.isAgentNumber(waId)) {
+      await logEvent("message_received", { waId, meta: { messageType: message.type } });
+    }
 
     await markAsRead(message.id).catch((err) =>
       console.error("markAsRead failed:", err.response?.data || err.message)

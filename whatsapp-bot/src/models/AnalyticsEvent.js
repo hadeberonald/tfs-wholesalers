@@ -28,6 +28,9 @@ const analyticsEventSchema = new mongoose.Schema({
       "fallback_triggered", // bot didn't understand the customer's free text
       "agent_message",      // agent -> customer relay — agentWaId
       "customer_message",   // customer -> agent relay (in handoff) — agentWaId
+      "message_sent",       // any outbound msg to a customer — meta.kind: 'chatbot'|'template', meta.messageType: 'text'|'list'|'document'|'template'
+      "message_received",   // any inbound msg from a customer — meta.messageType
+      "message_status",     // delivery webhook — meta.status, meta.pricingCategory, meta.billable, meta.conversationOrigin
     ],
   },
   waId: { type: String, index: true, default: null },      // customer, when applicable
