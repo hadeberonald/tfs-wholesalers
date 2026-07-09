@@ -103,6 +103,13 @@ export const ROUTE_MANIFEST: RouteManifestEntry[] = [
     icon: Package,
     href: '/admin/products',
   },
+  {
+    key: 'whatsapp',
+    label: 'WhatsApp Bot',
+    group: 'Marketing',
+    icon: BarChart2, // already imported in this file
+    href: '/admin/whatsapp',
+  },
 
   // ── Wholesale ─────────────────────────────────────────────────────────────
   {

@@ -1,6 +1,8 @@
+// services/handoff.js — full file, with logEvent calls added
 const { sendText, sendList } = require("./whatsapp");
 const { getSession, setSession } = require("./sessionStore");
 const conversations = require("./conversationStore");
+const { logEvent } = require("./analytics");
 const { ORDERS_AGENT, SUPPORT_AGENT, CLOSE_COMMANDS } = require("../config/agents");
 const menus = require("../data/menus");
 
@@ -11,16 +13,12 @@ function isAgentNumber(waId) {
   return AGENT_NUMBERS.has(waId);
 }
 
-/**
- * Starts a handoff: notifies the agent (with a #code identifying this
- * conversation), puts the customer's session into "handoff" mode, and adds
- * them to that agent's queue.
- */
 async function startHandoff(customerWaId, queue, contextLine, meta = {}) {
   const agentWaId = queue === "orders" ? ORDERS_AGENT : SUPPORT_AGENT;
 
   const entry = await conversations.addToQueue(agentWaId, customerWaId, { queueType: queue, ...meta });
   await setSession(customerWaId, { mode: "handoff", handoffTo: agentWaId, handoffQueue: queue });
+  await logEvent("handoff_started", { waId: customerWaId, agentWaId, meta: { queue } });
 
   const label = queue === "orders" ? "🛒 New order" : "💬 New support query";
   const nameLine = meta.name ? `Name: ${meta.name}\n` : "";
@@ -39,18 +37,14 @@ async function startHandoff(customerWaId, queue, contextLine, meta = {}) {
   );
 }
 
-/**
- * Customer sent a message while in handoff mode — relay it to whichever
- * agent owns their conversation, tagged with their #code so the agent can
- * tell whose message it is even with several chats going at once.
- */
 async function relayCustomerToAgent(customerWaId, text) {
   const session = await getSession(customerWaId);
   const agentWaId = session.handoffTo;
-  if (!agentWaId) return false; // not actually in handoff, let caller fall through
+  if (!agentWaId) return false;
 
   const entry = await conversations.getEntry(agentWaId, customerWaId);
   await conversations.setMostRecent(agentWaId, customerWaId);
+  await logEvent("customer_message", { waId: customerWaId, agentWaId });
 
   const codeTag = entry ? `[#${entry.code}] ` : "";
   const namePart = entry?.name ? ` (${entry.name})` : "";
@@ -59,11 +53,6 @@ async function relayCustomerToAgent(customerWaId, text) {
   return true;
 }
 
-/**
- * Figures out which customer an agent's incoming message is meant for.
- * Priority: quoted message (context.id) > explicit "#N " prefix in the text
- * > whichever customer they most recently exchanged a message with.
- */
 async function resolveTargetCustomer(agentWaId, message) {
   const contextId = message.context?.id;
   if (contextId) {
@@ -81,15 +70,10 @@ async function resolveTargetCustomer(agentWaId, message) {
   return conversations.getMostRecent(agentWaId);
 }
 
-/** Strips a leading "#3 " tag from agent text before relaying to the customer. */
 function stripCodePrefix(text) {
   return text.replace(/^#\d+\s*/, "");
 }
 
-/**
- * Agent sent a message — route it to the right customer, or handle it as
- * a command (/queue, /close, /close N).
- */
 async function relayAgentToCustomer(agentWaId, message) {
   const rawText = message.text?.body?.trim() || "";
   const lower = rawText.toLowerCase();
@@ -116,6 +100,7 @@ async function relayAgentToCustomer(agentWaId, message) {
     return;
   }
 
+  await logEvent("agent_message", { waId: customerWaId, agentWaId });
   await sendText(customerWaId, stripCodePrefix(rawText));
 }
 
@@ -134,9 +119,9 @@ async function sendQueueList(agentWaId) {
 }
 
 /**
- * Ends the handoff for a specific customer, sends them back to the main
- * menu, and removes them from the agent's queue. If the agent still has
- * others waiting, lets them know.
+ * Ends the handoff for a specific customer. Reads the QueueEntry BEFORE
+ * removing it so we can log the queue type and total handle time —
+ * removeFromQueue deletes the row entirely, it's not soft-deleted.
  */
 async function closeHandoff(agentWaId, customerWaId) {
   if (!customerWaId) {
@@ -144,8 +129,17 @@ async function closeHandoff(agentWaId, customerWaId) {
     return;
   }
 
+  const entry = await conversations.getEntry(agentWaId, customerWaId);
   await conversations.removeFromQueue(agentWaId, customerWaId);
   await setSession(customerWaId, { mode: "bot", handoffTo: null, handoffQueue: null });
+
+  if (entry) {
+    await logEvent("handoff_closed", {
+      waId: customerWaId,
+      agentWaId,
+      meta: { queue: entry.queueType, durationMs: Date.now() - entry.startedAt.getTime() },
+    });
+  }
 
   await sendText(customerWaId, "Thanks for chatting with us! Back to the main menu 👇");
   await sendList(customerWaId, menus.mainMenu);
@@ -157,10 +151,6 @@ async function closeHandoff(agentWaId, customerWaId) {
   await sendText(agentWaId, `Conversation with +${customerWaId} closed.${remainingNote}`);
 }
 
-/**
- * Customer explicitly typed something like "menu" while in handoff —
- * this always wins, even mid human-conversation, so no one gets stuck.
- */
 async function customerExitsHandoff(customerWaId) {
   const session = await getSession(customerWaId);
   const agentWaId = session.handoffTo;

@@ -1,15 +1,13 @@
+// app/[slug]/admin/promo-files/page.tsx — old route, now redirects for old bookmarks/links
 'use client';
-/**
- * app/[slug]/admin/promo-files/page.tsx — RoleGuard wrapper
- * Uses the existing "settings" permission — no new role/permission needed.
- */
-import RoleGuard from '@/components/RoleGuard';
-import InnerPage from './_page';
+import { useEffect } from 'react';
+import { useRouter, useParams } from 'next/navigation';
 
 export default function Page() {
-  return (
-    <RoleGuard routeKey="settings" require="write">
-      <InnerPage />
-    </RoleGuard>
-  );
+  const router = useRouter();
+  const { slug } = useParams<{ slug: string }>();
+  useEffect(() => {
+    router.replace(`/${slug}/admin/whatsapp?tab=files`);
+  }, [router, slug]);
+  return null;
 }
