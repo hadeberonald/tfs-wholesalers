@@ -6,12 +6,14 @@ import { setIO } from './lib/socket';
 import { verifyEmailTransport } from './lib/sendPushNotification';
 
 const whatsappWebhookRouter = require('./whatsapp-bot/src/routes/webhook');
+const whatsappAnalyticsRouter = require('./whatsapp-bot/src/routes/analytics');
 const express = require('express');
 const { connectDB } = require('./whatsapp-bot/src/config/db');
 
 const whatsappApp = express();
 whatsappApp.use(express.json());
 whatsappApp.use('/whatsapp-webhook', whatsappWebhookRouter);
+whatsappApp.use('/analytics', whatsappAnalyticsRouter);
 
 const dev  = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -23,7 +25,10 @@ Promise.all([app.prepare(), connectDB()]).then(() => {
   const httpServer = createServer((req, res) => {
     const parsedUrl = parse(req.url!, true);
 
-    if (parsedUrl.pathname?.startsWith('/whatsapp-webhook')) {
+    if (
+      parsedUrl.pathname?.startsWith('/whatsapp-webhook') ||
+      parsedUrl.pathname?.startsWith('/analytics')
+    ) {
       return whatsappApp(req, res);
     }
 
@@ -62,5 +67,7 @@ Promise.all([app.prepare(), connectDB()]).then(() => {
   httpServer.listen(port, () => {
     console.log(`Ready on http://localhost:${port} (${dev ? 'dev' : 'prod'})`);
     console.log('Socket.IO listening');
+    console.log(`WhatsApp webhook mounted at /whatsapp-webhook`);
+    console.log(`WhatsApp analytics mounted at /analytics`);
   });
 });
