@@ -12,6 +12,19 @@ import {
 import { cookies } from 'next/headers';
 import jwt from 'jsonwebtoken';
 
+// ── HOTFIX: server-side phone validation ─────────────────────────────────────
+// Mirrors the format check used on the mobile checkout screen
+// (app/checkout.tsx isValidPhone). The web checkout only relies on the HTML
+// `required` attribute, which does not catch whitespace-only values or
+// requests that bypass the form entirely. Enforcing this here ensures no
+// order — from any client, old build, or direct API call — can be created
+// without a usable phone number.
+function isValidPhone(phone: string | null | undefined): boolean {
+  if (!phone) return false;
+  const cleaned = phone.trim().replace(/[\s\-()]/g, '');
+  return /^(0\d{9}|\+27\d{9})$/.test(cleaned);
+}
+
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
@@ -141,9 +154,23 @@ export async function POST(request: NextRequest) {
 
     const customerName    = body.customerName  || body.customerInfo?.name  || null;
     const customerEmail   = body.customerEmail || body.customerInfo?.email || null;
-    const customerPhone   = body.phone         || body.customerInfo?.phone || null;
+    const customerPhone   = (body.phone || body.customerInfo?.phone || '').toString().trim() || null;
     const deliveryAddress = body.deliveryAddress || body.shippingAddress?.address || null;
     const deliveryFee     = body.deliveryFee ?? 0;
+
+    // ── HOTFIX: enforce phone server-side, don't just trust the client ──────
+    // The web checkout form only has the HTML `required` attribute (no format
+    // check, and whitespace can slip through); the mobile app validates format
+    // client-side but nothing stopped a stale build, retried request, or
+    // direct API call from omitting/blanking it. Reject here so bad orders
+    // can no longer reach the DB regardless of which client sent them.
+    if (!isValidPhone(customerPhone)) {
+      console.warn(
+        `⚠️ [Orders] Rejected order — invalid/missing phone. ` +
+        `Raw value: ${JSON.stringify(customerPhone)} | customer: ${customerEmail ?? 'guest'} | branch: ${body.branchId}`
+      );
+      return NextResponse.json({ error: 'A valid South African phone number is required' }, { status: 400 });
+    }
 
     const enrichedItems = await Promise.all(
       body.items.map(async (item: any) => {
@@ -246,7 +273,19 @@ export async function POST(request: NextRequest) {
 
     const result  = await db.collection('orders').insertOne(order);
     const orderId = result.insertedId.toString();
-    console.log('✅ Order created:', orderId, '| customer:', customerEmail ?? 'guest', '| till:', tillAccountNumber ?? 'none', '| status:', orderStatus);
+
+    // ── HOTFIX: phone now always printed on order-creation log line ─────────
+    // Previously the phone was not logged at all, making it impossible to
+    // confirm from logs whether it was captured. It is validated above, so
+    // it will never be 'MISSING' here — but the fallback is kept as a
+    // defensive trip-wire in case validation is ever bypassed or refactored.
+    console.log(
+      '✅ Order created:', orderId,
+      '| customer:', customerEmail ?? 'guest',
+      '| phone:', customerPhone ?? 'MISSING',
+      '| till:', tillAccountNumber ?? 'none',
+      '| status:', orderStatus
+    );
 
     notifyBranchPickers(body.branchId, {
       title: '🛒 New Order',
