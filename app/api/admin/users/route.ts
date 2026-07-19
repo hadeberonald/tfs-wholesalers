@@ -18,13 +18,9 @@ export async function GET(request: NextRequest) {
     const query: any = {};
     if (role) query.role = role;
 
-    // Scope to branch — match both field names for legacy docs
-    if (!auth.isSuperAdmin && auth.branchId) {
-      query.$or = [
-        { activeBranchId: auth.branchId },
-        { branchId: auth.branchId },
-      ];
-    }
+    // No branch scoping here: anyone holding users:read/users:write manages
+    // ALL users across all branches (including legacy docs with no branch
+    // set at all, which a branch-based filter would otherwise hide).
 
     const users = await db.collection('users').aggregate([
       { $match: query },
@@ -97,9 +93,14 @@ export async function POST(request: NextRequest) {
       resolvedRoleId = roleDoc._id;
     }
 
-    // Resolve branch — admin users use the form value, others inherit from auth
+    // Resolve branch. Admin users always use the branch chosen in the form.
+    // Non-admin users (customer/picker/delivery) use the branch chosen in
+    // the form if one was given, otherwise fall back to the creating
+    // admin's own branch (only applies to non-super-admins who have a
+    // branch of their own; super-admins and branch-less IT users create
+    // users with no branch unless one is explicitly selected).
     let resolvedBranchId: ObjectId | null = null;
-    if (role === 'admin' && activeBranchId) {
+    if (activeBranchId) {
       try {
         resolvedBranchId = new ObjectId(activeBranchId);
       } catch {
