@@ -48,6 +48,7 @@ import {
   Contact2,
   BookOpen,
   Percent,
+  TrendingUp,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -88,6 +89,16 @@ export const ROUTE_MANIFEST: RouteManifestEntry[] = [
     href: '/admin',
     writeEnabled: false,
     alwaysVisible: true,
+  },
+  {
+    key: 'analytics',
+    label: 'Business Intelligence',
+    group: 'Main',
+    icon: TrendingUp,
+    // Lives inline on the dashboard page rather than as its own route —
+    // this anchor just scrolls the Business Intelligence section into view.
+    href: '/admin#business-intelligence',
+    writeEnabled: false,
   },
   {
     key: 'orders',

@@ -1,5 +1,4 @@
 'use client';
-
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
@@ -10,9 +9,9 @@ import {
 } from 'lucide-react';
 import { useBranch } from '@/lib/branch-context';
 import { useAuth } from '@/lib/auth-context';
+import BusinessIntelligenceSection from './BusinessIntelligenceSection';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
 interface Stats {
   totalOrders: number;
   totalRevenue: number;
@@ -47,7 +46,6 @@ interface Stats {
   combos?: { active: number; total: number };
   nps?: { averageScore: number; totalResponses: number };
 }
-
 interface RecentOrder {
   _id: string;
   orderNumber: string;
@@ -56,7 +54,6 @@ interface RecentOrder {
   status: string;
   createdAt: string;
 }
-
 interface OrderResolution {
   _id: string;
   orderNumber: string;
@@ -65,17 +62,13 @@ interface OrderResolution {
   priority: string;
   createdAt: string;
 }
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
 const formatCurrency = (amount: number) =>
   new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR' }).format(amount);
-
 const formatDate = (date: string) =>
   new Date(date).toLocaleDateString('en-ZA', {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
   });
-
 const getStatusColor = (status: string) => {
   switch ((status || '').toLowerCase()) {
     case 'completed': case 'delivered': return 'bg-green-100 text-green-800';
@@ -85,21 +78,17 @@ const getStatusColor = (status: string) => {
     default:                             return 'bg-gray-100 text-gray-800';
   }
 };
-
 const getPriorityColor = (priority: string) => ({
   high:   'bg-red-100 text-red-800',
   medium: 'bg-orange-100 text-orange-800',
   low:    'bg-yellow-100 text-yellow-800',
 }[priority] ?? 'bg-gray-100 text-gray-800');
-
 // ─── Component ────────────────────────────────────────────────────────────────
-
 export default function AdminDashboard() {
   const params = useParams();
   const slug = params.slug as string;
   const { branch, loading: branchLoading } = useBranch();
   const { user, can } = useAuth();
-
   const [stats, setStats] = useState<Stats>({
     totalOrders: 0, totalRevenue: 0, totalProducts: 0, totalCustomers: 0,
     pendingOrders: 0, completedOrders: 0, cancelledOrders: 0, outForDelivery: 0,
@@ -108,7 +97,6 @@ export default function AdminDashboard() {
   const [recentOrders, setRecentOrders]       = useState<RecentOrder[]>([]);
   const [openResolutions, setOpenResolutions] = useState<OrderResolution[]>([]);
   const [loading, setLoading]                 = useState(true);
-
   // Derive what this user can see once auth is ready
   const isSuperAdmin  = user?.role === 'super-admin';
   const isFullAccess  = isSuperAdmin || (user?.permissions ?? []).length > 10;
@@ -122,22 +110,21 @@ export default function AdminDashboard() {
   const canCombos     = can('combos:read');
   const canNps        = can('nps:read');
   const canCustomers  = can('wholesale-customers:read');
-
+  // Business Intelligence — gated on its own permission (Full Access Admin
+  // role + super-admin), independent of the isFullAccess heuristic above.
+  const canAnalytics  = can('analytics:read');
   useEffect(() => {
     if (!branchLoading && branch && user) {
       fetchDashboardData();
     }
   }, [branchLoading, branch, user]);
-
   const fetchDashboardData = async () => {
     try {
       const fetches: Promise<any>[] = [];
-
       // Always fetch stats — the API returns only what the user can access
       fetches.push(
         fetch('/api/admin/stats').then(r => r.ok ? r.json() : null)
       );
-
       if (canOrders) {
         fetches.push(
           fetch('/api/orders?all=true').then(r => r.ok ? r.json() : null)
@@ -145,7 +132,6 @@ export default function AdminDashboard() {
       } else {
         fetches.push(Promise.resolve(null));
       }
-
       if (canResolutions) {
         fetches.push(
           fetch('/api/order-resolutions?status=open').then(r => r.ok ? r.json() : null)
@@ -153,9 +139,7 @@ export default function AdminDashboard() {
       } else {
         fetches.push(Promise.resolve(null));
       }
-
       const [statsData, ordersData, resData] = await Promise.all(fetches);
-
       if (statsData?.stats) setStats(statsData.stats);
       if (ordersData?.orders) setRecentOrders(ordersData.orders.slice(0, 5));
       if (resData?.resolutions) setOpenResolutions(resData.resolutions);
@@ -165,7 +149,6 @@ export default function AdminDashboard() {
       setLoading(false);
     }
   };
-
   if (branchLoading || loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -173,7 +156,6 @@ export default function AdminDashboard() {
       </div>
     );
   }
-
   if (!branch) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -184,14 +166,11 @@ export default function AdminDashboard() {
       </div>
     );
   }
-
   // ── Role name for greeting ────────────────────────────────────────────────
   const roleName = isSuperAdmin ? 'Super Admin' : (user?.adminRoleName ?? 'Admin');
-
   return (
     <div className="min-h-screen bg-gray-50 pt-32 md:pt-28">
       <div className="max-w-7xl mx-auto px-4 py-8">
-
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl md:text-4xl font-bold text-brand-black mb-1">
@@ -205,6 +184,9 @@ export default function AdminDashboard() {
             <p className="text-gray-500 text-sm">{branch.displayName}</p>
           </div>
         </div>
+
+        {/* ── Business Intelligence — full-access admins & super-admins only ── */}
+        {(isSuperAdmin || canAnalytics) && <BusinessIntelligenceSection />}
 
         {/* ── Alert cards — only shown if user has relevant permissions ── */}
         <div className="space-y-4 mb-8">
@@ -246,7 +228,6 @@ export default function AdminDashboard() {
               )}
             </div>
           )}
-
           {canProducts && stats.inventory && stats.inventory.lowStockCount > 0 && (
             <div className="bg-orange-50 border border-orange-200 rounded-2xl p-6">
               <div className="flex items-center justify-between">
@@ -265,7 +246,6 @@ export default function AdminDashboard() {
               </div>
             </div>
           )}
-
           {canStockTakes && stats.inventory && stats.inventory.overdueStockTakes > 0 && (
             <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-6">
               <div className="flex items-center justify-between">
@@ -284,7 +264,6 @@ export default function AdminDashboard() {
               </div>
             </div>
           )}
-
           {canPurchaseOrders && stats.purchaseOrders && stats.purchaseOrders.pendingApproval > 0 && (
             <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6">
               <div className="flex items-center justify-between">
@@ -304,7 +283,6 @@ export default function AdminDashboard() {
             </div>
           )}
         </div>
-
         {/* ── Full-access stats grid (revenue, orders, products, customers) ── */}
         {isFullAccess && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-8">
@@ -326,7 +304,6 @@ export default function AdminDashboard() {
                 <p className="text-white/60 text-xs mt-2">All time</p>
               </div>
             )}
-
             {canOrders && (
               <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-6 shadow-lg text-white">
                 <div className="flex items-center justify-between mb-4">
@@ -343,7 +320,6 @@ export default function AdminDashboard() {
                 <p className="text-white/60 text-xs mt-2">All time</p>
               </div>
             )}
-
             {canProducts && (
               <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl p-6 shadow-lg text-white">
                 <div className="flex items-center justify-between mb-4">
@@ -354,7 +330,6 @@ export default function AdminDashboard() {
                 <p className="text-white/60 text-xs mt-2">In catalog</p>
               </div>
             )}
-
             {canCustomers && (
               <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl p-6 shadow-lg text-white">
                 <div className="flex items-center justify-between mb-4">
@@ -367,7 +342,6 @@ export default function AdminDashboard() {
             )}
           </div>
         )}
-
         {/* ── Order status row — only if user can see orders ── */}
         {canOrders && isFullAccess && (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
@@ -387,7 +361,6 @@ export default function AdminDashboard() {
             ))}
           </div>
         )}
-
         {/* ── Quick access — shows only pages this role can reach ── */}
         <div className="bg-white rounded-2xl p-6 shadow-sm mb-8">
           <h2 className="text-xl font-bold text-brand-black mb-4">Quick Access</h2>
@@ -441,7 +414,6 @@ export default function AdminDashboard() {
               </Link>
             )}
           </div>
-
           {/* Edge case: user has no permissions at all */}
           {!canOrders && !canProducts && !canSpecials && !canCombos && !canNps && !canResolutions && !canPurchaseOrders && !canStockTakes && (
             <div className="text-center py-8 text-gray-400">
@@ -451,7 +423,6 @@ export default function AdminDashboard() {
             </div>
           )}
         </div>
-
         {/* ── Recent orders — only if user can see orders ── */}
         {canOrders && recentOrders.length > 0 && (
           <div className="bg-white rounded-2xl p-6 shadow-sm">
