@@ -804,18 +804,19 @@ function PromoFilesTab() {
 
 export default function WhatsAppAdminPage() {
   const searchParams = useSearchParams();
-  const initialTab = searchParams.get('tab') === 'files' ? 'files' : 'analytics';
-  const [tab, setTab] = useState<'analytics' | 'files'>(initialTab);
+  const tabParam = searchParams.get('tab');
+  const initialTab = tabParam === 'files' ? 'files' : tabParam === 'messages' ? 'messages' : 'analytics';
+  const [tab, setTab] = useState<'analytics' | 'files' | 'messages'>(initialTab);
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <h1 className="text-2xl font-semibold mb-1 text-slate-900">WhatsApp Bot</h1>
       <p className="text-slate-500 mb-6">
-        Analytics for the customer-facing WhatsApp bot, and the promo/specials files it sends.
+        Analytics for the customer-facing WhatsApp bot, the promo/specials files it sends, and the wording of its messages.
       </p>
 
       <div className="flex gap-1 border-b mb-6">
-        {(['analytics', 'files'] as const).map((t) => (
+        {(['analytics', 'files', 'messages'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -823,12 +824,176 @@ export default function WhatsAppAdminPage() {
               tab === t ? 'border-orange-600 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'
             }`}
           >
-            {t === 'analytics' ? 'Analytics' : 'Promo Files'}
+            {t === 'analytics' ? 'Analytics' : t === 'files' ? 'Promo Files' : 'Bot Messages'}
           </button>
         ))}
       </div>
 
-      {tab === 'analytics' ? <AnalyticsTab /> : <PromoFilesTab />}
+      {tab === 'analytics' ? <AnalyticsTab /> : tab === 'files' ? <PromoFilesTab /> : <BotMessagesTab />}
+    </div>
+  );
+}
+
+// ─── Bot Messages tab — edit the wording the bot sends, per branch ─────────
+
+type MessageKey =
+  | 'welcome_text'
+  | 'main_menu_body'
+  | 'promotions_menu_body'
+  | 'location_text'
+  | 'support_text'
+  | 'specials_text'
+  | 'retail_promo_fallback_text'
+  | 'wholesale_promo_fallback_text'
+  | 'order_text'
+  | 'fallback_text';
+
+interface BotMessageDoc {
+  key: MessageKey;
+  value: string;
+  updatedAt: string;
+}
+
+const MESSAGE_SLOTS: { key: MessageKey; label: string; hint: string }[] = [
+  { key: 'welcome_text', label: 'Welcome message', hint: 'Sent when a customer says "hi" or "menu"' },
+  { key: 'main_menu_body', label: 'Main menu body', hint: 'The line shown above the main menu options' },
+  { key: 'promotions_menu_body', label: 'Promotions menu body', hint: 'The line shown above the promotions options' },
+  { key: 'location_text', label: 'Location message', hint: 'Sent when a customer selects Location — make sure this is the real address before going live' },
+  { key: 'support_text', label: 'Support message', hint: 'Sent when a customer selects Customer support' },
+  { key: 'specials_text', label: 'Daily specials fallback', hint: 'Sent if no daily specials file has been uploaded yet' },
+  { key: 'retail_promo_fallback_text', label: 'Retail promotion fallback', hint: 'Sent if no retail promotion file has been uploaded yet' },
+  { key: 'wholesale_promo_fallback_text', label: 'Wholesale promotion fallback', hint: 'Sent if no wholesale promotion file has been uploaded yet' },
+  { key: 'order_text', label: 'Order message', hint: 'Sent when a customer selects Place an order' },
+  { key: 'fallback_text', label: "Didn't-understand message", hint: "Sent when the bot doesn't recognize the customer's reply" },
+];
+
+function BotMessagesTab() {
+  const [docs, setDocs] = useState<Record<string, BotMessageDoc>>({});
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [savingKey, setSavingKey] = useState<MessageKey | null>(null);
+
+  useEffect(() => { fetchMessages(); }, []);
+
+  const fetchMessages = async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const res = await fetch('/api/admin/bot-messages');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLoadError(data.error || 'Failed to load bot messages');
+        return;
+      }
+      const byKey: Record<string, BotMessageDoc> = {};
+      (data.messages || []).forEach((d: BotMessageDoc) => { byKey[d.key] = d; });
+      setDocs(byKey);
+      setDrafts((prev) => {
+        const next = { ...prev };
+        MESSAGE_SLOTS.forEach((s) => { next[s.key] = byKey[s.key]?.value ?? ''; });
+        return next;
+      });
+    } catch {
+      setLoadError('Failed to load bot messages');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async (key: MessageKey) => {
+    const value = (drafts[key] || '').trim();
+    if (!value) {
+      toast.error("Message can't be empty");
+      return;
+    }
+    setSavingKey(key);
+    try {
+      const res = await fetch('/api/admin/bot-messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to save');
+      setDocs((prev) => ({ ...prev, [key]: data.message }));
+      toast.success('Saved — the bot will use this within 30 seconds');
+    } catch (error: any) {
+      toast.error(error.message || 'Save failed');
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  const handleReset = async (key: MessageKey) => {
+    setSavingKey(key);
+    try {
+      const res = await fetch(`/api/admin/bot-messages?key=${key}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to reset');
+      setDocs((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      setDrafts((prev) => ({ ...prev, [key]: '' }));
+      toast.success('Reset to the default message');
+    } catch (error: any) {
+      toast.error(error.message || 'Reset failed');
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  if (loading) return <div className="text-slate-500">Loading…</div>;
+  if (loadError) return <div className="text-sm text-amber-600 border border-amber-200 bg-amber-50 rounded-lg p-4">{loadError}</div>;
+
+  return (
+    <div className="space-y-4 max-w-3xl">
+      {MESSAGE_SLOTS.map((slot) => {
+        const doc = docs[slot.key];
+        const isSaving = savingKey === slot.key;
+        const isDirty = (drafts[slot.key] || '') !== (doc?.value ?? '');
+        return (
+          <div key={slot.key} className="border border-slate-200 rounded-lg p-4">
+            <h2 className="font-medium">{slot.label}</h2>
+            <p className="text-sm text-slate-500 mb-2">{slot.hint}</p>
+            {!doc && (
+              <p className="text-xs text-amber-600 mb-2">Not customized yet — the bot is using its built-in default message.</p>
+            )}
+            <textarea
+              value={drafts[slot.key] ?? ''}
+              onChange={(e) => setDrafts((prev) => ({ ...prev, [slot.key]: e.target.value }))}
+              rows={3}
+              placeholder="Enter the message the bot should send…"
+              className="w-full text-sm border border-slate-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500"
+            />
+            <div className="flex items-center justify-between mt-2">
+              <span className="text-xs text-slate-400">
+                {doc ? `Last updated ${new Date(doc.updatedAt).toLocaleString()}` : ''}
+              </span>
+              <div className="flex gap-2">
+                {doc && (
+                  <button
+                    onClick={() => handleReset(slot.key)}
+                    disabled={isSaving}
+                    className="px-3 py-1.5 rounded-md text-sm text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Reset to default
+                  </button>
+                )}
+                <button
+                  onClick={() => handleSave(slot.key)}
+                  disabled={isSaving || !isDirty}
+                  className="px-3 py-1.5 rounded-md text-sm border border-slate-300 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {isSaving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
