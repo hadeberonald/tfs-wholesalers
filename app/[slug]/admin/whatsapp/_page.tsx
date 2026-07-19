@@ -4,28 +4,37 @@
 import { useState, useEffect, useMemo, useRef, forwardRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
-  LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import {
   FileText, Upload, ExternalLink, Download, FileDown,
   MessageSquare, MessageSquareText, CheckCheck, Users, Headphones, MousePointerClick,
+  TrendingUp, TrendingDown, Minus, Sparkles, Wallet,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { uploadToCloudinary } from '@/lib/cloudinary';
 
 type Period = 'week' | 'month' | 'custom';
 
-const COLORS = {
-  indigo: '#4f46e5',
-  indigoLight: '#818cf8',
-  teal: '#0d9488',
-  tealLight: '#5eead4',
-  slate: '#475569',
-  amber: '#d97706',
-  rose: '#e11d48',
+// ─── Design system: orange + grey, everywhere ───────────────────────────────
+// One palette, reused for every chart so the on-screen dashboard and the
+// exported PDF always look like the same report.
+const C = {
+  orange: '#f97316',
+  orangeDark: '#c2410c',
+  orangeLight: '#fdba74',
+  orangeSoft: '#ffedd5',
+  grey900: '#1e293b',
+  grey700: '#475569',
+  grey500: '#64748b',
+  grey400: '#94a3b8',
+  grey300: '#cbd5e1',
+  grey200: '#e2e8f0',
+  grey100: '#f1f5f9',
 };
-const PIE_COLORS = [COLORS.indigo, COLORS.teal, COLORS.amber, COLORS.rose, COLORS.slate, COLORS.indigoLight];
+// Rotation used for doughnut/bar segments with more than 2 categories.
+const SERIES = [C.orange, C.grey700, C.orangeLight, C.grey400, C.orangeDark, C.grey300];
 
 function rangeForPeriod(period: Period, custom: { from: string; to: string }) {
   const now = new Date();
@@ -45,43 +54,380 @@ function rangeForPeriod(period: Period, custom: { from: string; to: string }) {
   };
 }
 
-// Turn a { key: count } or { key: {count, ...} } map into a recharts-friendly array.
-function objToArray(obj: Record<string, any> | undefined, opts?: { countKey?: string; labelMap?: Record<string, string> }) {
-  if (!obj) return [];
-  const countKey = opts?.countKey;
-  return Object.entries(obj).map(([key, v]) => ({
-    name: opts?.labelMap?.[key] || key.replace(/_/g, ' '),
-    value: countKey ? (v?.[countKey] ?? 0) : (typeof v === 'number' ? v : v?.count ?? 0),
-  }));
+function fmt(n: number | undefined | null) {
+  if (n == null) return '0';
+  return n.toLocaleString();
 }
 
-export default function WhatsAppAdminPage() {
-  const searchParams = useSearchParams();
-  const initialTab = searchParams.get('tab') === 'files' ? 'files' : 'analytics';
-  const [tab, setTab] = useState<'analytics' | 'files'>(initialTab);
+function fmtMoney(n: number | undefined | null, currency: string) {
+  if (n == null) return '—';
+  return new Intl.NumberFormat('en-ZA', { style: 'currency', currency: currency || 'ZAR' }).format(n);
+}
+
+const ENGAGEMENT_LABELS: Record<string, string> = {
+  main_menu: 'Main Menu',
+  promotions: 'Promotions Menu Views',
+  retail_promo: 'Retail Promotions Views',
+  wholesale_promo: 'Wholesale Promotions Views',
+  specials: 'Daily Specials Views',
+  support: 'Customer Support',
+  order: 'Order Started',
+  location: 'Location Views',
+};
+
+const PROMO_LABELS: Record<string, string> = {
+  retail_promo: 'Retail Promotion',
+  wholesale_promo: 'Wholesale Promotion',
+  daily_specials: 'Daily Specials',
+};
+
+const PRICING_LABELS: Record<string, string> = {
+  marketing: 'Marketing',
+  utility: 'Utility',
+  service: 'Service',
+  authentication: 'Authentication',
+};
+
+// ─── Shared bits: growth badge, section headers, doughnut + bar primitives ──
+
+function GrowthBadge({ value, label = 'vs last period' }: { value: number | null | undefined; label?: string }) {
+  if (value === undefined) return null;
+  if (value === null) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-400">
+        <Sparkles className="w-3 h-3" /> New
+      </span>
+    );
+  }
+  const flat = Math.abs(value) < 0.1;
+  const up = value > 0;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-xs font-medium ${
+        flat ? 'text-slate-400' : up ? 'text-orange-600' : 'text-slate-500'
+      }`}
+      title={label}
+    >
+      {flat ? <Minus className="w-3 h-3" /> : up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+      {flat ? '0%' : `${up ? '+' : ''}${value}%`}
+    </span>
+  );
+}
+
+function SectionHeader({ title, subtitle, growth }: { title: string; subtitle?: string; growth?: number | null }) {
+  return (
+    <div className="flex items-start justify-between mb-3">
+      <div>
+        <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
+        {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
+      </div>
+      {growth !== undefined && <GrowthBadge value={growth} />}
+    </div>
+  );
+}
+
+function Legend({ items }: { items: { label: string; value: number; color: string }[] }) {
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3">
+      {items.map((it) => (
+        <div key={it.label} className="flex items-center gap-1.5 text-xs text-slate-600">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: it.color }} />
+          <span>{it.label}</span>
+          <span className="font-semibold text-slate-800">{fmt(it.value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Slim hollow doughnut with a stat centered in the hole. The go-to chart
+ * for every "breakdown with a headline number" panel in this report. */
+function DoughnutCard({
+  title, subtitle, segments, centerValue, centerLabel, height = 200, growth,
+}: {
+  title: string;
+  subtitle?: string;
+  segments: { label: string; value: number; color: string }[];
+  centerValue: string | number;
+  centerLabel: string;
+  height?: number;
+  growth?: number | null;
+}) {
+  const data = segments.map((s) => ({ name: s.label, value: s.value }));
+  return (
+    <div className="border border-slate-200 rounded-xl p-4 bg-white h-full">
+      <SectionHeader title={title} subtitle={subtitle} growth={growth} />
+      <div className="relative" style={{ height }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={data}
+              dataKey="value"
+              nameKey="name"
+              innerRadius="68%"
+              outerRadius="92%"
+              paddingAngle={2}
+              stroke="none"
+              startAngle={90}
+              endAngle={-270}
+            >
+              {segments.map((s, i) => <Cell key={i} fill={s.color} />)}
+            </Pie>
+            <Tooltip formatter={(v: any) => fmt(Number(v))} />
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+          <div className="text-2xl font-bold text-slate-900 leading-none">{centerValue}</div>
+          <div className="text-[11px] text-slate-400 mt-1 text-center px-4">{centerLabel}</div>
+        </div>
+      </div>
+      <Legend items={segments} />
+    </div>
+  );
+}
+
+/** Slim vertical bar chart, one or two series. */
+function SlimBarChart({
+  title, subtitle, data, bars, height = 220, growth, layout = 'vertical',
+}: {
+  title: string;
+  subtitle?: string;
+  data: any[];
+  bars: { key: string; color: string; label: string }[];
+  height?: number;
+  growth?: number | null;
+  layout?: 'vertical' | 'horizontal'; // 'horizontal' = bars run left-to-right
+}) {
+  return (
+    <div className="border border-slate-200 rounded-xl p-4 bg-white h-full">
+      <SectionHeader title={title} subtitle={subtitle} growth={growth} />
+      <div style={{ height }}>
+        <ResponsiveContainer width="100%" height="100%">
+          {layout === 'horizontal' ? (
+            <BarChart data={data} layout="vertical" margin={{ left: 8, right: 16 }} barCategoryGap="30%">
+              <CartesianGrid strokeDasharray="3 3" stroke={C.grey200} horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 11, fill: C.grey500 }} axisLine={{ stroke: C.grey200 }} />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: C.grey700 }} width={140} axisLine={{ stroke: C.grey200 }} />
+              <Tooltip formatter={(v: any) => fmt(Number(v))} cursor={{ fill: C.grey100 }} />
+              {bars.map((b) => (
+                <Bar key={b.key} dataKey={b.key} name={b.label} fill={b.color} radius={[0, 6, 6, 0]} barSize={14} />
+              ))}
+            </BarChart>
+          ) : (
+            <BarChart data={data} barCategoryGap="35%" barGap={4}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.grey200} vertical={false} />
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: C.grey500 }} axisLine={{ stroke: C.grey200 }} />
+              <YAxis tick={{ fontSize: 11, fill: C.grey500 }} axisLine={{ stroke: C.grey200 }} />
+              <Tooltip formatter={(v: any) => fmt(Number(v))} cursor={{ fill: C.grey100 }} />
+              {bars.map((b) => (
+                <Bar key={b.key} dataKey={b.key} name={b.label} fill={b.color} radius={[6, 6, 0, 0]} barSize={16} />
+              ))}
+            </BarChart>
+          )}
+        </ResponsiveContainer>
+      </div>
+      <Legend items={bars.map((b) => ({
+        label: b.label,
+        color: b.color,
+        value: data.reduce((sum, d) => sum + (d[b.key] || 0), 0),
+      }))} />
+    </div>
+  );
+}
+
+function KpiCard({ icon: Icon, label, value, growth }: { icon?: any; label: string; value: number | string; growth?: number | null }) {
+  return (
+    <div className="border border-slate-200 rounded-xl p-4 bg-white">
+      <div className="flex items-center gap-1.5 text-xs text-slate-500">
+        {Icon && <Icon className="w-3.5 h-3.5 text-orange-500" />} {label}
+      </div>
+      <div className="flex items-end justify-between mt-1">
+        <div className="text-2xl font-bold text-slate-900">{value}</div>
+        {growth !== undefined && <GrowthBadge value={growth} />}
+      </div>
+    </div>
+  );
+}
+
+// ─── Report page content (used both on-screen and inside the PDF export) ───
+
+function Page1Messages({ data }: { data: any }) {
+  const dailySplit = (data.dailyMessageTypeSeries || []).map((d: any) => ({ name: d.date.slice(5), sent: d.sent, received: d.received }));
+  const deliveryRate = data.deliveryRate ?? 0;
+  const kindData = data.messageKindBreakdown || {};
+  const kindTotal = (kindData.template || 0) + (kindData.chatbot || 0);
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <h1 className="text-2xl font-semibold mb-1 text-slate-900">WhatsApp Bot</h1>
-      <p className="text-slate-500 mb-6">
-        Analytics for the customer-facing WhatsApp bot, and the promo/specials files it sends.
-      </p>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <SlimBarChart
+        title="WhatsApp Messages Received vs Messages Sent"
+        subtitle="Daily volume for the selected period"
+        data={dailySplit}
+        growth={data.growth?.messagesSent}
+        bars={[
+          { key: 'received', label: 'Total WA Messages Received', color: C.grey500 },
+          { key: 'sent', label: 'Total WA Messages Sent', color: C.orange },
+        ]}
+        height={300}
+      />
+      <div className="grid grid-rows-2 gap-4">
+        <DoughnutCard
+          title="WhatsApp Messages Sent Breakdown"
+          centerValue={`${deliveryRate}%`}
+          centerLabel="Delivery Rate"
+          growth={data.growth?.deliveryRate}
+          segments={[
+            { label: 'Total WA Messages Sent', value: data.messagesSent || 0, color: C.orange },
+            { label: 'Total WA Delivered', value: data.messagesDelivered || 0, color: C.grey500 },
+          ]}
+          height={140}
+        />
+        <DoughnutCard
+          title="WhatsApp Template & Chatbot Messages"
+          centerValue={fmt(kindTotal)}
+          centerLabel="Total Messages Sent"
+          segments={[
+            { label: 'Template Messages Sent', value: kindData.template || 0, color: C.orangeDark },
+            { label: 'Chatbot Response Message Sent', value: kindData.chatbot || 0, color: C.grey400 },
+          ]}
+          height={140}
+        />
+      </div>
+    </div>
+  );
+}
 
-      <div className="flex gap-1 border-b mb-6">
-        {(['analytics', 'files'] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
-              tab === t ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            {t === 'analytics' ? 'Analytics' : 'Promo Files'}
-          </button>
-        ))}
+function Page2Engagement({ data }: { data: any }) {
+  const engagementRows = [
+    { name: 'Main Menu', value: data.totalsByType?.menu_viewed || 0 },
+    ...Object.entries(data.pageEngagements || {}).map(([key, count]: any) => ({
+      name: ENGAGEMENT_LABELS[key] || key.replace(/_/g, ' '),
+      value: count,
+    })),
+  ].sort((a, b) => b.value - a.value);
+
+  const promoSegments = Object.entries(data.promoBreakdown || {}).map(([key, v]: any, i) => ({
+    label: PROMO_LABELS[key] || key.replace(/_/g, ' '),
+    value: v.sent || 0,
+    color: SERIES[i % SERIES.length],
+  }));
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <SlimBarChart
+        title="Engagements Per Page Breakdown"
+        subtitle="Main menu, promotions, specials, support & more"
+        data={engagementRows}
+        layout="horizontal"
+        growth={data.growth?.uniqueEngagements}
+        bars={[{ key: 'value', label: 'Engagements', color: C.orange }]}
+        height={Math.max(220, engagementRows.length * 32)}
+      />
+      <DoughnutCard
+        title="Promotions Downloaded Breakdown"
+        subtitle="Retail, wholesale & daily specials sent to customers"
+        centerValue={fmt(data.promosDownloadedTotal)}
+        centerLabel="Promotions Downloaded"
+        growth={data.growth?.promosDownloaded}
+        segments={promoSegments}
+        height={280}
+      />
+    </div>
+  );
+}
+
+function Page3LiveChat({ data }: { data: any }) {
+  const sessionsCompare = [
+    { name: 'Sessions', total: data.totalsByType?.menu_viewed || 0, liveChat: data.liveChatSessionsTotal || 0 },
+  ];
+  const agentSegments = Object.entries(data.ticketsPerAgent || {}).map(([agent, count]: any, i) => ({
+    label: `+${agent}`,
+    value: count,
+    color: SERIES[i % SERIES.length],
+  }));
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <SlimBarChart
+        title="Live Chat Session Breakdown"
+        subtitle="Total customer sessions vs. sessions escalated to a live agent"
+        data={sessionsCompare}
+        growth={data.growth?.liveChatSessions}
+        bars={[
+          { key: 'total', label: 'Total Sessions', color: C.grey500 },
+          { key: 'liveChat', label: 'Total Live Chat Sessions', color: C.orange },
+        ]}
+        height={260}
+      />
+      <DoughnutCard
+        title="Live Chats Completed Per Agent"
+        centerValue={fmt(data.ticketsCompletedTotal)}
+        centerLabel="Chats Completed"
+        growth={data.growth?.ticketsCompleted}
+        segments={agentSegments.length ? agentSegments : [{ label: 'No data', value: 1, color: C.grey200 }]}
+        height={260}
+      />
+    </div>
+  );
+}
+
+function Page4Billable({ data }: { data: any }) {
+  const currency = data.billableSpendCurrency || 'ZAR';
+  const breakdown = data.billableSpendBreakdown || {};
+  const rows = Object.entries(breakdown).map(([key, v]: any) => ({
+    key,
+    label: PRICING_LABELS[key] || key,
+    count: v.count,
+    billableCount: v.billableCount,
+    rate: v.rate,
+    cost: v.cost,
+  }));
+  const nonBillable = Math.max(0, (data.messagesDelivered || 0) - (data.totalBillableMessages || 0));
+
+  return (
+    <div>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+        <KpiCard icon={Wallet} label="Estimated spend on billable messages" value={fmtMoney(data.billableSpendTotal, currency)} growth={data.growth?.billableSpend} />
+        <KpiCard label="Total billable messages" value={fmt(data.totalBillableMessages)} growth={data.growth?.totalBillableMessages} />
+        <KpiCard label="Non-billable (free tier) messages" value={fmt(nonBillable)} />
       </div>
 
-      {tab === 'analytics' ? <AnalyticsTab /> : <PromoFilesTab />}
+      {!data.billableRatesConfigured && (
+        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+          Conversation rates aren't configured yet, so spend shows as {fmtMoney(0, currency)}. Set WA_RATE_MARKETING /
+          WA_RATE_UTILITY / WA_RATE_SERVICE / WA_RATE_AUTHENTICATION (and WA_RATE_CURRENCY) in the bot's environment to
+          match your current Meta conversation-based price card, and this will populate automatically.
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="border border-slate-200 rounded-xl p-4 bg-white">
+          <SectionHeader title="Billable Spend By Category" subtitle={`Rate × billable count, in ${currency}`} />
+          <div className="divide-y divide-slate-100">
+            {rows.map((r) => (
+              <div key={r.key} className="flex items-center justify-between py-2.5 text-sm">
+                <div>
+                  <div className="font-medium text-slate-700">{r.label}</div>
+                  <div className="text-xs text-slate-400">{fmt(r.billableCount)} billable of {fmt(r.count)} sent · rate {fmtMoney(r.rate, currency)}</div>
+                </div>
+                <div className="font-semibold text-slate-900">{fmtMoney(r.cost, currency)}</div>
+              </div>
+            ))}
+            {rows.length === 0 && <div className="text-sm text-slate-400 py-4">No billable message data for this period.</div>}
+          </div>
+        </div>
+        <DoughnutCard
+          title="Billable vs. Free-tier Messages"
+          subtitle="Share of delivered messages that were billable"
+          centerValue={fmt(data.totalBillableMessages)}
+          centerLabel="Billable Messages"
+          segments={[
+            { label: 'Billable Messages', value: data.totalBillableMessages || 0, color: C.orange },
+            { label: 'Free-tier / Service Messages', value: nonBillable, color: C.grey300 },
+          ]}
+          height={220}
+        />
+      </div>
     </div>
   );
 }
@@ -115,8 +461,11 @@ function AnalyticsTab() {
   const exportCsv = () => {
     if (!data) return;
     const rows = [
-      ['date', 'events', 'unique_customers'],
-      ...data.dailySeries.map((d: any) => [d.date, d.count, d.uniqueCustomers]),
+      ['date', 'events', 'unique_customers', 'messages_sent', 'messages_received'],
+      ...data.dailySeries.map((d: any) => {
+        const split = (data.dailyMessageTypeSeries || []).find((x: any) => x.date === d.date) || {};
+        return [d.date, d.count, d.uniqueCustomers, split.sent || 0, split.received || 0];
+      }),
     ];
     const csv = rows.map((r) => r.join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -160,19 +509,6 @@ function AnalyticsTab() {
     }
   };
 
-  const messagesSentVsReceived = data ? [
-    { name: 'Sent', value: data.messagesSent },
-    { name: 'Received', value: data.messagesReceived },
-  ] : [];
-  const sentByType = objToArray(data?.messagesSentByType);
-  const kindBreakdown = objToArray(data?.messageKindBreakdown);
-  const statusBreakdown = objToArray(data?.messageStatusBreakdown);
-  const pricing = objToArray(data?.pricingBreakdown, { countKey: 'count' });
-  const engagements = objToArray(data?.pageEngagements)
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 8);
-  const ticketsPerAgent = objToArray(data?.ticketsPerAgent);
-
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2 mb-6">
@@ -181,7 +517,7 @@ function AnalyticsTab() {
             key={p}
             onClick={() => setPeriod(p)}
             className={`px-3 py-1.5 rounded-md text-sm border ${
-              period === p ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-300 hover:bg-slate-50'
+              period === p ? 'bg-orange-600 text-white border-orange-600' : 'border-slate-300 hover:bg-slate-50'
             }`}
           >
             {p === 'week' ? 'Last 7 days' : p === 'month' ? 'This month' : 'Custom'}
@@ -215,7 +551,7 @@ function AnalyticsTab() {
           <button
             onClick={exportPdf}
             disabled={!data || exporting}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-teal-600 text-white text-sm hover:bg-teal-700 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-orange-600 text-white text-sm hover:bg-orange-700 disabled:opacity-50"
           >
             <FileDown className="w-4 h-4" /> {exporting ? 'Building PDF…' : 'PDF report'}
           </button>
@@ -229,233 +565,103 @@ function AnalyticsTab() {
         <>
           {/* ── KPI tiles ─────────────────────────────────────────────── */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-            <KpiCard icon={MessageSquareText} label="Messages sent" value={data.messagesSent} />
-            <KpiCard icon={MessageSquare} label="Messages received" value={data.messagesReceived} />
-            <KpiCard icon={CheckCheck} label="Messages delivered" value={data.messagesDelivered} />
-            <KpiCard icon={Users} label="Unique customers" value={data.uniqueCustomers} />
+            <KpiCard icon={MessageSquareText} label="Messages sent" value={fmt(data.messagesSent)} growth={data.growth?.messagesSent} />
+            <KpiCard icon={MessageSquare} label="Messages received" value={fmt(data.messagesReceived)} growth={data.growth?.messagesReceived} />
+            <KpiCard icon={CheckCheck} label="Messages delivered" value={fmt(data.messagesDelivered)} growth={data.growth?.messagesDelivered} />
+            <KpiCard icon={Users} label="Unique customers" value={fmt(data.uniqueCustomers)} growth={data.growth?.uniqueCustomers} />
             <KpiCard icon={Headphones} label="Live chats closed"
-              value={(data.handoffsClosed?.orders?.count ?? 0) + (data.handoffsClosed?.support?.count ?? 0)} />
-            <KpiCard icon={MousePointerClick} label="Engagements" value={data.uniqueEngagements} />
-            <KpiCard label="Currently in queue" value={data.currentlyQueued} />
-            <KpiCard label="Fallbacks (didn't understand)" value={data.totalsByType?.fallback_triggered ?? 0} />
+              value={fmt((data.handoffsClosed?.orders?.count ?? 0) + (data.handoffsClosed?.support?.count ?? 0))}
+              growth={data.growth?.ticketsCompleted} />
+            <KpiCard icon={MousePointerClick} label="Engagements" value={fmt(data.uniqueEngagements)} growth={data.growth?.uniqueEngagements} />
+            <KpiCard label="Currently in queue" value={fmt(data.currentlyQueued)} />
+            <KpiCard label="Fallbacks (didn't understand)" value={fmt(data.totalsByType?.fallback_triggered ?? 0)} />
           </div>
 
-          {/* ── Chart grid ────────────────────────────────────────────── */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            <ChartCard title="Messages sent vs. received">
-              <BarChart data={messagesSentVsReceived}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Bar dataKey="value" fill={COLORS.indigo} radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ChartCard>
-
-            <ChartCard title="Messages sent by type">
-              <BarChart data={sentByType}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Bar dataKey="value" fill={COLORS.teal} radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ChartCard>
-
-            <ChartCard title="Chatbot vs. template messages">
-              <PieChart>
-                <Pie data={kindBreakdown} dataKey="value" nameKey="name" outerRadius={80} label>
-                  {kindBreakdown.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                </Pie>
-                <Tooltip /><Legend />
-              </PieChart>
-            </ChartCard>
-
-            <ChartCard title="Delivery status">
-              <PieChart>
-                <Pie data={statusBreakdown} dataKey="value" nameKey="name" outerRadius={80} label>
-                  {statusBreakdown.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                </Pie>
-                <Tooltip /><Legend />
-              </PieChart>
-            </ChartCard>
-
-            <ChartCard title="Pricing category (billable messages)">
-              <BarChart data={pricing}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Bar dataKey="value" fill={COLORS.amber} radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ChartCard>
-
-            <ChartCard title="Top menu engagements">
-              <BarChart data={engagements} layout="vertical" margin={{ left: 24 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis type="number" tick={{ fontSize: 11 }} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={110} />
-                <Tooltip />
-                <Bar dataKey="value" fill={COLORS.slate} radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ChartCard>
-
-            <ChartCard title="Tickets closed per agent">
-              <BarChart data={ticketsPerAgent}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Bar dataKey="value" fill={COLORS.indigoLight} radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ChartCard>
-
-            <ChartCard title="Busiest hours">
-              <BarChart data={data.hourlyHistogram.map((h: any) => ({ name: h._id, value: h.count }))}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Bar dataKey="value" fill={COLORS.teal} radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ChartCard>
-          </div>
-
+          {/* ── Page 1: message volume + delivery + kind breakdown ──────── */}
           <div className="mb-8">
-            <h3 className="text-sm font-medium text-slate-700 mb-2">Activity over time</h3>
-            <div className="h-64 border border-slate-200 rounded-lg p-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={data.dailySeries}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip />
-                  <Line type="monotone" dataKey="count" name="Events" stroke={COLORS.indigo} strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="uniqueCustomers" name="Unique customers" stroke={COLORS.teal} strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-orange-600 mb-3">Messages</h2>
+            <Page1Messages data={data} />
           </div>
 
+          {/* ── Page 2: engagement + promo downloads ─────────────────────── */}
           <div className="mb-8">
-            <h3 className="text-sm font-medium text-slate-700 mb-2">Promo &amp; specials delivery</h3>
-            <div className="border border-slate-200 rounded-lg divide-y">
-              {Object.entries(data.promoBreakdown || {}).map(([key, v]: any) => (
-                <div key={key} className="flex justify-between px-4 py-2 text-sm">
-                  <span className="capitalize">{key.replace(/_/g, ' ')}</span>
-                  <span className="text-slate-500">{v.sent} sent · {v.fallback} fallback</span>
-                </div>
-              ))}
-            </div>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-orange-600 mb-3">Engagement</h2>
+            <Page2Engagement data={data} />
+          </div>
+
+          {/* ── Page 3: live chat sessions + agents ──────────────────────── */}
+          <div className="mb-8">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-orange-600 mb-3">Live Chat</h2>
+            <Page3LiveChat data={data} />
+          </div>
+
+          {/* ── Page 4: billable spend ────────────────────────────────────── */}
+          <div className="mb-8">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-orange-600 mb-3">Billable Messages &amp; Spend</h2>
+            <Page4Billable data={data} />
           </div>
 
           {/* ── Off-screen print layout used only for PDF capture ───────── */}
-          <PdfExportView ref={exportRef} data={data} period={period} charts={{
-            messagesSentVsReceived, sentByType, kindBreakdown, statusBreakdown,
-            pricing, engagements, ticketsPerAgent,
-          }} />
+          <PdfExportView ref={exportRef} data={data} period={period} />
         </>
       )}
     </div>
   );
 }
 
-function KpiCard({ icon: Icon, label, value, sub }: { icon?: any; label: string; value: number | string; sub?: string }) {
-  return (
-    <div className="border border-slate-200 rounded-lg p-4 bg-white">
-      <div className="flex items-center gap-1.5 text-xs text-slate-500">
-        {Icon && <Icon className="w-3.5 h-3.5 text-indigo-500" />} {label}
-      </div>
-      <div className="text-2xl font-semibold mt-1 text-slate-900">{value}</div>
-      {sub && <div className="text-xs text-slate-400 mt-1">{sub}</div>}
-    </div>
-  );
-}
-
-function ChartCard({ title, children }: { title: string; children: React.ReactElement }) {
-  return (
-    <div className="border border-slate-200 rounded-lg p-4 bg-white">
-      <h3 className="text-sm font-medium text-slate-700 mb-2">{title}</h3>
-      <div className="h-64">
-        <ResponsiveContainer width="100%" height="100%">
-          {children}
-        </ResponsiveContainer>
-      </div>
-    </div>
-  );
-}
-
 // ─── Hidden multi-page landscape layout, captured page-by-page for the PDF ──
 
-const PdfExportView = forwardRef<HTMLDivElement, { data: any; period: string; charts: any }>(({ data, period, charts }, ref) => (
-  <div ref={ref} style={{ position: 'fixed', top: -99999, left: -99999, width: 1400 }}>
-    <PdfPage title={`WhatsApp Bot Report — ${period}`}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
-        <PdfKpi label="Messages sent" value={data.messagesSent} />
-        <PdfKpi label="Messages received" value={data.messagesReceived} />
-        <PdfKpi label="Messages delivered" value={data.messagesDelivered} />
-        <PdfKpi label="Unique customers" value={data.uniqueCustomers} />
-        <PdfKpi label="Live chats closed" value={(data.handoffsClosed?.orders?.count ?? 0) + (data.handoffsClosed?.support?.count ?? 0)} />
-        <PdfKpi label="Engagements" value={data.uniqueEngagements} />
-        <PdfKpi label="Currently in queue" value={data.currentlyQueued} />
-        <PdfKpi label="Fallbacks" value={data.totalsByType?.fallback_triggered ?? 0} />
-      </div>
-    </PdfPage>
+const PdfExportView = forwardRef<HTMLDivElement, { data: any; period: string }>(({ data, period }, ref) => {
+  const currency = data.billableSpendCurrency || 'ZAR';
+  return (
+    <div ref={ref} style={{ position: 'fixed', top: -99999, left: -99999, width: 1400 }}>
+      <PdfPage title={`WhatsApp Bot Report — ${period}`} subtitle="Overview & message volume">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 20 }}>
+          <PdfKpi label="Messages sent" value={fmt(data.messagesSent)} growth={data.growth?.messagesSent} />
+          <PdfKpi label="Messages received" value={fmt(data.messagesReceived)} growth={data.growth?.messagesReceived} />
+          <PdfKpi label="Messages delivered" value={fmt(data.messagesDelivered)} growth={data.growth?.messagesDelivered} />
+          <PdfKpi label="Unique customers" value={fmt(data.uniqueCustomers)} growth={data.growth?.uniqueCustomers} />
+        </div>
+        <Page1Messages data={data} />
+      </PdfPage>
 
-    <PdfPage title="Message volume">
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, height: 400 }}>
-        <PdfChart><BarChart data={charts.messagesSentVsReceived}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis /><Bar dataKey="value" fill={COLORS.indigo} /></BarChart></PdfChart>
-        <PdfChart><BarChart data={charts.sentByType}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis /><Bar dataKey="value" fill={COLORS.teal} /></BarChart></PdfChart>
-      </div>
-    </PdfPage>
+      <PdfPage title="Engagement & Promotions" subtitle="Where customers spend time, and what they download">
+        <Page2Engagement data={data} />
+      </PdfPage>
 
-    <PdfPage title="Message type &amp; delivery status">
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, height: 400 }}>
-        <PdfChart><PieChart><Pie data={charts.kindBreakdown} dataKey="value" nameKey="name" outerRadius={110} label>{charts.kindBreakdown.map((_: any, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}</Pie><Legend /></PieChart></PdfChart>
-        <PdfChart><PieChart><Pie data={charts.statusBreakdown} dataKey="value" nameKey="name" outerRadius={110} label>{charts.statusBreakdown.map((_: any, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}</Pie><Legend /></PieChart></PdfChart>
-      </div>
-    </PdfPage>
+      <PdfPage title="Live Chat Performance" subtitle="Escalations and agent throughput">
+        <Page3LiveChat data={data} />
+      </PdfPage>
 
-    <PdfPage title="Engagement &amp; agent performance">
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, height: 400 }}>
-        <PdfChart><BarChart data={charts.engagements} layout="vertical" margin={{ left: 24 }}><CartesianGrid strokeDasharray="3 3" /><XAxis type="number" /><YAxis type="category" dataKey="name" width={110} /><Bar dataKey="value" fill={COLORS.slate} /></BarChart></PdfChart>
-        <PdfChart><BarChart data={charts.ticketsPerAgent}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis /><Bar dataKey="value" fill={COLORS.indigoLight} /></BarChart></PdfChart>
-      </div>
-    </PdfPage>
-
-    <PdfPage title="Activity trend &amp; busiest hours">
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, height: 400 }}>
-        <PdfChart>
-          <LineChart data={data.dailySeries}>
-            <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="date" /><YAxis />
-            <Line type="monotone" dataKey="count" stroke={COLORS.indigo} strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="uniqueCustomers" stroke={COLORS.teal} strokeWidth={2} dot={false} />
-          </LineChart>
-        </PdfChart>
-        <PdfChart><BarChart data={data.hourlyHistogram.map((h: any) => ({ name: h._id, value: h.count }))}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis /><Bar dataKey="value" fill={COLORS.teal} /></BarChart></PdfChart>
-      </div>
-    </PdfPage>
-  </div>
-));
+      <PdfPage title="Billable Messages & Spend" subtitle={`Estimated cost in ${currency}, by conversation category`}>
+        <Page4Billable data={data} />
+      </PdfPage>
+    </div>
+  );
+});
 PdfExportView.displayName = 'PdfExportView';
 
-const PdfPage = ({ title, children }: { title: string; children: React.ReactNode }) => (
+const PdfPage = ({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) => (
   <div className="pdf-page" style={{ width: 1400, height: 990, background: '#fff', padding: 40, boxSizing: 'border-box' }}>
-    <h2 style={{ fontSize: 24, fontWeight: 600, color: '#1e293b', marginBottom: 24 }}>{title}</h2>
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 20, borderBottom: `2px solid ${C.orange}`, paddingBottom: 12 }}>
+      <h2 style={{ fontSize: 22, fontWeight: 700, color: C.grey900, margin: 0 }}>{title}</h2>
+      {subtitle && <span style={{ fontSize: 13, color: C.grey500 }}>{subtitle}</span>}
+    </div>
     {children}
   </div>
 );
 
-const PdfKpi = ({ label, value }: { label: string; value: number | string }) => (
-  <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 16 }}>
-    <div style={{ fontSize: 12, color: '#64748b' }}>{label}</div>
-    <div style={{ fontSize: 28, fontWeight: 600, color: '#0f172a', marginTop: 4 }}>{value}</div>
-  </div>
-);
-
-const PdfChart = ({ children }: { children: React.ReactElement }) => (
-  <div style={{ height: 400 }}>
-    <ResponsiveContainer width="100%" height="100%">{children}</ResponsiveContainer>
+const PdfKpi = ({ label, value, growth }: { label: string; value: number | string; growth?: number | null }) => (
+  <div style={{ border: `1px solid ${C.grey200}`, borderRadius: 10, padding: 14 }}>
+    <div style={{ fontSize: 11, color: C.grey500 }}>{label}</div>
+    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+      <div style={{ fontSize: 24, fontWeight: 700, color: C.grey900, marginTop: 2 }}>{value}</div>
+      {growth !== undefined && (
+        <div style={{ fontSize: 11, fontWeight: 600, color: growth == null ? C.grey400 : growth > 0 ? C.orange : C.grey500 }}>
+          {growth == null ? 'New' : `${growth > 0 ? '+' : ''}${growth}%`}
+        </div>
+      )}
+    </div>
   </div>
 );
 
@@ -565,7 +771,7 @@ function PromoFilesTab() {
               <h2 className="font-medium">{slot.label}</h2>
               <p className="text-sm text-slate-500 mb-2">{slot.hint}</p>
               {doc ? (
-                <a href={doc.fileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:underline">
+                <a href={doc.fileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm text-orange-600 hover:underline">
                   <FileText className="w-4 h-4" /> {doc.filename} <ExternalLink className="w-3.5 h-3.5" />
                 </a>
               ) : (
@@ -590,6 +796,39 @@ function PromoFilesTab() {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ─── Page shell ──────────────────────────────────────────────────────────────
+
+export default function WhatsAppAdminPage() {
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get('tab') === 'files' ? 'files' : 'analytics';
+  const [tab, setTab] = useState<'analytics' | 'files'>(initialTab);
+
+  return (
+    <div className="p-6 max-w-6xl mx-auto">
+      <h1 className="text-2xl font-semibold mb-1 text-slate-900">WhatsApp Bot</h1>
+      <p className="text-slate-500 mb-6">
+        Analytics for the customer-facing WhatsApp bot, and the promo/specials files it sends.
+      </p>
+
+      <div className="flex gap-1 border-b mb-6">
+        {(['analytics', 'files'] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+              tab === t ? 'border-orange-600 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            {t === 'analytics' ? 'Analytics' : 'Promo Files'}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'analytics' ? <AnalyticsTab /> : <PromoFilesTab />}
     </div>
   );
 }
