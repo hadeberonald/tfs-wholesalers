@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requirePermission } from '@/lib/with-permission';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
-import mongoose from 'mongoose';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,47 +22,58 @@ type MessageKey = (typeof VALID_KEYS)[number];
 /**
  * Each branch's WhatsApp bot lives in its own folder (whatsapp-bot,
  * whatsapp-bot-2, whatsapp-bot-3 for Vryheid / Dundee / Ladysmith) and
- * connects to its own database on the same Mongo cluster. This route runs
- * inside the SAME Next.js process as whatsapp-bot (Vryheid) — that one
- * reuses the default mongoose connection (already opened by connectDB()
- * elsewhere in this process). The other two get their own named
- * mongoose.createConnection(), since a second mongoose.connect() call would
- * just re-point the shared default connection and break Vryheid's bot.
+ * connects to its own database on the same Mongo cluster.
  *
- * Dundee/Ladysmith's env vars (WHATSAPP_MONGODB_URI_2 / _3) are a naming
- * convention chosen for this feature — update here if those folders end up
- * using different variable names.
+ * IMPORTANT: this file intentionally never does `import mongoose from
+ * 'mongoose'` at the top. Next.js's bundler can treat an `import` of a
+ * package as a different module instance than a `require()` of the same
+ * package elsewhere in the same route bundle. whatsapp-bot's own files
+ * (config/db.js, models/BotMessage.js) load mongoose via `require(...)` — if
+ * this file ALSO imported mongoose via `import`, connectDB() would connect
+ * one mongoose instance while a model compiled against this file's own
+ * import would stay disconnected forever, and every query on it would sit in
+ * Mongoose's command buffer until it times out (this is exactly what caused
+ * the "botmessages.find() buffering timed out" errors). Always reach
+ * mongoose and the models through the same require() chain as the bot's own
+ * files, never through a separate import.
  */
-const extraConnections: Record<string, mongoose.Connection> = {};
+const extraConnections: Record<string, any> = {};
 
-type ModelResult = { model: mongoose.Model<any> } | { error: string };
+type ModelResult = { model: any } | { error: string };
 
 async function getBotMessageModel(slug: string): Promise<ModelResult> {
   try {
     if (slug === 'vryheid') {
       const { connectDB } = require('../../../../whatsapp-bot/src/config/db');
-      const { schema } = require('../../../../whatsapp-bot/src/models/botMessageSchema');
       await connectDB();
-      return { model: mongoose.models.BotMessage || mongoose.model('BotMessage', schema) };
+      // Reuse the model already compiled in whatsapp-bot/src/models/BotMessage.js
+      // (same require() chain, same mongoose instance, same live connection)
+      // rather than recompiling it here against a separately-imported mongoose.
+      const BotMessage = require('../../../../whatsapp-bot/src/models/BotMessage');
+      return { model: BotMessage };
     }
 
     if (slug === 'dundee') {
+      const mongoose = require('mongoose');
       const { schema } = require('../../../../whatsapp-bot-2/src/models/botMessageSchema');
       const uri = process.env.WHATSAPP_MONGODB_URI_2;
       if (!uri) return { error: 'WHATSAPP_MONGODB_URI_2 is not set' };
       if (!extraConnections.dundee) {
         extraConnections.dundee = mongoose.createConnection(uri, { serverSelectionTimeoutMS: 10000 });
+        await extraConnections.dundee.asPromise();
       }
       const conn = extraConnections.dundee;
       return { model: conn.models.BotMessage || conn.model('BotMessage', schema) };
     }
 
     if (slug === 'ladysmith') {
+      const mongoose = require('mongoose');
       const { schema } = require('../../../../whatsapp-bot-3/src/models/botMessageSchema');
       const uri = process.env.WHATSAPP_MONGODB_URI_3;
       if (!uri) return { error: 'WHATSAPP_MONGODB_URI_3 is not set' };
       if (!extraConnections.ladysmith) {
         extraConnections.ladysmith = mongoose.createConnection(uri, { serverSelectionTimeoutMS: 10000 });
+        await extraConnections.ladysmith.asPromise();
       }
       const conn = extraConnections.ladysmith;
       return { model: conn.models.BotMessage || conn.model('BotMessage', schema) };
@@ -115,8 +125,12 @@ export async function GET(request: NextRequest) {
   const result = await getBotMessageModel(slug);
   if ('error' in result) return NextResponse.json({ error: result.error, branch: slug }, { status: 503 });
 
-  const docs = await result.model.find({ key: { $in: VALID_KEYS } }).lean();
-  return NextResponse.json({ branch: slug, messages: docs });
+  try {
+    const docs = await result.model.find({ key: { $in: VALID_KEYS } }).lean();
+    return NextResponse.json({ branch: slug, messages: docs });
+  } catch (err: any) {
+    return NextResponse.json({ error: `Database query failed: ${err.message}`, branch: slug }, { status: 503 });
+  }
 }
 
 // POST /api/admin/bot-messages[?branch=...]
@@ -146,15 +160,19 @@ export async function POST(request: NextRequest) {
   const result = await getBotMessageModel(slug);
   if ('error' in result) return NextResponse.json({ error: result.error, branch: slug }, { status: 503 });
 
-  const doc = await result.model
-    .findOneAndUpdate(
-      { key },
-      { key, value: value.trim(), updatedAt: new Date() },
-      { upsert: true, new: true }
-    )
-    .lean();
+  try {
+    const doc = await result.model
+      .findOneAndUpdate(
+        { key },
+        { key, value: value.trim(), updatedAt: new Date() },
+        { upsert: true, new: true }
+      )
+      .lean();
 
-  return NextResponse.json({ success: true, branch: slug, message: doc });
+    return NextResponse.json({ success: true, branch: slug, message: doc });
+  } catch (err: any) {
+    return NextResponse.json({ error: `Database write failed: ${err.message}`, branch: slug }, { status: 503 });
+  }
 }
 
 // DELETE /api/admin/bot-messages?key=...[&branch=...]
@@ -179,6 +197,10 @@ export async function DELETE(request: NextRequest) {
   const result = await getBotMessageModel(slug);
   if ('error' in result) return NextResponse.json({ error: result.error, branch: slug }, { status: 503 });
 
-  await result.model.deleteOne({ key });
-  return NextResponse.json({ success: true, branch: slug });
+  try {
+    await result.model.deleteOne({ key });
+    return NextResponse.json({ success: true, branch: slug });
+  } catch (err: any) {
+    return NextResponse.json({ error: `Database delete failed: ${err.message}`, branch: slug }, { status: 503 });
+  }
 }
