@@ -16,8 +16,20 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
     const { password, adminRoleId, activeBranchId, branchId, ...updateData } = body;
 
-    if (updateData.role !== undefined && !auth.isSuperAdmin)
-      return NextResponse.json({ error: 'Not authorized to change user roles' }, { status: 403 });
+    // Only block a REAL role change by non-super-admins.
+    // The edit form always sends `role` in the body (even when untouched),
+    // so we compare against the current stored value rather than just
+    // checking whether the field is present.
+    let targetUser = null;
+    if (updateData.role !== undefined && !auth.isSuperAdmin) {
+      targetUser = await db.collection('users').findOne({ _id: new ObjectId(params.id) });
+      if (updateData.role !== targetUser?.role) {
+        return NextResponse.json(
+          { error: 'Not authorized to change user roles' },
+          { status: 403 }
+        );
+      }
+    }
 
     if (password) {
       if (password.length < 6)
