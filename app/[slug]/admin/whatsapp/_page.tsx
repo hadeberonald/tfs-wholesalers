@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef, forwardRef } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useParams } from 'next/navigation';
 import {
   BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -868,19 +868,20 @@ const MESSAGE_SLOTS: { key: MessageKey; label: string; hint: string }[] = [
 ];
 
 function BotMessagesTab() {
+  const { slug } = useParams<{ slug: string }>();
   const [docs, setDocs] = useState<Record<string, BotMessageDoc>>({});
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<MessageKey | null>(null);
 
-  useEffect(() => { fetchMessages(); }, []);
+  useEffect(() => { fetchMessages(); }, [slug]);
 
   const fetchMessages = async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const res = await fetch('/api/admin/bot-messages');
+      const res = await fetch(`/api/admin/bot-messages?branch=${slug}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setLoadError(data.error || 'Failed to load bot messages');
@@ -909,7 +910,7 @@ function BotMessagesTab() {
     }
     setSavingKey(key);
     try {
-      const res = await fetch('/api/admin/bot-messages', {
+      const res = await fetch(`/api/admin/bot-messages?branch=${slug}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, value }),
@@ -928,7 +929,7 @@ function BotMessagesTab() {
   const handleReset = async (key: MessageKey) => {
     setSavingKey(key);
     try {
-      const res = await fetch(`/api/admin/bot-messages?key=${key}`, { method: 'DELETE' });
+      const res = await fetch(`/api/admin/bot-messages?key=${key}&branch=${slug}`, { method: 'DELETE' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to reset');
       setDocs((prev) => {
