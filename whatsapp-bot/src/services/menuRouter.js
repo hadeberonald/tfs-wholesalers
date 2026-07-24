@@ -1,5 +1,4 @@
 // services/menuRouter.js — full file, with logEvent calls added
-const menus = require("../data/menus");
 const {
   sendText,
   sendList,
@@ -11,6 +10,7 @@ const { getSession, setSession } = require("./sessionStore");
 const handoff = require("./handoff");
 const { logEvent } = require("./analytics");
 const PromoDocument = require("../models/PromoDocument");
+const { getMessage, buildMainMenu, buildPromotionsMenu } = require("./messages");
 
 const GREETING_WORDS = ["hi", "hello", "hey", "menu", "start", "hi there"];
 const MENU_OVERRIDE_WORDS = ["menu", "main menu"]; // wins even mid-handoff
@@ -61,7 +61,7 @@ async function handleIncomingMessage(waId, message) {
       await handoff.customerExitsHandoff(waId);
     }
     await logEvent("menu_viewed", { waId });
-    await sendList(waId, menus.mainMenu);
+    await sendList(waId, await buildMainMenu());
     await setSession(waId, { currentMenu: "main_menu" });
     return;
   }
@@ -87,8 +87,8 @@ async function handleIncomingMessage(waId, message) {
 
   if (selection.kind === "text" && GREETING_WORDS.includes(selection.value.toLowerCase())) {
     await logEvent("menu_viewed", { waId });
-    await sendText(waId, menus.welcomeText);
-    await sendList(waId, menus.mainMenu);
+    await sendText(waId, await getMessage("welcome_text"));
+    await sendList(waId, await buildMainMenu());
     await setSession(waId, { currentMenu: "main_menu" });
     return;
   }
@@ -102,8 +102,8 @@ async function handleIncomingMessage(waId, message) {
     waId,
     meta: { text: selection.kind === "text" ? selection.value : null },
   });
-  await sendText(waId, menus.fallbackText);
-  await sendList(waId, menus.mainMenu);
+  await sendText(waId, await getMessage("fallback_text"));
+  await sendList(waId, await buildMainMenu());
 }
 
 async function routeRowSelection(waId, rowId) {
@@ -111,54 +111,53 @@ async function routeRowSelection(waId, rowId) {
 
   switch (rowId) {
     case "main_menu":
-      await sendList(waId, menus.mainMenu);
+      await sendList(waId, await buildMainMenu());
       await setSession(waId, { currentMenu: "main_menu" });
       return;
 
     case "promotions":
-      await sendList(waId, menus.promotionsMenu);
+      await sendList(waId, await buildPromotionsMenu());
       await setSession(waId, { currentMenu: "promotions_menu" });
       return;
 
     case "retail_promo":
     case "wholesale_promo": {
-      const fallback =
-        menus.textReplies[rowId] ||
-        "Sorry, this promotion isn't available right now. Please check back soon.";
+      const fallbackKey = rowId === "retail_promo" ? "retail_promo_fallback_text" : "wholesale_promo_fallback_text";
+      const fallback = await getMessage(fallbackKey);
       await sendPromoDocument(waId, rowId, fallback);
-      await sendList(waId, menus.mainMenu);
+      await sendList(waId, await buildMainMenu());
       await setSession(waId, { currentMenu: "main_menu" });
       return;
     }
 
     case "order":
       await logEvent("order_started", { waId });
-      await sendText(waId, menus.textReplies.order);
+      await sendText(waId, await getMessage("order_text"));
       await setSession(waId, { currentMenu: "awaiting_order_name" });
       return;
 
     case "support":
-      await sendText(waId, menus.textReplies.support);
+      await sendText(waId, await getMessage("support_text"));
       await handoff.startHandoff(waId, "support", "Customer requested support from the main menu.");
       return;
 
     case "specials":
-      await sendPromoDocument(waId, "daily_specials", menus.textReplies.specials);
-      await sendList(waId, menus.mainMenu);
+      await sendPromoDocument(waId, "daily_specials", await getMessage("specials_text"));
+      await sendList(waId, await buildMainMenu());
       await setSession(waId, { currentMenu: "main_menu" });
       return;
 
     case "location": {
-      await sendText(waId, menus.textReplies.location || menus.fallbackText);
-      await sendList(waId, menus.mainMenu);
+      await sendText(waId, await getMessage("location_text"));
+      await sendList(waId, await buildMainMenu());
       await setSession(waId, { currentMenu: "main_menu" });
       return;
     }
 
     default:
       await logEvent("fallback_triggered", { waId, meta: { rowId } });
-      await sendText(waId, menus.fallbackText);
-      await sendList(waId, menus.mainMenu);
+      await sendText(waId, await getMessage("fallback_text"));
+      await sendList(waId, await buildMainMenu());
       await setSession(waId, { currentMenu: "main_menu" });
   }
 }

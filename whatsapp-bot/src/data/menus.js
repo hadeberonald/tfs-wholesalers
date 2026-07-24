@@ -13,6 +13,16 @@
  * (Admin -> Promo Files), and menuRouter.js fetches whatever's currently
  * uploaded from the PromoDocument collection at send time. The textReplies
  * below are only used as a fallback if nothing has been uploaded yet.
+ *
+ * NOTE: welcomeText, mainMenu.body, promotionsMenu.body, and every entry in
+ * textReplies + fallbackText can ALSO be overridden by an admin from the
+ * storefront admin panel (Admin -> WhatsApp Bot -> Bot Messages), stored in
+ * the BotMessage collection. services/messages.js reads that collection
+ * first and only falls back to the values below if nothing's been saved.
+ * Everything in this file is still the source of truth for the *default*
+ * wording (and for anything not yet exposed to the admin, like menu row
+ * titles) — just don't assume these strings are what actually gets sent
+ * once an admin has customized a message.
  */
 
 const BUSINESS_NAME = "TFS Vryheid";
