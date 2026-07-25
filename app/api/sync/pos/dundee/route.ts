@@ -11,6 +11,20 @@
  *
  * Add to .env:
  *   SYNC_SECRET_DUNDEE=<generate a new secret for this branch>
+ *
+ * ── DIAGNOSTICS ──────────────────────────────────────────────
+ * GET /api/sync/pos/dundee?secret=<SYNC_SECRET_DUNDEE>
+ *   Returns a safe (non-secret-leaking) status report: whether
+ *   the env var is configured, whether the Dundee branch exists
+ *   in Mongo, and how many products currently exist for it.
+ *   Use this to verify the whole pipeline WITHOUT needing the
+ *   POS machine or a CSV file.
+ *
+ * TEST WITHOUT THE POS MACHINE:
+ *   curl -s -X POST "https://tfs-wholesalers.onrender.com/api/sync/pos/dundee" ^
+ *        -H "Authorization: Bearer <SYNC_SECRET_DUNDEE>" ^
+ *        -F "file=@sample.csv"
+ *   (sample.csv just needs the same 7 columns as the real export)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -30,14 +44,55 @@ export const maxDuration = 300;
 const DUNDEE_BRANCH_ID = '698894236fadbf1e005f6c91';
 const DB_NAME          = 'tfs-wholesalers';
 
-function authorized(request: NextRequest): boolean {
-  const secret = process.env.SYNC_SECRET_DUNDEE || '';
-  if (!secret) {
-    console.error('[Dundee Sync] SYNC_SECRET_DUNDEE env var is not set');
-    return false;
+// ─────────────────────────────────────────────────────────────────────────────
+// AUTH — hardened against invisible whitespace / stray quotes in the env var,
+// and now logs enough (without leaking the real secret) to diagnose a mismatch
+// ─────────────────────────────────────────────────────────────────────────────
+function normalize(raw: string): string {
+  // Strip surrounding whitespace/newlines (common when pasting into a
+  // dashboard env var field) and strip a single layer of wrapping quotes
+  // (common when copying a value that included quotes by accident).
+  let s = raw.trim();
+  if (
+    (s.startsWith('"') && s.endsWith('"')) ||
+    (s.startsWith("'") && s.endsWith("'"))
+  ) {
+    s = s.slice(1, -1).trim();
   }
-  const header = request.headers.get('authorization') || '';
-  return header === `Bearer ${secret}`;
+  return s;
+}
+
+function authorized(request: NextRequest): { ok: boolean; reason?: string } {
+  const rawSecret = process.env.SYNC_SECRET_DUNDEE || '';
+  if (!rawSecret) {
+    console.error('[Dundee Sync] SYNC_SECRET_DUNDEE env var is not set');
+    return { ok: false, reason: 'env_missing' };
+  }
+
+  const secret = normalize(rawSecret);
+  const rawHeader = request.headers.get('authorization') || '';
+
+  // Accept "Bearer X" case-insensitively on the prefix, tolerate extra spaces
+  const match = rawHeader.match(/^\s*bearer\s+(.*)$/i);
+  const headerToken = match ? normalize(match[1]) : '';
+
+  if (!rawHeader) {
+    console.error('[Dundee Sync] No Authorization header on request at all');
+    return { ok: false, reason: 'no_header' };
+  }
+
+  if (headerToken === secret) {
+    return { ok: true };
+  }
+
+  // Mismatch — log enough to diagnose without ever printing the real secret
+  console.error(
+    `[Dundee Sync] Auth mismatch — ` +
+    `header_len:${headerToken.length} secret_len:${secret.length} ` +
+    `header_prefix:"${headerToken.slice(0, 4)}" secret_prefix:"${secret.slice(0, 4)}" ` +
+    `header_suffix:"${headerToken.slice(-4)}" secret_suffix:"${secret.slice(-4)}"`
+  );
+  return { ok: false, reason: 'mismatch' };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -432,10 +487,73 @@ async function expireDatedSpecials(db: Db, branchOid: ObjectId): Promise<number>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ROUTE HANDLER
+// GET — safe diagnostics, no data mutation.
+// Requires the same secret (as ?secret= query param, since a browser can't
+// easily set an Authorization header) so it doesn't leak anything publicly.
+// Never echoes the actual secret value back.
+// ─────────────────────────────────────────────────────────────────────────────
+export async function GET(request: NextRequest) {
+  const provided = normalize(request.nextUrl.searchParams.get('secret') || '');
+  const expected = normalize(process.env.SYNC_SECRET_DUNDEE || '');
+
+  if (!expected) {
+    return NextResponse.json(
+      { ok: false, error: 'SYNC_SECRET_DUNDEE is not set on the server' },
+      { status: 500 },
+    );
+  }
+
+  if (!provided || provided !== expected) {
+    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    if (!ObjectId.isValid(DUNDEE_BRANCH_ID)) {
+      return NextResponse.json({
+        ok: false,
+        error: `DUNDEE_BRANCH_ID "${DUNDEE_BRANCH_ID}" is not a valid ObjectId`,
+      });
+    }
+
+    const branchOid = new ObjectId(DUNDEE_BRANCH_ID);
+    const client     = await clientPromise;
+    const db         = client.db(DB_NAME);
+
+    const branchDoc      = await db.collection('branches').findOne({ _id: branchOid });
+    const productCount   = await db.collection('products').countDocuments({ branchId: branchOid });
+    const activeCount    = await db.collection('products').countDocuments({ branchId: branchOid, active: true });
+    const lastSyncLog    = await db.collection('syncLog')
+      .find({ type: 'pos_ftp_sync', branch: 'dundee' })
+      .sort({ createdAt: -1 })
+      .limit(1)
+      .toArray();
+
+    return NextResponse.json({
+      ok: true,
+      envConfigured: true,
+      secretLength: expected.length,
+      dundeeBranchId: DUNDEE_BRANCH_ID,
+      branchFoundInDb: !!branchDoc,
+      branchName: branchDoc?.name ?? null,
+      branchStatus: branchDoc?.status ?? null,
+      totalProductsForBranch: productCount,
+      activeProductsForBranch: activeCount,
+      lastSyncLog: lastSyncLog[0] ?? null,
+    });
+  } catch (err: any) {
+    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ROUTE HANDLER — POST
 // ─────────────────────────────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
-  if (!authorized(request)) {
+  console.log('[Dundee Sync] Request received');
+
+  const auth = authorized(request);
+  if (!auth.ok) {
+    console.error(`[Dundee Sync] Rejected — reason: ${auth.reason}`);
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -446,6 +564,7 @@ export async function POST(request: NextRequest) {
   try {
     const wasUploaded = await extractUploadedFile(request, localPath);
     if (!wasUploaded) {
+      console.error('[Dundee Sync] No file received in multipart body');
       return NextResponse.json(
         { error: 'No file received. This route only accepts HTTPS push (multipart upload).' },
         { status: 400 },
@@ -463,7 +582,7 @@ export async function POST(request: NextRequest) {
     }
 
     const client = await clientPromise;
-    const db     = client.db(DB_NAME);
+    const db = client.db(DB_NAME);
 
     const result  = await syncProducts(db, rows, branchOid);
     const expired = await expireDatedSpecials(db, branchOid);
