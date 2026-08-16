@@ -8,7 +8,9 @@ const BotMessage = require("../models/BotMessage");
 // strings here) so the two stay in sync automatically.
 const DEFAULTS = {
   welcome_text: () => menus.welcomeText,
+  main_menu_header: () => menus.mainMenu.header,
   main_menu_body: () => menus.mainMenu.body,
+  main_menu_footer: () => menus.mainMenu.footer,
   promotions_menu_body: () => menus.promotionsMenu.body,
   location_text: () => menus.textReplies.location,
   support_text: () => menus.textReplies.support,
@@ -49,9 +51,14 @@ async function getMessage(key) {
   return DEFAULTS[key]();
 }
 
-/** Returns a copy of menus.mainMenu with its body replaced by the current override (if any). */
+/** Returns a copy of menus.mainMenu with its header/body/footer replaced by the current overrides (if any). */
 async function buildMainMenu() {
-  return { ...menus.mainMenu, body: await getMessage("main_menu_body") };
+  return {
+    ...menus.mainMenu,
+    header: await getMessage("main_menu_header"),
+    body: await getMessage("main_menu_body"),
+    footer: await getMessage("main_menu_footer"),
+  };
 }
 
 /** Returns a copy of menus.promotionsMenu with its body replaced by the current override (if any). */

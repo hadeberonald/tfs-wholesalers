@@ -831,7 +831,9 @@ export default function WhatsAppAdminPage() {
 
 type MessageKey =
   | 'welcome_text'
+  | 'main_menu_header'
   | 'main_menu_body'
+  | 'main_menu_footer'
   | 'promotions_menu_body'
   | 'location_text'
   | 'support_text'
@@ -849,7 +851,9 @@ interface BotMessageDoc {
 
 const MESSAGE_SLOTS: { key: MessageKey; label: string; hint: string }[] = [
   { key: 'welcome_text', label: 'Welcome message', hint: 'Sent when a customer says "hi" or "menu"' },
+  { key: 'main_menu_header', label: 'Main menu header', hint: 'The bold title at the top of the main menu list' },
   { key: 'main_menu_body', label: 'Main menu body', hint: 'The line shown above the main menu options' },
+  { key: 'main_menu_footer', label: 'Main menu footer', hint: 'The small line shown below the main menu options' },
   { key: 'promotions_menu_body', label: 'Promotions menu body', hint: 'The line shown above the promotions options' },
   { key: 'location_text', label: 'Location message', hint: 'Sent when a customer selects Location — make sure this is the real address before going live' },
   { key: 'support_text', label: 'Support message', hint: 'Sent when a customer selects Customer support' },

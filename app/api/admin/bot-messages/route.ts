@@ -7,7 +7,9 @@ export const dynamic = 'force-dynamic';
 
 const VALID_KEYS = [
   'welcome_text',
+  'main_menu_header',
   'main_menu_body',
+  'main_menu_footer',
   'promotions_menu_body',
   'location_text',
   'support_text',
