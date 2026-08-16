@@ -20,9 +20,15 @@ const VALID_KEYS = [
 type MessageKey = (typeof VALID_KEYS)[number];
 
 /**
- * Each branch's WhatsApp bot lives in its own folder (whatsapp-bot,
- * whatsapp-bot-2, whatsapp-bot-3 for Vryheid / Dundee / Ladysmith) and
- * connects to its own database on the same Mongo cluster.
+ * Each branch's WhatsApp bot lives in its own folder and connects to its own
+ * database on the same Mongo cluster:
+ *   - whatsapp-bot          → Dundee    (formerly Vryheid; repointed here)
+ *   - whatsapp-bot-branch2  → Ladysmith (Render callback URL + Mongo not
+ *                             configured yet — this will error gracefully
+ *                             with "not set" / "aren't deployed yet" until
+ *                             WHATSAPP_MONGODB_URI_2 is added)
+ *   - whatsapp-bot-branch3  → Vryheid   (planned for later — same graceful
+ *                             error until WHATSAPP_MONGODB_URI_3 is added)
  *
  * IMPORTANT: this file intentionally never does `import mongoose from
  * 'mongoose'` at the top. Next.js's bundler can treat an `import` of a
@@ -43,7 +49,7 @@ type ModelResult = { model: any } | { error: string };
 
 async function getBotMessageModel(slug: string): Promise<ModelResult> {
   try {
-    if (slug === 'vryheid') {
+    if (slug === 'dundee') {
       const { connectDB } = require('../../../../whatsapp-bot/src/config/db');
       await connectDB();
       // Reuse the model already compiled in whatsapp-bot/src/models/BotMessage.js
@@ -53,24 +59,11 @@ async function getBotMessageModel(slug: string): Promise<ModelResult> {
       return { model: BotMessage };
     }
 
-    if (slug === 'dundee') {
-      const mongoose = require('mongoose');
-      const { schema } = require('../../../../whatsapp-bot-2/src/models/botMessageSchema');
-      const uri = process.env.WHATSAPP_MONGODB_URI_2;
-      if (!uri) return { error: 'WHATSAPP_MONGODB_URI_2 is not set' };
-      if (!extraConnections.dundee) {
-        extraConnections.dundee = mongoose.createConnection(uri, { serverSelectionTimeoutMS: 10000 });
-        await extraConnections.dundee.asPromise();
-      }
-      const conn = extraConnections.dundee;
-      return { model: conn.models.BotMessage || conn.model('BotMessage', schema) };
-    }
-
     if (slug === 'ladysmith') {
       const mongoose = require('mongoose');
-      const { schema } = require('../../../../whatsapp-bot-3/src/models/botMessageSchema');
-      const uri = process.env.WHATSAPP_MONGODB_URI_3;
-      if (!uri) return { error: 'WHATSAPP_MONGODB_URI_3 is not set' };
+      const { schema } = require('../../../../whatsapp-bot-branch2/src/models/botMessageSchema');
+      const uri = process.env.WHATSAPP_MONGODB_URI_2;
+      if (!uri) return { error: 'WHATSAPP_MONGODB_URI_2 is not set' };
       if (!extraConnections.ladysmith) {
         extraConnections.ladysmith = mongoose.createConnection(uri, { serverSelectionTimeoutMS: 10000 });
         await extraConnections.ladysmith.asPromise();
@@ -79,10 +72,23 @@ async function getBotMessageModel(slug: string): Promise<ModelResult> {
       return { model: conn.models.BotMessage || conn.model('BotMessage', schema) };
     }
 
+    if (slug === 'vryheid') {
+      const mongoose = require('mongoose');
+      const { schema } = require('../../../../whatsapp-bot-branch3/src/models/botMessageSchema');
+      const uri = process.env.WHATSAPP_MONGODB_URI_3;
+      if (!uri) return { error: 'WHATSAPP_MONGODB_URI_3 is not set' };
+      if (!extraConnections.vryheid) {
+        extraConnections.vryheid = mongoose.createConnection(uri, { serverSelectionTimeoutMS: 10000 });
+        await extraConnections.vryheid.asPromise();
+      }
+      const conn = extraConnections.vryheid;
+      return { model: conn.models.BotMessage || conn.model('BotMessage', schema) };
+    }
+
     return { error: `No WhatsApp bot configured for branch "${slug}"` };
   } catch (err: any) {
-    // Most likely cause: whatsapp-bot-2 / whatsapp-bot-3 don't exist in this
-    // deployment yet.
+    // Most likely cause: whatsapp-bot-branch2 or whatsapp-bot-branch3 doesn't
+    // exist or isn't configured (schema file missing, folder not deployed yet).
     return { error: `Bot files for "${slug}" aren't deployed yet (${err.message})` };
   }
 }
@@ -107,7 +113,7 @@ async function resolveSlugFromRequest(
   return getBranchSlug(auth.branchId);
 }
 
-// GET /api/admin/bot-messages[?branch=vryheid|dundee|ladysmith]
+// GET /api/admin/bot-messages[?branch=dundee|ladysmith|vryheid]
 // Returns the current overrides for the caller's branch's bot (or the
 // branch given in ?branch= for super-admins).
 export async function GET(request: NextRequest) {
@@ -117,7 +123,7 @@ export async function GET(request: NextRequest) {
   const slug = await resolveSlugFromRequest(auth, request);
   if (!slug) {
     return NextResponse.json(
-      { error: auth.isSuperAdmin ? 'Pass ?branch=vryheid|dundee|ladysmith' : 'No branch found for this account' },
+      { error: auth.isSuperAdmin ? 'Pass ?branch=dundee|ladysmith|vryheid' : 'No branch found for this account' },
       { status: 400 }
     );
   }
@@ -142,7 +148,7 @@ export async function POST(request: NextRequest) {
   const slug = await resolveSlugFromRequest(auth, request);
   if (!slug) {
     return NextResponse.json(
-      { error: auth.isSuperAdmin ? 'Pass ?branch=vryheid|dundee|ladysmith' : 'No branch found for this account' },
+      { error: auth.isSuperAdmin ? 'Pass ?branch=dundee|ladysmith|vryheid' : 'No branch found for this account' },
       { status: 400 }
     );
   }
@@ -184,7 +190,7 @@ export async function DELETE(request: NextRequest) {
   const slug = await resolveSlugFromRequest(auth, request);
   if (!slug) {
     return NextResponse.json(
-      { error: auth.isSuperAdmin ? 'Pass ?branch=vryheid|dundee|ladysmith' : 'No branch found for this account' },
+      { error: auth.isSuperAdmin ? 'Pass ?branch=dundee|ladysmith|vryheid' : 'No branch found for this account' },
       { status: 400 }
     );
   }

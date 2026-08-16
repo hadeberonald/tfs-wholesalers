@@ -61,6 +61,7 @@ async function handleIncomingMessage(waId, message) {
       await handoff.customerExitsHandoff(waId);
     }
     await logEvent("menu_viewed", { waId });
+    await sendText(waId, await getMessage("welcome_text"));
     await sendList(waId, await buildMainMenu());
     await setSession(waId, { currentMenu: "main_menu" });
     return;
