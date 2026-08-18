@@ -5,13 +5,15 @@ const mongoose = require("mongoose");
  * list in sync with services/messages.js (DEFAULTS) and the admin UI
  * (MESSAGE_SLOTS in app/[slug]/admin/whatsapp/_page.tsx).
  *
- * This file is duplicated into whatsapp-bot-2 (Dundee) and whatsapp-bot-3
- * (Ladysmith) as-is — it has no branch-specific content, since each bot
- * folder connects to its own database.
+ * This file is duplicated into whatsapp-bot-branch2 (Ladysmith) and
+ * whatsapp-bot-branch3 (Vryheid) as-is — it has no branch-specific content,
+ * since each bot folder connects to its own database.
  */
 const EDITABLE_KEYS = [
   "welcome_text",
+  "main_menu_header",
   "main_menu_body",
+  "main_menu_footer",
   "promotions_menu_body",
   "location_text",
   "support_text",

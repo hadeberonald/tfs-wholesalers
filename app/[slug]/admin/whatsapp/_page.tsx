@@ -392,14 +392,6 @@ function Page4Billable({ data }: { data: any }) {
         <KpiCard label="Non-billable (free tier) messages" value={fmt(nonBillable)} />
       </div>
 
-      {!data.billableRatesConfigured && (
-        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
-          Conversation rates aren't configured yet, so spend shows as {fmtMoney(0, currency)}. Set WA_RATE_MARKETING /
-          WA_RATE_UTILITY / WA_RATE_SERVICE / WA_RATE_AUTHENTICATION (and WA_RATE_CURRENCY) in the bot's environment to
-          match your current Meta conversation-based price card, and this will populate automatically.
-        </div>
-      )}
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="border border-slate-200 rounded-xl p-4 bg-white">
           <SectionHeader title="Billable Spend By Category" subtitle={`Rate × billable count, in ${currency}`} />
@@ -684,6 +676,7 @@ const SLOTS: { key: PromoKey; label: string; hint: string; defaultCaption: strin
 ];
 
 function PromoFilesTab() {
+  const { slug } = useParams<{ slug: string }>();
   const [docs, setDocs] = useState<Record<string, PromoDoc>>({});
   const [captions, setCaptions] = useState<Record<PromoKey, string>>({
     retail_promo: '', wholesale_promo: '', daily_specials: '',
@@ -695,7 +688,7 @@ function PromoFilesTab() {
 
   const fetchDocs = async () => {
     try {
-      const res = await fetch('/api/admin/promo-files');
+      const res = await fetch(`/api/admin/promo-files?branch=${slug}`);
       if (res.ok) {
         const data = await res.json();
         const byKey: Record<string, PromoDoc> = {};
@@ -735,7 +728,7 @@ function PromoFilesTab() {
       const resourceType = file.type === 'application/pdf' ? 'raw' : 'image';
       const fileUrl = await uploadToCloudinary(file, resourceType);
 
-      const res = await fetch('/api/admin/promo-files', {
+      const res = await fetch(`/api/admin/promo-files?branch=${slug}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, fileUrl, filename: file.name, caption: captions[key] }),
@@ -838,7 +831,9 @@ export default function WhatsAppAdminPage() {
 
 type MessageKey =
   | 'welcome_text'
+  | 'main_menu_header'
   | 'main_menu_body'
+  | 'main_menu_footer'
   | 'promotions_menu_body'
   | 'location_text'
   | 'support_text'
@@ -856,7 +851,9 @@ interface BotMessageDoc {
 
 const MESSAGE_SLOTS: { key: MessageKey; label: string; hint: string }[] = [
   { key: 'welcome_text', label: 'Welcome message', hint: 'Sent when a customer says "hi" or "menu"' },
+  { key: 'main_menu_header', label: 'Main menu header', hint: 'The bold title at the top of the main menu list' },
   { key: 'main_menu_body', label: 'Main menu body', hint: 'The line shown above the main menu options' },
+  { key: 'main_menu_footer', label: 'Main menu footer', hint: 'The small line shown below the main menu options' },
   { key: 'promotions_menu_body', label: 'Promotions menu body', hint: 'The line shown above the promotions options' },
   { key: 'location_text', label: 'Location message', hint: 'Sent when a customer selects Location — make sure this is the real address before going live' },
   { key: 'support_text', label: 'Support message', hint: 'Sent when a customer selects Customer support' },
