@@ -26,6 +26,7 @@ import {
   Package,
 } from 'lucide-react-native';
 import { useStore } from '@/lib/store';
+import { getLogoForBranchSlug } from '@/lib/branch-logo-map';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface HeaderProps {
@@ -43,6 +44,12 @@ export default function Header({ showBack, title }: HeaderProps) {
   const logout = useStore((state) => state.logout);
 
   const isAuthenticated = !!user;
+
+  // Branch-specific in-app logo (separate from the OS home-screen icon,
+  // which is handled by lib/icon-switcher.ts + lib/branch-icon-map.ts).
+  // Falls back to the neutral default logo when there's no branch yet
+  // or the slug isn't mapped.
+  const logoSource = getLogoForBranchSlug(branch?.slug);
 
   const [menuOpen,        setMenuOpen]        = useState(false);
   const [shopExpanded,    setShopExpanded]    = useState(false);
@@ -125,7 +132,7 @@ export default function Header({ showBack, title }: HeaderProps) {
                 <ArrowLeft color="#1f2937" size={24} />
               </TouchableOpacity>
             ) : (
-              <Image source={require('@/assets/logo.png')} style={styles.logo} resizeMode="contain" />
+              <Image source={logoSource} style={styles.logo} resizeMode="contain" />
             )}
             {title && <Text style={styles.titleText}>{title}</Text>}
           </View>
@@ -258,13 +265,6 @@ export default function Header({ showBack, title }: HeaderProps) {
 
               <View style={styles.divider} />
 
-              {branch && (
-                <MenuRow
-                  icon={<Store color="#6b7280" size={18} />}
-                  label="Change Branch"
-                  onPress={() => navigate('/branch-select')}
-                />
-              )}
 
               {isAuthenticated && (
                 <MenuRow
