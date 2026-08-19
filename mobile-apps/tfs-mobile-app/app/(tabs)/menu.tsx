@@ -1,13 +1,20 @@
+import { useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useStore } from '@/lib/store';
+import { locateNearestBranch, BranchLocationError } from '@/lib/branchLocation';
+import { getIconKeyForBranchSlug } from '@/lib/branch-icon-map';
+import { switchAppIcon } from '@/lib/icon-switcher';
 
 export default function MenuScreen() {
   const router          = useRouter();
   const user            = useStore((state) => state.user);
   const branch          = useStore((state) => state.branch);
+  const setBranch       = useStore((state) => state.setBranch);
   const isAuthenticated = useStore((state) => state.isAuthenticated);
   const logout          = useStore((state) => state.logout);
+
+  const [refreshingLocation, setRefreshingLocation] = useState(false);
 
   const handleLogout = () => {
     Alert.alert(
@@ -20,24 +27,36 @@ export default function MenuScreen() {
           style: 'destructive',
           onPress: async () => {
             await logout();
-            // Replace the entire stack so the user can't swipe back into an
-            // authenticated screen. Branch-select will fetch fresh data on mount.
-            router.replace('/branch-select');
+            // Signing out doesn't change which branch you're shopping —
+            // that's purely location-based — so just land back on tabs.
+            router.replace('/(tabs)');
           },
         },
       ]
     );
   };
 
-  const handleChangeBranch = () => {
-    Alert.alert(
-      'Change Branch',
-      'This will clear your cart. Continue?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Continue', onPress: () => router.push('/branch-select') },
-      ]
-    );
+  const handleRefreshLocation = async () => {
+    try {
+      setRefreshingLocation(true);
+      const nearest = await locateNearestBranch();
+      setBranch(nearest);
+
+      // Same icon-switch guard rails as the initial resolve on app open —
+      // relevant if the customer has traveled into a different branch's area.
+      const iconKey = getIconKeyForBranchSlug(nearest.slug);
+      await switchAppIcon(iconKey);
+
+      Alert.alert('Branch Updated', `You're now shopping at ${nearest.displayName || nearest.name}.`);
+    } catch (err) {
+      const message =
+        err instanceof BranchLocationError
+          ? branchErrorMessage(err.code)
+          : 'Something went wrong while checking your location.';
+      Alert.alert('Could not update branch', message);
+    } finally {
+      setRefreshingLocation(false);
+    }
   };
 
   return (
@@ -77,10 +96,10 @@ export default function MenuScreen() {
         )}
       </View>
 
-      {/* Branch Info */}
+      {/* Branch Info — location-based only, no manual switching */}
       {branch && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Current Branch</Text>
+          <Text style={styles.sectionTitle}>Your Branch</Text>
           <View style={styles.branchCard}>
             <View style={styles.branchIcon}>
               <Text style={styles.branchIconText}>🏪</Text>
@@ -94,8 +113,17 @@ export default function MenuScreen() {
               )}
             </View>
           </View>
-          <TouchableOpacity style={styles.changeBranchButton} onPress={handleChangeBranch}>
-            <Text style={styles.changeBranchText}>Change Branch</Text>
+          <Text style={styles.branchHint}>
+            We automatically match you to your nearest branch based on your location.
+          </Text>
+          <TouchableOpacity
+            style={styles.changeBranchButton}
+            onPress={handleRefreshLocation}
+            disabled={refreshingLocation}
+          >
+            <Text style={styles.changeBranchText}>
+              {refreshingLocation ? 'Checking location…' : 'Refresh My Location'}
+            </Text>
           </TouchableOpacity>
         </View>
       )}
@@ -151,6 +179,21 @@ export default function MenuScreen() {
   );
 }
 
+function branchErrorMessage(code: string) {
+  switch (code) {
+    case 'PERMISSION_DENIED':
+      return 'Location access is off. Enable it in Settings to update your branch.';
+    case 'LOCATION_UNAVAILABLE':
+      return 'Make sure location services are turned on, then try again.';
+    case 'NO_BRANCHES':
+      return "We couldn't find a branch near you.";
+    case 'NETWORK_ERROR':
+      return 'Check your internet connection and try again.';
+    default:
+      return 'Please try again.';
+  }
+}
+
 function MenuItem({
   icon, title, subtitle, onPress,
 }: {
@@ -189,12 +232,13 @@ const styles = StyleSheet.create({
   signInTitle:             { fontSize: 18, fontWeight: 'bold', color: '#1f2937', marginBottom: 4 },
   signInSubtitle:          { fontSize: 14, color: '#6b7280' },
   arrow:                   { fontSize: 24, color: '#FF6B35' },
-  branchCard:              { backgroundColor: '#fff', borderRadius: 12, padding: 16, flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  branchCard:              { backgroundColor: '#fff', borderRadius: 12, padding: 16, flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   branchIcon:              { width: 50, height: 50, borderRadius: 25, backgroundColor: '#fef3e9', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   branchIconText:          { fontSize: 24 },
   branchInfo:              { flex: 1 },
   branchName:              { fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 4 },
   branchAddress:           { fontSize: 14, color: '#6b7280' },
+  branchHint:              { fontSize: 12, color: '#9ca3af', marginBottom: 10, lineHeight: 16 },
   changeBranchButton:      { backgroundColor: '#f3f4f6', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
   changeBranchText:        { fontSize: 14, fontWeight: '600', color: '#1f2937' },
   menuItem:                { backgroundColor: '#fff', borderRadius: 12, padding: 16, flexDirection: 'row', alignItems: 'center', marginBottom: 8 },

@@ -11,8 +11,9 @@ const isExpoGo = Constants.appOwnership === 'expo';
  * icon, via this library's dedicated MainActivityDEFAULT alias).
  *
  * This is intentionally the ONLY place in the app that touches the native
- * icon API, so every call site (onboarding detection, manual branch picker)
- * goes through the same guard rails:
+ * icon API, so every call site (onboarding detection, automatic
+ * location-based branch resolution on launch, and the "Refresh My
+ * Location" action in the menu) goes through the same guard rails:
  *  - no-ops safely inside Expo Go (native module isn't available there)
  *  - skips the native call entirely if the icon is already correct, so we
  *    never trigger a redundant iOS alert / Android process relaunch

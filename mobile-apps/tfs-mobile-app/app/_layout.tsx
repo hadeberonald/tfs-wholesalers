@@ -3,10 +3,8 @@ import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useStore } from '@/lib/store';
-import api from '@/lib/api';
 import {
   setNotificationRouter,
   registerForPushNotifications,
@@ -16,14 +14,25 @@ import DeliveryNpsModal from './DeliveryNpsModal';
 import { usePendingDeliveryReview } from '../hooks/usePendingDeliveryReview';
 
 export default function RootLayout() {
-  const router    = useRouter();
-  const setUser   = useStore((state) => state.setUser);
-  const setBranch = useStore((state) => state.setBranch);
-  const [isLoading, setIsLoading] = useState(true);
+  const router = useRouter();
+  const [isHydrated, setIsHydrated] = useState(useStore.persist.hasHydrated());
 
   const { pendingReview, dismiss } = usePendingDeliveryReview();
 
-  useEffect(() => { loadStoredData(); }, []);
+  // useStore is wrapped in zustand's `persist` middleware (lib/store.ts),
+  // which restores user/branch/cart/wishlist from AsyncStorage on its own.
+  // We just wait for that to finish rather than re-reading AsyncStorage
+  // manually here — doing both was racing two separate restores of the
+  // same data.
+  useEffect(() => {
+    if (useStore.persist.hasHydrated()) {
+      setIsHydrated(true);
+      return;
+    }
+    const unsub = useStore.persist.onFinishHydration(() => setIsHydrated(true));
+    return unsub;
+  }, []);
+
   useEffect(() => { setNotificationRouter(router); }, [router]);
   useEffect(() => {
     registerForPushNotifications().catch(() => {});
@@ -31,29 +40,7 @@ export default function RootLayout() {
     return cleanup;
   }, []);
 
-  const loadStoredData = async () => {
-    try {
-      const userStr = await AsyncStorage.getItem('user');
-      if (userStr) setUser(JSON.parse(userStr));
-
-      const branchSlug = await AsyncStorage.getItem('selectedBranch');
-      if (branchSlug) {
-        const response = await api.get(`/api/mobile/branches/${branchSlug}`);
-        if (response.data.success && response.data.branch) {
-          setBranch(response.data.branch);
-        } else {
-          await AsyncStorage.removeItem('selectedBranch');
-        }
-      }
-    } catch (error) {
-      console.error('[ROOT LAYOUT] Failed to load stored data:', error);
-      await AsyncStorage.removeItem('selectedBranch');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  if (isLoading) {
+  if (!isHydrated) {
     return (
       <SafeAreaProvider>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f9fafb' }}>
@@ -69,7 +56,6 @@ export default function RootLayout() {
 
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#f9fafb' } }}>
         <Stack.Screen name="index" />
-        <Stack.Screen name="branch-select" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="shop" />
         <Stack.Screen name="specials" />
@@ -95,10 +81,7 @@ export default function RootLayout() {
         <Stack.Screen name="order-being-picked" />
       </Stack>
 
-      <DeliveryNpsModal
-        pendingReview={pendingReview}
-        onDismiss={dismiss}
-      />
+      <DeliveryNpsModal pendingReview={pendingReview} onDismiss={dismiss} />
     </SafeAreaProvider>
   );
 }
