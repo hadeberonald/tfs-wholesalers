@@ -13,7 +13,13 @@ import {
 } from '@/lib/branchLocation';
 import { getIconKeyForBranchSlug } from '@/lib/branch-icon-map';
 import { switchAppIcon } from '@/lib/icon-switcher';
-import { useOnboardingIconDetection } from '@/hooks/useOnboardingIconDetection';
+// useOnboardingIconDetection() REMOVED — it duplicated resolveBranch()'s
+// job (location -> branch fetch -> nearest match -> switchAppIcon) and ran
+// concurrently with it on every cold start. Two simultaneous native
+// icon-switch calls racing each other was the actual crash: overlapping
+// writes to Android's component-enabled state, not just the expected
+// single process relaunch. resolveBranch() below already covers first-run
+// detection on every launch, so this hook has no job left to do.
 
 type Phase = 'locating' | 'error';
 
@@ -23,11 +29,6 @@ export default function Index() {
   const [phase, setPhase] = useState<Phase>('locating');
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [debug, setDebug] = useState<ResolutionDebug | null>(null);
-
-  // Fires once, ever — guarded internally by an AsyncStorage flag (see the
-  // hook itself). Used to live on branch-select.tsx; this screen is now the
-  // first thing every user lands on, so it moved here.
-  useOnboardingIconDetection();
 
   useEffect(() => {
     resolveBranch();

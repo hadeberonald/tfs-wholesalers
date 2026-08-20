@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -46,10 +46,29 @@ export default function Header({ showBack, title }: HeaderProps) {
   const isAuthenticated = !!user;
 
   // Branch-specific in-app logo (separate from the OS home-screen icon,
-  // which is handled by lib/icon-switcher.ts + lib/branch-icon-map.ts).
-  // Falls back to the neutral default logo when there's no branch yet
-  // or the slug isn't mapped.
+  // which is handled by lib/icon-switcher.ts + lib/branch-icon-map.ts) —
+  // same per-slug lookup pattern as the icon switching. Falls back to the
+  // neutral default logo when there's no branch yet or the slug isn't
+  // mapped.
   const logoSource = getLogoForBranchSlug(branch?.slug);
+
+  // Logo crops aren't all the same aspect ratio (some are 2:1, some are
+  // 1:1), so a fixed width+height box would letterbox them inconsistently
+  // - the 1:1 ones would render visibly smaller than the 2:1 ones inside
+  // the same box. Instead: fix the height and derive width from each
+  // image's real resolved dimensions, so every logo renders at the same
+  // height and its own correct, undistorted aspect ratio. Recomputes only
+  // when the logo asset actually changes.
+  const LOGO_HEIGHT = 52; // was 40 - bigger, still fits comfortably in the header row
+  const logoWidth = useMemo(() => {
+    const dims = Image.resolveAssetSource(logoSource);
+    if (dims?.width && dims?.height) {
+      return (LOGO_HEIGHT * dims.width) / dims.height;
+    }
+    // Fallback if dimensions can't be resolved (shouldn't happen for
+    // bundled static assets, but don't let the header break if it does).
+    return LOGO_HEIGHT * 2;
+  }, [logoSource]);
 
   const [menuOpen,        setMenuOpen]        = useState(false);
   const [shopExpanded,    setShopExpanded]    = useState(false);
@@ -132,7 +151,11 @@ export default function Header({ showBack, title }: HeaderProps) {
                 <ArrowLeft color="#1f2937" size={24} />
               </TouchableOpacity>
             ) : (
-              <Image source={logoSource} style={styles.logo} resizeMode="contain" />
+              <Image
+                source={logoSource}
+                style={{ width: logoWidth, height: LOGO_HEIGHT }}
+                resizeMode="contain"
+              />
             )}
             {title && <Text style={styles.titleText}>{title}</Text>}
           </View>
@@ -351,9 +374,8 @@ const styles = StyleSheet.create({
   outerWrap:       { zIndex: 100 },
   container:       { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
   headerRow:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 12 },
-  left:            { flexDirection: 'row', alignItems: 'center' },
+  left:            { flexDirection: 'row', alignItems: 'center', paddingLeft: 8 },
   right:           { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  logo:            { width: 120, height: 40 },
   titleText:       { fontSize: 18, fontWeight: '600', color: '#1f2937', marginLeft: 12 },
   iconBtn:         { position: 'relative', padding: 8 },
   hamburgerWrap:   { width: 22, height: 16, justifyContent: 'space-between' },

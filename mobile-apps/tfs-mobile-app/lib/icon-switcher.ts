@@ -17,6 +17,17 @@ const isExpoGo = Constants.appOwnership === 'expo';
  *  - no-ops safely inside Expo Go (native module isn't available there)
  *  - skips the native call entirely if the icon is already correct, so we
  *    never trigger a redundant iOS alert / Android process relaunch
+ *  - NEVER throws — an icon mismatch is cosmetic, never a reason to take
+ *    down the app. Callers can still inspect the boolean return value if
+ *    they care whether it actually happened.
+ *
+ * IMPORTANT: on Android, actually changing the icon (i.e. when this does
+ * NOT hit the "already correct" skip) kills and restarts the app process.
+ * That's OS behavior for activity-alias based icon switching, not
+ * something this function can prevent. Callers should treat any code
+ * after `await switchAppIcon(...)` as "might never run on this process
+ * instance" — see app/index.tsx for how navigation is sequenced around
+ * this.
  */
 export async function switchAppIcon(iconKey: IconKey): Promise<boolean> {
   if (isExpoGo) {
@@ -28,10 +39,9 @@ export async function switchAppIcon(iconKey: IconKey): Promise<boolean> {
   }
 
   try {
-    const current = await DynamicAppIcon.getAppIcon();
-    const currentNormalized = current === 'DEFAULT' ? null : current;
+    const current = await getCurrentAppIcon();
 
-    if (currentNormalized === iconKey) {
+    if (current === iconKey) {
       console.log('[ICON] Already set to', iconKey ?? 'default', '- skipping');
       return true;
     }
@@ -40,7 +50,28 @@ export async function switchAppIcon(iconKey: IconKey): Promise<boolean> {
     await DynamicAppIcon.setAppIcon(iconKey);
     return true;
   } catch (err) {
+    // Deliberately swallowed. A failed/rejected icon switch (e.g. user
+    // dismissed the iOS "change icon?" system alert, or a transient
+    // native module hiccup) must never surface as an unhandled rejection
+    // that could crash the app or block navigation.
     console.error('[ICON] Failed to switch icon:', err);
     return false;
+  }
+}
+
+/**
+ * Reads the currently-active icon, normalized to the same IconKey shape
+ * used everywhere else (null = default). Never throws — returns null on
+ * any failure so callers can treat "unknown" the same as "default" rather
+ * than crashing on a native module error.
+ */
+export async function getCurrentAppIcon(): Promise<IconKey> {
+  if (isExpoGo) return null;
+  try {
+    const current = await DynamicAppIcon.getAppIcon();
+    return current === 'DEFAULT' ? null : (current as IconKey);
+  } catch (err) {
+    console.error('[ICON] Failed to read current icon:', err);
+    return null;
   }
 }

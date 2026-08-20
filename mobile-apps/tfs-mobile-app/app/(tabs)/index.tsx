@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  Image, Dimensions, StyleSheet, ActivityIndicator,
+  Image, Dimensions, StyleSheet, ActivityIndicator, TextInput,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ShoppingBag, Package, Tag, ArrowRight, Star } from 'lucide-react-native';
+import { ShoppingBag, Package, Tag, ArrowRight, Star, Search, X } from 'lucide-react-native';
 import { useStore } from '@/lib/store';
 import ProductCard from '@/components/ProductCard';
 import SpecialCard from '@/components/SpecialCard';
@@ -39,6 +39,7 @@ export default function HomeScreen() {
   const [featuredCombos,      setFeaturedCombos]      = useState<Combo[]>([]);
   const [loading,             setLoading]             = useState(true);
   const [activeSlide,         setActiveSlide]         = useState(0);
+  const [searchQuery,         setSearchQuery]         = useState('');
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => { if (branch) loadData(); }, [branch]);
@@ -95,6 +96,17 @@ export default function HomeScreen() {
   const navigateToCategory = (categoryId: string) =>
     router.push({ pathname: '/(tabs)/shop', params: { categoryId } });
 
+  const handleSearchSubmit = () => {
+    const trimmed = searchQuery.trim();
+    if (trimmed.length < 2) return;
+    router.push({
+      pathname: '/(tabs)/shop',
+      params: { tab: 'products', search: trimmed },
+    });
+  };
+
+  const handleClearSearch = () => setSearchQuery('');
+
   const dealsFeed: FeedItem[] = [
     ...featuredSpecials.map((s): FeedItem => ({ kind: 'special', data: s })),
     ...featuredCombos.map((c):   FeedItem => ({ kind: 'combo',   data: c })),
@@ -115,6 +127,38 @@ export default function HomeScreen() {
 
   return (
     <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+
+      {/* ── Search bar ───────────────────────────────────────────────────── */}
+      <View style={styles.searchBarWrapper}>
+        <View style={styles.searchContainer}>
+          <Search
+            color="#6b7280"
+            size={20}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+          />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search products…"
+            placeholderTextColor="#9ca3af"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            onSubmitEditing={handleSearchSubmit}
+            returnKeyType="search"
+            accessibilityLabel="Search products"
+            accessibilityHint="Enter at least 2 characters and press search to see results"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity
+              onPress={handleClearSearch}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+            >
+              <X color="#6b7280" size={20} />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
 
       {/* ── Featured category hero carousel ─────────────────────────────── */}
       {featuredCategories.length > 0 && (
@@ -274,6 +318,14 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   scrollView:       { flex: 1, backgroundColor: '#f9fafb' },
   centerContainer:  { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
+  searchBarWrapper: { paddingHorizontal: 16, marginTop: 16 },
+  searchContainer: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#f3f4f6', borderRadius: 12,
+    paddingHorizontal: 16, paddingVertical: 12, gap: 12,
+  },
+  searchInput: { flex: 1, fontSize: 16, color: '#1f2937' },
 
   carouselContainer:    { marginBottom: 0, marginTop: 16 },
   carouselContent:      { gap: 16 },

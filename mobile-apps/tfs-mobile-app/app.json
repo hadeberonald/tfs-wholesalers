@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "TFS Wholesalers",
+    "name": "TFS Shopping",
     "slug": "tfs-wholesalers",
     "version": "1.1.0",
     "orientation": "portrait",
@@ -19,7 +19,7 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FF6B35"
+      "backgroundColor": "#FFFFFF"
     },
 
     "assetBundlePatterns": ["**/*"],
@@ -27,7 +27,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.tfswholesalers.app",
-      "buildNumber": "0",
+      "buildNumber": "1",
 
       "config": {
         "googleMapsApiKey": "AIzaSyBnssZMeuqy3Y074vdvp_4-BePD6cGwaTM"
@@ -97,21 +97,21 @@
         "@praneeth26/expo-dynamic-app-identity",
         {
           "dundee": {
-            "ios": "./assets/icons/tfs-dundee.png",
+            "ios": "./assets/icons/ios/tfs-dundee-ios.png",
             "android": {
               "foregroundImage": "./assets/icons/tfs-dundee.png",
               "backgroundColor": "#FF6B35"
             }
           },
           "vryheid": {
-            "ios": "./assets/icons/tfs-vryheid.png",
+            "ios": "./assets/icons/ios/tfs-vryheid-ios.png",
             "android": {
               "foregroundImage": "./assets/icons/tfs-vryheid.png",
               "backgroundColor": "#FF6B35"
             }
           },
           "ladysmith": {
-            "ios": "./assets/icons/tfs-ladysmith.png",
+            "ios": "./assets/icons/ios/tfs-ladysmith-ios.png",
             "android": {
               "foregroundImage": "./assets/icons/tfs-ladysmith.png",
               "backgroundColor": "#FF6B35"
