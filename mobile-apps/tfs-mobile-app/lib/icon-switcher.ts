@@ -1,5 +1,5 @@
 import Constants from 'expo-constants';
-import * as DynamicAppIcon from '@praneeth26/expo-dynamic-app-identity';
+import { setAppIcon as _setAppIcon, getAppIcon as _getAppIcon } from '@howincodes/expo-dynamic-app-icon';
 import type { IconKey } from './branch-icon-map';
 
 const isExpoGo = Constants.appOwnership === 'expo';
@@ -7,27 +7,33 @@ const isExpoGo = Constants.appOwnership === 'expo';
 /**
  * Switches the home-screen icon.
  *
- * iconKey: 'dundee' | 'vryheid' | null (null = reset to the default/main
- * icon, via this library's dedicated MainActivityDEFAULT alias).
+ * iconKey: 'dundee' | 'vryheid' | 'ladysmith' | null (null = reset to
+ * default).
  *
- * This is intentionally the ONLY place in the app that touches the native
- * icon API, so every call site (onboarding detection, automatic
- * location-based branch resolution on launch, and the "Refresh My
- * Location" action in the menu) goes through the same guard rails:
+ * SWITCHED FROM @praneeth26/expo-dynamic-app-identity — that plugin's own
+ * build logs claimed success ("Icon 'AppIcon-dundee' ready") while never
+ * actually registering the generated icon files with Xcode's Copy Bundle
+ * Resources build phase, so the files never made it into the shipped
+ * .ipa (confirmed via App Store Connect's ITMS-90032 "Invalid Image
+ * Path" errors, which persisted across two rounds of otherwise-correct
+ * fixes). @howincodes/expo-dynamic-app-icon is actively maintained and
+ * uses a compatible per-branch config shape, so app.json's plugin config
+ * only needed the plugin name swapped.
+ *
+ * This is intentionally the ONLY place in the app that touches the
+ * native icon API, so every call site goes through the same guard rails:
  *  - no-ops safely inside Expo Go (native module isn't available there)
  *  - skips the native call entirely if the icon is already correct, so we
  *    never trigger a redundant iOS alert / Android process relaunch
  *  - NEVER throws — an icon mismatch is cosmetic, never a reason to take
- *    down the app. Callers can still inspect the boolean return value if
- *    they care whether it actually happened.
+ *    down the app.
  *
  * IMPORTANT: on Android, actually changing the icon (i.e. when this does
- * NOT hit the "already correct" skip) kills and restarts the app process.
- * That's OS behavior for activity-alias based icon switching, not
- * something this function can prevent. Callers should treat any code
- * after `await switchAppIcon(...)` as "might never run on this process
- * instance" — see app/index.tsx for how navigation is sequenced around
- * this.
+ * NOT hit the "already correct" skip) still kills and restarts the app
+ * process — that's OS behavior for activity-alias based icon switching,
+ * unrelated to which plugin generates the icons. Callers should treat
+ * any code after `await switchAppIcon(...)` as "might never run on this
+ * process instance."
  */
 export async function switchAppIcon(iconKey: IconKey): Promise<boolean> {
   if (isExpoGo) {
@@ -47,7 +53,14 @@ export async function switchAppIcon(iconKey: IconKey): Promise<boolean> {
     }
 
     console.log('[ICON] Switching icon to', iconKey ?? 'default');
-    await DynamicAppIcon.setAppIcon(iconKey);
+    // This package returns false on a genuine failure (rather than the
+    // old plugin's silent "always looks fine") - surface that instead of
+    // assuming success.
+    const result = await _setAppIcon(iconKey);
+    if (result === false) {
+      console.error('[ICON] setAppIcon reported failure for', iconKey ?? 'default');
+      return false;
+    }
     return true;
   } catch (err) {
     // Deliberately swallowed. A failed/rejected icon switch (e.g. user
@@ -68,8 +81,8 @@ export async function switchAppIcon(iconKey: IconKey): Promise<boolean> {
 export async function getCurrentAppIcon(): Promise<IconKey> {
   if (isExpoGo) return null;
   try {
-    const current = await DynamicAppIcon.getAppIcon();
-    return current === 'DEFAULT' ? null : (current as IconKey);
+    const current = await _getAppIcon();
+    return current === 'DEFAULT' || !current ? null : (current as IconKey);
   } catch (err) {
     console.error('[ICON] Failed to read current icon:', err);
     return null;

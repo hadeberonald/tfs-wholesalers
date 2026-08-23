@@ -94,7 +94,7 @@
       ],
 
       [
-        "@praneeth26/expo-dynamic-app-identity",
+        "@howincodes/expo-dynamic-app-icon",
         {
           "dundee": {
             "ios": "./assets/icons/ios/tfs-dundee-ios.png",

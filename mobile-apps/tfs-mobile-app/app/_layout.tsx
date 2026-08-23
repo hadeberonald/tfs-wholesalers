@@ -55,7 +55,6 @@ export default function RootLayout() {
       <StatusBar style="dark" />
 
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#f9fafb' } }}>
-        <Stack.Screen name="debug-branches" />
         <Stack.Screen name="index" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="shop" />
