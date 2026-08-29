@@ -21,7 +21,7 @@ export default function DownloadPage() {
           </h1>
 
           <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-            Access the TFS Wholesalers mobile application on Android and iOS.
+            We've updated our app. Download the latest version below to update and get the best experience.
           </p>
         </div>
 
