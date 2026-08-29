@@ -96,11 +96,13 @@ export default function DownloadPage() {
             </div>
 
             <h2 className="text-3xl font-bold text-gray-900 mb-4">
-              We've updated our app
+              Coming Soon on Google Play
             </h2>
 
             <p className="text-gray-600 leading-relaxed mb-6">
-              Download the latest version below to update and get the best experience.
+              Download and install the Android application manually using the
+              link below. We've updated our app. Download the latest version
+              below to update and get the best experience.
             </p>
 
             <a href="/apk/tfs-shopping.apk" download
