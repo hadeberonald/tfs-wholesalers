@@ -100,9 +100,9 @@ export default function DownloadPage() {
             </h2>
 
             <p className="text-gray-600 leading-relaxed mb-6">
-              Download and install the Android application manually using the
-              link below. We've updated our app. Download the latest version
-              below to update and get the best experience.
+              Install the Android application manually using the link below.
+              If you're on the old version; we've updated our app. Download
+              the latest version below to update and get the best experience.
             </p>
 
             <a href="/apk/tfs-shopping.apk" download
