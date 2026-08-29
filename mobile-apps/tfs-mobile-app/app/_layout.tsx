@@ -1,9 +1,9 @@
-// app/_layout.tsx
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import * as Application from 'expo-application';
 import { useStore } from '@/lib/store';
 import {
   setNotificationRouter,
@@ -11,7 +11,21 @@ import {
   addNotificationListeners,
 } from '@/lib/notificationService';
 import DeliveryNpsModal from './DeliveryNpsModal';
+import ForceUpdateModal from '@/components/ForceUpdateModal';
 import { usePendingDeliveryReview } from '../hooks/usePendingDeliveryReview';
+
+// This branch is only ever published as a runtimeVersion "1.0.0" OTA update.
+// Because app.json here uses runtimeVersion policy "appVersion", it can only
+// ever be delivered to native installs that were built with version "1.0.0" —
+// anyone who has already updated to the 1.1.0 native build is compiled with
+// runtimeVersion "1.1.0" and will never fetch or apply this bundle. The check
+// below is a belt-and-suspenders backstop on top of that server-side isolation,
+// reading the real native version (which OTA can never change).
+function needsForceUpdate() {
+  const current = Application.nativeApplicationVersion; // e.g. "1.0.0"
+  if (!current) return false; // fail-open if we can't determine it
+  return current.startsWith('1.0.');
+}
 
 export default function RootLayout() {
   const router = useRouter();
@@ -39,6 +53,18 @@ export default function RootLayout() {
     const cleanup = addNotificationListeners();
     return cleanup;
   }, []);
+
+  // Checked before hydration on purpose — this is a synchronous native-version
+  // read with no async cost, and an out-of-date install should never even
+  // reach the store hydration / notification registration paths above.
+  if (needsForceUpdate()) {
+    return (
+      <SafeAreaProvider>
+        <StatusBar style="dark" />
+        <ForceUpdateModal />
+      </SafeAreaProvider>
+    );
+  }
 
   if (!isHydrated) {
     return (
