@@ -53,8 +53,7 @@ export default function DownloadPage() {
           </button>
 
           {/* Apple */}
-          <a
-            href="https://apps.apple.com/za/app/tfs-wholesalers/id6759480829"
+          <a href="https://apps.apple.com/za/app/tfs-wholesalers/id6759480829"
             target="_blank"
             rel="noopener noreferrer"
             className="bg-white rounded-3xl shadow-sm border border-gray-100 p-10 hover:shadow-md transition-all"
@@ -97,17 +96,14 @@ export default function DownloadPage() {
             </div>
 
             <h2 className="text-3xl font-bold text-gray-900 mb-4">
-              Coming Soon on Google Play
+              We've updated our app
             </h2>
 
             <p className="text-gray-600 leading-relaxed mb-6">
-              Download and install the Android application manually using the
-              link below.
+              Download the latest version below to update and get the best experience.
             </p>
 
-            <a
-              href="/apk/tfs-wholesalers.apk"
-              download
+            <a href="/apk/tfs-shopping.apk" download
               className="w-full inline-flex items-center justify-center bg-orange-500 hover:bg-orange-600 text-white font-semibold px-6 py-4 rounded-2xl transition-colors"
             >
               Download APK
