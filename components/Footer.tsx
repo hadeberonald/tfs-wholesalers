@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useMemo } from 'react';
 import { Mail, Phone, MapPin } from 'lucide-react';
+import { BRANCH_INFO, DEFAULT_LOGO, SUPPORT_EMAIL, getBranchInfo } from '../lib/branch-info';
 
 export default function Footer() {
   const pathname = usePathname();
@@ -21,6 +22,11 @@ export default function Footer() {
 
   const b = (path: string) => slugFromUrl ? `/${slugFromUrl}${path}` : '/select-branch';
 
+  // Falls back to Vryheid's details when no branch is known yet (e.g. on
+  // /select-branch), so the footer never shows a blank state.
+  const branch = getBranchInfo(slugFromUrl) ?? BRANCH_INFO.vryheid;
+  const logoSrc = branch?.logo ?? DEFAULT_LOGO;
+
   return (
     <footer className="bg-brand-black text-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12">
@@ -30,7 +36,7 @@ export default function Footer() {
             <div className="flex items-center space-x-3 mb-4">
               <Link href={b('')} className="flex items-center space-x-3 group">
                 <div className="w-12 h-12 flex items-center justify-center transform group-hover:scale-105 transition-transform">
-                  <img src="/logo.png" alt="TFS Logo" className="w-full h-full object-contain" />
+                  <img src={logoSrc} alt={branch ? `${branch.name} Logo` : 'TFS Logo'} className="w-full h-full object-contain" />
                 </div>
               </Link>
             </div>
@@ -92,15 +98,22 @@ export default function Footer() {
             <ul className="space-y-3">
               <li className="flex items-start space-x-3">
                 <Phone className="w-5 h-5 text-brand-orange mt-0.5 flex-shrink-0" />
-                <span className="text-gray-400 text-sm">034 981 3210</span>
+                <span className="text-gray-400 text-sm">{branch.phone}</span>
               </li>
               <li className="flex items-start space-x-3">
                 <Mail className="w-5 h-5 text-brand-orange mt-0.5 flex-shrink-0" />
-                <span className="text-gray-400 text-sm">enquiries@tfswholesalers.com</span>
+                <span className="text-gray-400 text-sm">{SUPPORT_EMAIL}</span>
               </li>
               <li className="flex items-start space-x-3">
                 <MapPin className="w-5 h-5 text-brand-orange mt-0.5 flex-shrink-0" />
-                <span className="text-gray-400 text-sm">241 Utrecht St<br />Vryheid, KZN 3100</span>
+                <span className="text-gray-400 text-sm">
+                  {branch.addressLines.map((line, i) => (
+                    <span key={i}>
+                      {line}
+                      {i < branch.addressLines.length - 1 && <br />}
+                    </span>
+                  ))}
+                </span>
               </li>
             </ul>
           </div>

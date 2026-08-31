@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { getVisibleRoutes, groupRoutes, MANIFEST_GROUPS } from '@/lib/route-manifest';
+import { getBranchLogo } from '@/lib/branch-info';
 import toast from 'react-hot-toast';
 
 // ── Change Password Modal ─────────────────────────────────────────────────────
@@ -221,6 +222,10 @@ export default function AdminHeader() {
     return null;
   }, [pathname]);
 
+  // Admin portal logo follows the branch in the URL (e.g. /vryheid/admin),
+  // falling back to the generic logo for /admin or /super-admin.
+  const logoSrc = getBranchLogo(slug);
+
   const visibleRoutes = useMemo(() => {
     if (loading || !user) return [];
     const isSuperAdmin = user.role === 'super-admin';
@@ -273,7 +278,7 @@ export default function AdminHeader() {
               className="flex items-center space-x-2 shrink-0"
             >
               <div className="w-8 h-8 flex items-center justify-center">
-                <img src="/logo.png" alt="TFS Logo" className="w-full h-full object-contain" />
+                <img src={logoSrc} alt="TFS Logo" className="w-full h-full object-contain" />
               </div>
               <div>
                 <h1 className="text-white font-bold text-base leading-tight">Admin Portal</h1>

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useCartStore } from '../lib/store';
 import { useAuth } from '../lib/auth-context';
+import { getBranchLogo } from '../lib/branch-info';
 
 interface Branch {
   _id: string;
@@ -43,6 +44,10 @@ export default function Header() {
   const cartItems = useCartStore(state => state.items);
   const cartItemCount = cartItems.reduce((sum, item) => item.autoAdded ? sum : sum + item.quantity, 0);
   const { user, logout } = useAuth();
+
+  // The logo always reflects the branch currently in the URL/selected,
+  // falling back to the generic logo until a branch is known.
+  const logoSrc = getBranchLogo(currentBranch?.slug ?? slugFromUrl);
 
   // Fetch branches
   useEffect(() => {
@@ -164,7 +169,7 @@ export default function Header() {
             className="flex items-center space-x-2 group"
           >
             <div className="w-12 h-12 flex items-center justify-center transform group-hover:scale-105 transition-transform">
-              <img src="/logo.png" alt="TFS Logo" className="w-full h-full object-contain" />
+              <img src={logoSrc} alt={currentBranch ? `${currentBranch.name} Logo` : 'TFS Logo'} className="w-full h-full object-contain" />
             </div>
           </Link>
 
