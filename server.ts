@@ -31,7 +31,8 @@ const port = parseInt(process.env.PORT || '3000', 10);
 const app    = next({ dev });
 const handle = app.getRequestHandler();
 
-Promise.all([app.prepare(), connectDB(), connectLadysmithDB()]).then(() => {
+Promise.all([app.prepare(), connectDB(), connectLadysmithDB()])
+  .then(() => {
   const httpServer = createServer((req, res) => {
     const parsedUrl = parse(req.url!, true);
 
@@ -82,4 +83,12 @@ Promise.all([app.prepare(), connectDB(), connectLadysmithDB()]).then(() => {
     console.log(`Ladysmith webhook mounted at /whatsapp-webhook-ladysmith`);
     console.log(`Ladysmith analytics mounted at /analytics-ladysmith`);
   });
+})
+.catch((err) => {
+  // Without this, a failed connectDB()/connectLadysmithDB() (e.g. a
+  // missing or unreachable Mongo URI) rejects silently and the server
+  // just hangs with no open port until Render's deploy times out —
+  // with no clue in the logs as to why. This makes the real cause show up.
+  console.error('Fatal error during server startup:', err);
+  process.exit(1);
 });
