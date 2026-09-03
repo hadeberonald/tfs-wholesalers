@@ -8,7 +8,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import {
-  FileText, Upload, ExternalLink, Download, FileDown,
+  FileText, Upload, ExternalLink, Download, FileDown, Trash2,
   MessageSquare, MessageSquareText, CheckCheck, Users, Headphones, MousePointerClick,
   TrendingUp, TrendingDown, Minus, Sparkles, Wallet,
 } from 'lucide-react';
@@ -683,6 +683,7 @@ function PromoFilesTab() {
   });
   const [loading, setLoading] = useState(true);
   const [uploadingKey, setUploadingKey] = useState<PromoKey | null>(null);
+  const [deletingKey, setDeletingKey] = useState<PromoKey | null>(null);
 
   useEffect(() => { fetchDocs(); }, []);
 
@@ -751,6 +752,36 @@ function PromoFilesTab() {
     }
   };
 
+  const handleDelete = async (key: PromoKey) => {
+    if (!confirm('Delete this file? The bot will send its fallback text message for this slot until a new file is uploaded.')) {
+      return;
+    }
+    setDeletingKey(key);
+    try {
+      const res = await fetch(`/api/admin/promo-files?branch=${slug}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to delete file');
+      }
+
+      setDocs((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      toast.success('File deleted');
+    } catch (error: any) {
+      toast.error(error.message || 'Delete failed');
+    } finally {
+      setDeletingKey(null);
+    }
+  };
+
   if (loading) return <div className="text-slate-500">Loading…</div>;
 
   return (
@@ -758,6 +789,7 @@ function PromoFilesTab() {
       {SLOTS.map((slot) => {
         const doc = docs[slot.key];
         const isUploading = uploadingKey === slot.key;
+        const isDeleting = deletingKey === slot.key;
         return (
           <div key={slot.key} className="border border-slate-200 rounded-lg p-4 flex items-start justify-between gap-4">
             <div className="flex-1">
@@ -781,11 +813,24 @@ function PromoFilesTab() {
                 />
               </div>
             </div>
-            <label className="shrink-0 cursor-pointer inline-flex items-center gap-2 px-3 py-2 rounded-md border border-slate-300 text-sm hover:bg-slate-50">
-              <Upload className="w-4 h-4" />
-              {isUploading ? 'Uploading…' : doc ? 'Replace' : 'Upload'}
-              <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden" disabled={isUploading} onChange={(e) => handleUpload(e, slot.key)} />
-            </label>
+            <div className="shrink-0 flex flex-col gap-2">
+              <label className="cursor-pointer inline-flex items-center gap-2 px-3 py-2 rounded-md border border-slate-300 text-sm hover:bg-slate-50">
+                <Upload className="w-4 h-4" />
+                {isUploading ? 'Uploading…' : doc ? 'Replace' : 'Upload'}
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden" disabled={isUploading} onChange={(e) => handleUpload(e, slot.key)} />
+              </label>
+              {doc && (
+                <button
+                  type="button"
+                  onClick={() => handleDelete(slot.key)}
+                  disabled={isDeleting}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-red-200 text-red-600 text-sm hover:bg-red-50 disabled:opacity-50"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  {isDeleting ? 'Deleting…' : 'Delete'}
+                </button>
+              )}
+            </div>
           </div>
         );
       })}

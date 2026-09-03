@@ -25,7 +25,7 @@
  * once an admin has customized a message.
  */
 
-const BUSINESS_NAME = "TFS Vryheid";
+const BUSINESS_NAME = "TFS Discount Warehouse";
 
 module.exports = {
   BUSINESS_NAME,

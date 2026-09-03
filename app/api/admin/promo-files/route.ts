@@ -180,3 +180,45 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Database write failed: ${err.message}`, branch: slug }, { status: 503 });
   }
 }
+
+// DELETE /api/admin/promo-files[?branch=...]
+// Body: { key: 'retail_promo' | 'wholesale_promo' | 'daily_specials' }
+// Removes the file reference for that slot on the caller's own branch (or
+// ?branch= for super-admins). This only deletes the PromoDocument record
+// (fileUrl/filename/caption) — it does not delete the underlying file from
+// Cloudinary, so if that matters for storage cleanup, that's a separate
+// step. After deletion, menuRouter.js's normal "no file uploaded yet" fallback
+// text takes over automatically for that slot, same as before any file was
+// ever uploaded.
+export async function DELETE(request: NextRequest) {
+  const auth = await requirePermission('settings:write');
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+  const slug = await resolveSlugFromRequest(auth, request);
+  if (!slug) {
+    return NextResponse.json(
+      { error: auth.isSuperAdmin ? 'Pass ?branch=dundee|ladysmith|vryheid' : 'No branch found for this account' },
+      { status: 400 }
+    );
+  }
+
+  const body = await request.json();
+  const { key } = body;
+
+  if (!VALID_KEYS.includes(key)) {
+    return NextResponse.json(
+      { error: `key must be one of: ${VALID_KEYS.join(', ')}` },
+      { status: 400 }
+    );
+  }
+
+  const result = await getPromoDocumentModel(slug);
+  if ('error' in result) return NextResponse.json({ error: result.error, branch: slug }, { status: 503 });
+
+  try {
+    const deleted = await result.model.findOneAndDelete({ key: key as PromoKey }).lean();
+    return NextResponse.json({ success: true, branch: slug, deleted: !!deleted });
+  } catch (err: any) {
+    return NextResponse.json({ error: `Database delete failed: ${err.message}`, branch: slug }, { status: 503 });
+  }
+}

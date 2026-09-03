@@ -25,7 +25,7 @@
  * once an admin has customized a message.
  */
 
-const BUSINESS_NAME = "TFS Vryheid";
+const BUSINESS_NAME = "TFS Ladysmith";
 
 module.exports = {
   BUSINESS_NAME,
@@ -66,7 +66,7 @@ module.exports = {
         title: "Promotions",
         rows: [
           { id: "retail_promo", title: "Retail Promotion", description: "" },
-          { id: "wholesale_promo", title: "Non Foods Promotion", description: "" },
+          { id: "wholesale_promo", title: "Wholesale Promotion", description: "" },
           { id: "main_menu", title: "Main Menu", description: "" },
         ],
       },
@@ -85,7 +85,7 @@ module.exports = {
     retail_promo:
       "Sorry, the retail promotion isn't available right now. Please check back soon.",
     wholesale_promo:
-      "Sorry, the non foods promotion isn't available right now. Please check back soon.",
+      "Sorry, the wholesale promotion isn't available right now. Please check back soon.",
     order:
       "Welcome to the TFS Vryheid orders & deliveries on WhatsApp 📝🚗\n\n" +
       "Please give us your name so we know who we're speaking to.\n\n" +

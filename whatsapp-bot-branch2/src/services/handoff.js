@@ -5,6 +5,7 @@ const conversations = require("./conversationStore");
 const { logEvent } = require("./analytics");
 const { ORDERS_AGENT, SUPPORT_AGENT, CLOSE_COMMANDS } = require("../config/agents");
 const menus = require("../data/menus");
+const { buildMainMenu } = require("./messages");
 
 const AGENT_NUMBERS = new Set([ORDERS_AGENT, SUPPORT_AGENT]);
 const QUEUE_COMMANDS = ["/queue", "/list", "/who"];
@@ -142,7 +143,12 @@ async function closeHandoff(agentWaId, customerWaId) {
   }
 
   await sendText(customerWaId, "Thanks for chatting with us! Back to the main menu 👇");
-  await sendList(customerWaId, menus.mainMenu);
+  // Use the override-aware buildMainMenu() (same as menuRouter.js) instead of
+  // the raw menus.mainMenu default — otherwise an admin-saved main menu
+  // override (e.g. the correct branch name) would show everywhere EXCEPT
+  // right after an agent closes a handoff, which is exactly the bug that
+  // caused "TFS Vryheid" to show up here regardless of branch.
+  await sendList(customerWaId, await buildMainMenu());
 
   const remaining = await conversations.listQueue(agentWaId);
   const remainingNote = remaining.length
