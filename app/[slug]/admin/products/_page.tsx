@@ -77,6 +77,7 @@ interface Category {
 
 type StatusFilter = 'all' | 'active' | 'hidden';
 type ImageFilter  = 'all' | 'with' | 'without';
+type DescriptionFilter = 'all' | 'with' | 'without';
 type StockSort    = 'none' | 'asc' | 'desc';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -142,6 +143,7 @@ export default function AdminProductsPage() {
   // Table filters / sort (server-side)
   const [statusFilter, setStatusFilter]     = useState<StatusFilter>('all');
   const [imageFilter, setImageFilter]       = useState<ImageFilter>('all');
+  const [descriptionFilter, setDescriptionFilter] = useState<DescriptionFilter>('all');
   const [stockSort, setStockSort]           = useState<StockSort>('none');
 
   // ── Link modal state ────────────────────────────────────────────────────────
@@ -169,9 +171,11 @@ export default function AdminProductsPage() {
     if (statusFilter !== 'all') p.set('status', statusFilter);
     if (imageFilter === 'with') p.set('hasImage', 'true');
     if (imageFilter === 'without') p.set('hasImage', 'false');
+    if (descriptionFilter === 'with') p.set('hasDescription', 'true');
+    if (descriptionFilter === 'without') p.set('hasDescription', 'false');
     if (stockSort !== 'none') p.set('sortStock', stockSort);
     return p.toString();
-  }, [statusFilter, imageFilter, stockSort]);
+  }, [statusFilter, imageFilter, descriptionFilter, stockSort]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Data fetching
@@ -194,7 +198,7 @@ export default function AdminProductsPage() {
       fetchProducts();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, imageFilter, stockSort]);
+  }, [statusFilter, imageFilter, descriptionFilter, stockSort]);
 
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
@@ -256,10 +260,11 @@ export default function AdminProductsPage() {
   const clearFilters = () => {
     setStatusFilter('all');
     setImageFilter('all');
+    setDescriptionFilter('all');
     setStockSort('none');
   };
 
-  const filtersActive = statusFilter !== 'all' || imageFilter !== 'all' || stockSort !== 'none';
+  const filtersActive = statusFilter !== 'all' || imageFilter !== 'all' || descriptionFilter !== 'all' || stockSort !== 'none';
 
   // ─────────────────────────────────────────────────────────────────────────
   // Link modal — paginated fetch
@@ -797,6 +802,20 @@ export default function AdminProductsPage() {
                 <option value="all">All</option>
                 <option value="with">Has image</option>
                 <option value="without">No image</option>
+              </select>
+            </div>
+
+            {/* Description filter */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500 whitespace-nowrap">Description:</span>
+              <select
+                value={descriptionFilter}
+                onChange={e => setDescriptionFilter(e.target.value as DescriptionFilter)}
+                className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+              >
+                <option value="all">All</option>
+                <option value="with">Has description</option>
+                <option value="without">No description</option>
               </select>
             </div>
 

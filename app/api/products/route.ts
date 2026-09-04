@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
     // ── New: admin table filters ────────────────────────────────────────────
     const status    = searchParams.get('status');    // 'active' | 'hidden' | null
     const hasImage  = searchParams.get('hasImage');  // 'true' | 'false' | null
+    const hasDescription = searchParams.get('hasDescription'); // 'true' | 'false' | null
     const sortStock = searchParams.get('sortStock'); // 'asc' | 'desc' | null
 
     const client = await clientPromise;
@@ -146,6 +147,20 @@ export async function GET(request: NextRequest) {
         : { $eq: [{ $size: { $ifNull: ['$images', []] } }, 0] };
 
       query.$expr = query.$expr ? { $and: [query.$expr, imgExpr] } : imgExpr;
+    }
+
+    // ── Description presence filter ─────────────────────────────────────────
+    // "Has a description" means a non-empty string after trimming whitespace —
+    // matches products where the field is missing, null, "", or just spaces.
+    if (hasDescription === 'true' || hasDescription === 'false') {
+      const trimmedLen = {
+        $strLenCP: { $trim: { input: { $ifNull: ['$description', ''] } } },
+      };
+      const descExpr = hasDescription === 'true'
+        ? { $gt: [trimmedLen, 0] }
+        : { $eq: [trimmedLen, 0] };
+
+      query.$expr = query.$expr ? { $and: [query.$expr, descExpr] } : descExpr;
     }
 
     const pageNum        = page  ? parseInt(page)  : 1;
