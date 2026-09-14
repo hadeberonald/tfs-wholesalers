@@ -105,7 +105,7 @@ async function resolveSlugFromRequest(
 // Returns the currently-uploaded file (if any) for each promo/specials slot,
 // scoped to the caller's own branch (or ?branch= for super-admins).
 export async function GET(request: NextRequest) {
-  const auth = await requirePermission('settings:read');
+  const auth = await requirePermission('whatsapp:read');
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const slug = await resolveSlugFromRequest(auth, request);
@@ -133,7 +133,7 @@ export async function GET(request: NextRequest) {
 // then call this route with the resulting URL to save/replace the reference
 // for the caller's own branch (or ?branch= for super-admins).
 export async function POST(request: NextRequest) {
-  const auth = await requirePermission('settings:write');
+  const auth = await requirePermission('whatsapp:write');
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const slug = await resolveSlugFromRequest(auth, request);
@@ -191,7 +191,7 @@ export async function POST(request: NextRequest) {
 // text takes over automatically for that slot, same as before any file was
 // ever uploaded.
 export async function DELETE(request: NextRequest) {
-  const auth = await requirePermission('settings:write');
+  const auth = await requirePermission('whatsapp:write');
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const slug = await resolveSlugFromRequest(auth, request);

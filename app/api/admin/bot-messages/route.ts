@@ -119,7 +119,7 @@ async function resolveSlugFromRequest(
 // Returns the current overrides for the caller's branch's bot (or the
 // branch given in ?branch= for super-admins).
 export async function GET(request: NextRequest) {
-  const auth = await requirePermission('settings:read');
+  const auth = await requirePermission('whatsapp:read');
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const slug = await resolveSlugFromRequest(auth, request);
@@ -144,7 +144,7 @@ export async function GET(request: NextRequest) {
 // POST /api/admin/bot-messages[?branch=...]
 // Body: { key: MessageKey, value: string }
 export async function POST(request: NextRequest) {
-  const auth = await requirePermission('settings:write');
+  const auth = await requirePermission('whatsapp:write');
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const slug = await resolveSlugFromRequest(auth, request);
@@ -186,7 +186,7 @@ export async function POST(request: NextRequest) {
 // DELETE /api/admin/bot-messages?key=...[&branch=...]
 // Removes the override so the bot goes back to its built-in default text.
 export async function DELETE(request: NextRequest) {
-  const auth = await requirePermission('settings:write');
+  const auth = await requirePermission('whatsapp:write');
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const slug = await resolveSlugFromRequest(auth, request);
