@@ -38,9 +38,9 @@ function emitOrderUpdate(order: any) {
       console.warn('[Socket] getIO() returned null in verify route');
       return;
     }
-    const branchId   = order.branchId?.toString();
+    const branchId = order.branchId?.toString();
     const serialized = { ...order, _id: order._id?.toString(), id: order._id?.toString() };
-    const payload    = { order: serialized, status: serialized.status };
+    const payload = { order: serialized, status: serialized.status };
 
     if (branchId) io.to(`branch:${branchId}`).emit('order:updated', payload);
     io.to(`order:${serialized._id}`).emit('order:updated', payload);
@@ -53,23 +53,23 @@ function emitOrderUpdate(order: any) {
 
 // ─── Picker notifications on payment confirmation ─────────────────────────────
 async function triggerPaymentConfirmedNotifications(order: any): Promise<void> {
-  const orderId       = order._id?.toString();
-  const orderNumber   = order.orderNumber || orderId;
-  const branchId      = order.branchId?.toString();
+  const orderId = order._id?.toString();
+  const orderNumber = order.orderNumber || orderId;
+  const branchId = order.branchId?.toString();
   const customerEmail = order.customerEmail || order.customerInfo?.email || null;
-  const customerName  = order.customerName  || order.customerInfo?.name  || 'Customer';
+  const customerName = order.customerName || order.customerInfo?.name || 'Customer';
 
   if (branchId) {
     notifyBranchPickers(branchId, {
       title: '🛒 New Order',
-      body:  `Order ${orderNumber} is paid and ready to pick`,
-      data:  { type: 'new_order', orderId, orderNumber },
+      body: `Order ${orderNumber} is paid and ready to pick`,
+      data: { type: 'new_order', orderId, orderNumber },
     }).catch(() => {});
 
     notifyBranchWeb(branchId, {
       title: '🛒 New Order',
-      body:  `Order ${orderNumber} is paid and ready to pick`,
-      data:  { type: 'new_order', orderId, orderNumber },
+      body: `Order ${orderNumber} is paid and ready to pick`,
+      data: { type: 'new_order', orderId, orderNumber },
     }).catch(() => {});
   }
 
@@ -116,10 +116,10 @@ export async function POST(request: NextRequest) {
       console.error(`[Verify] Network error calling Paystack for ${reference}:`, fetchErr.message);
       return NextResponse.json(
         {
-          verified:  false,
-          pending:   true,
+          verified: false,
+          pending: true,
           retryable: true,
-          error:     'Could not reach payment provider — retrying…',
+          error: 'Could not reach payment provider — retrying…',
         },
         { status: 202 }
       );
@@ -135,10 +135,10 @@ export async function POST(request: NextRequest) {
       console.log(`[Verify] Status "${paystackStatus}" is transient — instructing client to retry`);
       return NextResponse.json(
         {
-          verified:  false,
-          pending:   true,
+          verified: false,
+          pending: true,
           retryable: true,
-          error:     `Payment status is "${paystackStatus}" — waiting for settlement`,
+          error: `Payment status is "${paystackStatus}" — waiting for settlement`,
         },
         { status: 202 }
       );
@@ -149,9 +149,9 @@ export async function POST(request: NextRequest) {
       console.warn(`[Verify] Terminal failure "${paystackStatus}" for ${reference}`);
       return NextResponse.json(
         {
-          verified:  false,
+          verified: false,
           retryable: false,
-          error:     `Payment ${paystackStatus}. Please try again or use a different card.`,
+          error: `Payment ${paystackStatus}. Please try again or use a different card.`,
         },
         { status: 400 }
       );
@@ -162,9 +162,9 @@ export async function POST(request: NextRequest) {
       console.warn(`[Verify] Non-success status "${paystackStatus}" for ${reference}:`, paystackResult.message);
       return NextResponse.json(
         {
-          verified:  false,
+          verified: false,
           retryable: false,
-          error:     paystackResult.message || `Payment was not successful (status: ${paystackStatus})`,
+          error: paystackResult.message || `Payment was not successful (status: ${paystackStatus})`,
         },
         { status: 400 }
       );
@@ -186,7 +186,7 @@ export async function POST(request: NextRequest) {
       );
       return NextResponse.json(
         {
-          verified:  false,
+          verified: false,
           retryable: false,
           error:
             'Payment received but could not be matched to your order. ' +
@@ -205,7 +205,7 @@ export async function POST(request: NextRequest) {
     }
 
     const client = await clientPromise;
-    const db     = client.db('tfs-wholesalers');
+    const db = client.db('tfs-wholesalers');
 
     const existing = await db.collection('orders').findOne({ _id: new ObjectId(orderId) });
 
@@ -222,10 +222,10 @@ export async function POST(request: NextRequest) {
       console.log(`[Verify] Order ${orderId} already marked paid — skipping duplicate update`);
       const branchSlug = await getBranchSlug(db, existing.branchId);
       return NextResponse.json({
-        verified:  true,
+        verified: true,
         orderId,
         branchSlug,
-        amount:    data.amount / 100,
+        amount: data.amount / 100,
         reference: data.reference,
       });
     }
@@ -236,12 +236,15 @@ export async function POST(request: NextRequest) {
       {
         $set: {
           paymentStatus: 'paid',
-          status:        'confirmed',
+          status: 'confirmed',
           paymentDetails: {
             reference: data.reference,
-            amount:    data.amount / 100,
-            paidAt:    data.paid_at,
-            channel:   data.channel,
+            amount: data.amount / 100,
+            paidAt: data.paid_at,
+            channel: data.channel,
+            // NEW — audit trail for split payments. null when the order was
+            // routed to the main account on purpose (e.g. Vryheid).
+            subaccount: data.subaccount?.subaccount_code || null,
           },
           updatedAt: new Date(),
         },
@@ -265,10 +268,10 @@ export async function POST(request: NextRequest) {
     const branchSlug = await getBranchSlug(db, updated.branchId);
 
     return NextResponse.json({
-      verified:  true,
+      verified: true,
       orderId,
       branchSlug,
-      amount:    data.amount / 100,
+      amount: data.amount / 100,
       reference: data.reference,
     });
   } catch (error: any) {

@@ -22,16 +22,16 @@ function emitNewOrder(order: any) {
     const serialized = {
       ...order,
       _id: order._id?.toString(),
-      id:  order._id?.toString(),
+      id: order._id?.toString(),
     };
 
     io.to(`branch:${branchId}`).emit('order:updated', {
-      order:  serialized,
+      order: serialized,
       status: serialized.status,
     });
 
     io.to(`order:${serialized._id}`).emit('order:updated', {
-      order:  serialized,
+      order: serialized,
       status: serialized.status,
     });
 
@@ -39,6 +39,38 @@ function emitNewOrder(order: any) {
   } catch (err) {
     console.error('[Socket] emitNewOrder error:', err);
   }
+}
+
+// ─── Helper: resolve how this branch's payments should be routed ─────────────
+// Returns either:
+//   { blocked: true, reason }                       — branch has no valid payment routing, refuse to proceed
+//   { blocked: false, subaccountCode: null }         — route to main account (e.g. Vryheid, by design)
+//   { blocked: false, subaccountCode: 'ACCT_xxx' }   — route via split payment, branch bears the Paystack fee
+function resolvePaymentRouting(branch: any): {
+  blocked: boolean;
+  reason?: string;
+  subaccountCode: string | null;
+} {
+  const paystackConfig = branch?.paymentConfig?.paystack;
+
+  const subaccountCode: string | undefined = paystackConfig?.subaccountCode;
+  const routeToMainAccount: boolean = paystackConfig?.routeToMainAccount === true;
+
+  if (subaccountCode) {
+    return { blocked: false, subaccountCode };
+  }
+
+  if (routeToMainAccount) {
+    return { blocked: false, subaccountCode: null };
+  }
+
+  // Neither a subaccount code nor an explicit main-account flag is set —
+  // this is a genuine misconfiguration, not an intentional choice. Block.
+  return {
+    blocked: true,
+    reason: `Branch "${branch?.name || branch?._id}" has no subaccountCode and routeToMainAccount is not set`,
+    subaccountCode: null,
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -51,7 +83,7 @@ export async function POST(request: NextRequest) {
     }
 
     const client = await clientPromise;
-    const db     = client.db('tfs-wholesalers');
+    const db = client.db('tfs-wholesalers');
 
     // SECURITY: fetch the authoritative order total from the database
     if (!ObjectId.isValid(orderId)) {
@@ -62,8 +94,39 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
+    // ── Resolve branch payment routing before touching Paystack at all ───────
+    if (!orderDoc.branchId) {
+      console.error(`[Initialize] Order ${orderId} has no branchId — cannot route payment`);
+      return NextResponse.json({ error: 'Order is missing branch information' }, { status: 400 });
+    }
+
+    const branch = await db.collection('branches').findOne({
+      _id: new ObjectId(orderDoc.branchId.toString()),
+    });
+
+    if (!branch) {
+      console.error(`[Initialize] Order ${orderId} references branchId ${orderDoc.branchId} which does not exist`);
+      return NextResponse.json({ error: 'Order references an unknown branch' }, { status: 400 });
+    }
+
+    const routing = resolvePaymentRouting(branch);
+
+    if (routing.blocked) {
+      console.error(`[Initialize] Blocking payment for order ${orderId}: ${routing.reason}`);
+      return NextResponse.json(
+        { error: 'This store is not yet set up to accept payments. Please contact support.' },
+        { status: 400 }
+      );
+    }
+
+    const subaccountCode = routing.subaccountCode;
+    const splitFields = subaccountCode
+      ? { subaccount: subaccountCode, bearer: 'subaccount' as const }
+      : {};
+    // ───────────────────────────────────────────────────────────────────────
+
     // Always use the DB amount — never trust client-supplied amount
-    const amount    = orderDoc.total;
+    const amount = orderDoc.total;
     const reference = generatePaymentReference(`ORDER-${orderId}`);
 
     // ── Saved card: charge immediately ────────────────────────────────────────
@@ -75,6 +138,7 @@ export async function POST(request: NextRequest) {
           authorization_code: authorizationCode,
           currency: 'ZAR',
           reference,
+          ...splitFields,
           metadata: {
             orderId,
             custom_fields: [{ display_name: 'Order ID', variable_name: 'order_id', value: orderId }],
@@ -98,9 +162,9 @@ export async function POST(request: NextRequest) {
             {
               $set: {
                 paymentReference: reference,
-                paymentStatus:    'paid',
-                status:           'confirmed',
-                updatedAt:        new Date(),
+                paymentStatus: 'paid',
+                status: 'confirmed',
+                updatedAt: new Date(),
               },
             },
             { returnDocument: 'after' }
@@ -111,8 +175,8 @@ export async function POST(request: NextRequest) {
           }
 
           return NextResponse.json({
-            success:   true,
-            charged:   true,
+            success: true,
+            charged: true,
             reference,
             publicKey: paystackService.getPublicKey(),
           });
@@ -130,10 +194,11 @@ export async function POST(request: NextRequest) {
     // The verify route returns branchSlug so the callback page can redirect correctly.
     const paymentData = {
       email,
-      amount:       formatAmountForPayment(amount),
-      currency:     'ZAR',
+      amount: formatAmountForPayment(amount),
+      currency: 'ZAR',
       reference,
       callback_url: `${process.env.NEXTAUTH_URL}/checkout/callback`,
+      ...splitFields,
       metadata: {
         orderId,
         custom_fields: [{ display_name: 'Order ID', variable_name: 'order_id', value: orderId }],
@@ -149,15 +214,15 @@ export async function POST(request: NextRequest) {
       );
 
       return NextResponse.json({
-        success:           true,
-        charged:           false,
+        success: true,
+        charged: false,
         reference,
         // Return the DB-authoritative amount in kobo so the mobile WebView
         // uses the same figure Paystack was initialized with — no mismatch.
-        amountKobo:        formatAmountForPayment(amount),
+        amountKobo: formatAmountForPayment(amount),
         authorization_url: result.data.authorization_url,
-        access_code:       result.data.access_code,
-        publicKey:         paystackService.getPublicKey(),
+        access_code: result.data.access_code,
+        publicKey: paystackService.getPublicKey(),
       });
     } else {
       return NextResponse.json({ error: 'Payment initialization failed' }, { status: 400 });

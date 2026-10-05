@@ -17,9 +17,9 @@ function emitOrderUpdate(order: any) {
   try {
     const io = getIO();
     if (!io) return;
-    const branchId   = order.branchId?.toString();
+    const branchId = order.branchId?.toString();
     const serialized = { ...order, _id: order._id?.toString(), id: order._id?.toString() };
-    const payload    = { order: serialized, status: serialized.status };
+    const payload = { order: serialized, status: serialized.status };
     if (branchId) io.to(`branch:${branchId}`).emit('order:updated', payload);
     io.to(`order:${serialized._id}`).emit('order:updated', payload);
   } catch (err) {
@@ -51,7 +51,7 @@ async function handleChargeSuccess(data: any): Promise<void> {
   }
 
   const client = await clientPromise;
-  const db     = client.db('tfs-wholesalers');
+  const db = client.db('tfs-wholesalers');
 
   const existing = await db.collection('orders').findOne({ _id: new ObjectId(orderId) });
   if (!existing) {
@@ -70,12 +70,15 @@ async function handleChargeSuccess(data: any): Promise<void> {
     {
       $set: {
         paymentStatus: 'paid',
-        status:        'confirmed',
+        status: 'confirmed',
         paymentDetails: {
           reference: data.reference,
-          amount:    data.amount / 100,
-          paidAt:    data.paid_at,
-          channel:   data.channel,
+          amount: data.amount / 100,
+          paidAt: data.paid_at,
+          channel: data.channel,
+          // NEW — audit trail for split payments. null when the order was
+          // routed to the main account on purpose (e.g. Vryheid).
+          subaccount: data.subaccount?.subaccount_code || null,
         },
         updatedAt: new Date(),
       },
@@ -92,22 +95,22 @@ async function handleChargeSuccess(data: any): Promise<void> {
 
   emitOrderUpdate(updated);
 
-  const branchId      = updated.branchId?.toString();
-  const orderNumber   = updated.orderNumber || orderId;
+  const branchId = updated.branchId?.toString();
+  const orderNumber = updated.orderNumber || orderId;
   const customerEmail = updated.customerEmail || updated.customerInfo?.email || null;
-  const customerName  = updated.customerName  || updated.customerInfo?.name  || 'Customer';
+  const customerName = updated.customerName || updated.customerInfo?.name || 'Customer';
 
   if (branchId) {
     notifyBranchPickers(branchId, {
       title: '🛒 New Order',
-      body:  `Order ${orderNumber} is paid and ready to pick`,
-      data:  { type: 'new_order', orderId, orderNumber },
+      body: `Order ${orderNumber} is paid and ready to pick`,
+      data: { type: 'new_order', orderId, orderNumber },
     }).catch(() => {});
 
     notifyBranchWeb(branchId, {
       title: '🛒 New Order',
-      body:  `Order ${orderNumber} is paid and ready to pick`,
-      data:  { type: 'new_order', orderId, orderNumber },
+      body: `Order ${orderNumber} is paid and ready to pick`,
+      data: { type: 'new_order', orderId, orderNumber },
     }).catch(() => {});
   }
 

@@ -21,6 +21,21 @@ export interface Branch {
   paymentConfig?: {
     paystackPublicKey?: string;
     paystackSecretKey?: string;
+    paystack?: {
+      enabled?: boolean;
+      publicKey?: string;
+      secretKey?: string;
+      // NEW — the branch's Paystack subaccount code (e.g. "ACCT_xxx").
+      // When set, payments for this branch are split 100% to the
+      // subaccount with the subaccount bearing the Paystack fee.
+      subaccountCode?: string | null;
+      // NEW — explicit opt-in for branches that intentionally route
+      // payments to the main Paystack account instead of a subaccount
+      // (e.g. Vryheid). Only meaningful when subaccountCode is unset.
+      // If both subaccountCode and routeToMainAccount are falsy,
+      // checkout is blocked for that branch as a safety fallback.
+      routeToMainAccount?: boolean;
+    };
   };
   createdAt: Date;
   updatedAt: Date;
@@ -267,6 +282,15 @@ export interface Order {
   paymentMethod: 'paystack' | 'ozow' | 'cash';
   paymentStatus: 'pending' | 'paid' | 'failed' | 'refunded';
   paymentReference?: string;
+  // NEW — populated once a payment is verified. subaccount is null when the
+  // order was routed to the main Paystack account on purpose.
+  paymentDetails?: {
+    reference: string;
+    amount: number;
+    paidAt?: string;
+    channel?: string;
+    subaccount: string | null;
+  };
   orderStatus: 'pending' | 'confirmed' | 'picking' | 'ready' | 'out-for-delivery' | 'delivered' | 'cancelled';
   pickerId?: ObjectId | string;
   pickedAt?: Date;
