@@ -110,6 +110,42 @@ const emptyForm = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Toggle switch
+// ─────────────────────────────────────────────────────────────────────────────
+
+function Toggle({
+  checked,
+  onChange,
+  disabled = false,
+  label,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={e => { e.stopPropagation(); onChange(!checked); }}
+      className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-orange-400 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-wait ${
+        checked ? 'bg-orange-500' : 'bg-gray-300'
+      }`}
+    >
+      <span
+        className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+          checked ? 'translate-x-5' : 'translate-x-0.5'
+        }`}
+      />
+    </button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -127,6 +163,7 @@ export default function AdminProductsPage() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [uploading, setUploading]           = useState(false);
   const [expandedVariants, setExpandedVariants] = useState<Set<number>>(new Set());
+  const [togglingIds, setTogglingIds]       = useState<Set<string>>(new Set());
 
   // Search
   const [searchTerm, setSearchTerm]         = useState('');
@@ -576,6 +613,43 @@ export default function AdminProductsPage() {
   };
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Quick toggle active/hidden from the list
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const handleToggleActive = async (product: Product) => {
+    const next = !product.active;
+
+    setTogglingIds(prev => new Set(prev).add(product._id));
+    // Optimistic update so the switch flips instantly
+    setProducts(prev => prev.map(p => (p._id === product._id ? { ...p, active: next } : p)));
+
+    try {
+      const res = await fetch(`/api/products/${product._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...product, active: next }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to update product');
+      }
+      toast.success(next ? `"${product.name}" is now active` : `"${product.name}" is now hidden`, {
+        id: `toggle-${product._id}`,
+      });
+    } catch (err: any) {
+      // Roll back on failure
+      setProducts(prev => prev.map(p => (p._id === product._id ? { ...p, active: !next } : p)));
+      toast.error(err.message || 'Failed to update product');
+    } finally {
+      setTogglingIds(prev => {
+        const n = new Set(prev);
+        n.delete(product._id);
+        return n;
+      });
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Submit — also patch linked child products inline
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -928,7 +1002,7 @@ export default function AdminProductsPage() {
                       <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">Tags</th>
                       <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Price</th>
                       <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Stock</th>
-                      <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">Status</th>
+                      <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
                       <th className="px-5 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Actions</th>
                     </tr>
                   </thead>
@@ -1021,14 +1095,24 @@ export default function AdminProductsPage() {
                                 {stock} units
                               </span>
                             </td>
-                            <td className="px-5 py-4 hidden lg:table-cell">
-                              <div className="flex flex-col gap-1">
-                                <span className={`text-xs px-2 py-0.5 rounded-lg w-fit font-medium ${product.active ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-500'}`}>
-                                  {product.active ? 'Active' : 'Hidden'}
-                                </span>
-                                {product.featured && (
-                                  <span className="text-xs px-2 py-0.5 rounded-lg w-fit bg-blue-50 text-blue-600 border border-blue-200 font-medium">Featured</span>
-                                )}
+                            <td className="px-5 py-4">
+                              <div className="flex items-center gap-2.5">
+                                <Toggle
+                                  checked={product.active}
+                                  disabled={togglingIds.has(product._id)}
+                                  onChange={() => handleToggleActive(product)}
+                                  label={product.active ? `Hide ${product.name}` : `Activate ${product.name}`}
+                                />
+                                <div className="flex flex-col gap-1">
+                                  <span className={`text-xs font-medium ${product.active ? 'text-emerald-600' : 'text-gray-400'}`}>
+                                    {product.active ? 'Active' : 'Hidden'}
+                                  </span>
+                                  {product.featured && (
+                                    <span className="text-xs px-2 py-0.5 rounded-lg w-fit bg-blue-50 text-blue-600 border border-blue-200 font-medium">
+                                      Featured
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </td>
                             <td className="px-5 py-4">
@@ -1765,18 +1849,32 @@ export default function AdminProductsPage() {
               <section className="border-t pt-6">
                 <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Status</h3>
                 <div className="grid md:grid-cols-2 gap-3">
-                  {[
-                    { key: 'active', label: 'Active', desc: 'Product visible to customers' },
-                    { key: 'featured', label: 'Featured', desc: 'Show in featured products section' },
-                  ].map(({ key, label, desc }) => (
-                    <label key={key} className="flex items-start gap-3 cursor-pointer p-3.5 border border-gray-200 rounded-xl hover:border-orange-300 hover:bg-orange-50/30 transition-colors">
-                      <input type="checkbox" checked={(formData as any)[key]} onChange={e => setFormData({ ...formData, [key]: e.target.checked })} className="w-4 h-4 mt-0.5 accent-orange-500 rounded" />
-                      <div>
-                        <p className="font-medium text-gray-900 text-sm">{label}</p>
-                        <p className="text-xs text-gray-500">{desc}</p>
-                      </div>
-                    </label>
-                  ))}
+                  {/* Active — toggle */}
+                  <div className="flex items-center justify-between gap-3 p-3.5 border border-gray-200 rounded-xl">
+                    <div>
+                      <p className="font-medium text-gray-900 text-sm">Active</p>
+                      <p className="text-xs text-gray-500">Product visible to customers</p>
+                    </div>
+                    <Toggle
+                      label="Active"
+                      checked={formData.active}
+                      onChange={next => setFormData({ ...formData, active: next })}
+                    />
+                  </div>
+
+                  {/* Featured — unchanged checkbox */}
+                  <label className="flex items-start gap-3 cursor-pointer p-3.5 border border-gray-200 rounded-xl hover:border-orange-300 hover:bg-orange-50/30 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={formData.featured}
+                      onChange={e => setFormData({ ...formData, featured: e.target.checked })}
+                      className="w-4 h-4 mt-0.5 accent-orange-500 rounded"
+                    />
+                    <div>
+                      <p className="font-medium text-gray-900 text-sm">Featured</p>
+                      <p className="text-xs text-gray-500">Show in featured products section</p>
+                    </div>
+                  </label>
                 </div>
               </section>
 
