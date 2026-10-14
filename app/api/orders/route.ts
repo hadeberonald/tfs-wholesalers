@@ -11,6 +11,8 @@ import {
 } from '@/lib/sendPushNotification';
 import { cookies } from 'next/headers';
 import jwt from 'jsonwebtoken';
+import { LEGACY_APP_DELIVERY_FEE, type PromoBenefits } from '@/lib/promo-engine';
+import { checkPromo, redeemPromo, releasePromo, recordPromoUsage } from '@/lib/promo-service';
 
 // ── HOTFIX: server-side phone validation ─────────────────────────────────────
 // Mirrors the format check used on the mobile checkout screen
@@ -156,7 +158,7 @@ export async function POST(request: NextRequest) {
     const customerEmail   = body.customerEmail || body.customerInfo?.email || null;
     const customerPhone   = (body.phone || body.customerInfo?.phone || '').toString().trim() || null;
     const deliveryAddress = body.deliveryAddress || body.shippingAddress?.address || null;
-    const deliveryFee     = body.deliveryFee ?? 0;
+    let   deliveryFee     = body.deliveryFee ?? 0;
 
     // ── HOTFIX: enforce phone server-side, don't just trust the client ──────
     // The web checkout form only has the HTML `required` attribute (no format
@@ -170,6 +172,49 @@ export async function POST(request: NextRequest) {
         `Raw value: ${JSON.stringify(customerPhone)} | customer: ${customerEmail ?? 'guest'} | branch: ${body.branchId}`
       );
       return NextResponse.json({ error: 'A valid South African phone number is required' }, { status: 400 });
+    }
+
+    // ── Promo code: re-price on the server, never trust the client's numbers ──
+    // The shipped mobile app posts a pre-computed total plus a `promoCode` blob
+    // whose `type` / `discountAmount` are a *translation* for old clients (see
+    // lib/promo-engine.ts). Only `promoCode.id` is used from the request; the
+    // benefits, delivery fee and total are recomputed here from the DB record.
+    let promoApplied: { promo: any; benefits: PromoBenefits } | null = null;
+    let orderTotal: number = body.total ?? 0;
+
+    if (body.promoCode) {
+      const promoId = body.promoCode.id;
+      if (!promoId) {
+        return NextResponse.json({ error: 'Invalid promo code' }, { status: 400 });
+      }
+      const clientSubtotal = Number(body.subtotal);
+      if (!Number.isFinite(clientSubtotal) || clientSubtotal < 0) {
+        return NextResponse.json({ error: 'Invalid order subtotal' }, { status: 400 });
+      }
+
+      // The shipped app always charges R35 delivery (checkout.tsx), so the base fee is fixed.
+      const checked = await checkPromo(db, {
+        branchId:    body.branchId,
+        promoId,
+        subtotal:    clientSubtotal,
+        email:       customerEmail,
+        deliveryFee: LEGACY_APP_DELIVERY_FEE,
+      });
+      if (!checked.ok) {
+        return NextResponse.json({ error: checked.error }, { status: checked.status });
+      }
+
+      promoApplied = { promo: checked.promo, benefits: checked.benefits };
+      orderTotal   = checked.benefits.total;
+      deliveryFee  = Math.round((LEGACY_APP_DELIVERY_FEE - checked.benefits.deliveryDiscount) * 100) / 100;
+
+      const clientTotal = Number(body.total);
+      if (Number.isFinite(clientTotal) && Math.abs(clientTotal - orderTotal) > 0.01) {
+        console.warn(
+          `⚠️ [Orders] Client total R${clientTotal.toFixed(2)} differs from server total ` +
+          `R${orderTotal.toFixed(2)} for promo ${checked.promo.code} — using server total`
+        );
+      }
     }
 
     const enrichedItems = await Promise.all(
@@ -250,6 +295,16 @@ export async function POST(request: NextRequest) {
     }
 
     const orderNumber = `ORD-${Date.now()}`;
+    const promoRecord = promoApplied
+      ? {
+          id:                   promoApplied.promo._id.toString(),
+          code:                 promoApplied.promo.code,
+          type:                 promoApplied.promo.type,
+          includesFreeDelivery: promoApplied.benefits.freeDelivery && promoApplied.promo.type !== 'free_delivery',
+          itemDiscount:         promoApplied.benefits.itemDiscount,
+          deliveryDiscount:     promoApplied.benefits.deliveryDiscount,
+        }
+      : null;
     const orderStatus = body.status ?? 'pending';
     const order = {
       ...body,
@@ -262,6 +317,11 @@ export async function POST(request: NextRequest) {
       orderNumber,
       status:            orderStatus,
       deliveryFee,
+      // Server-authoritative promo figures. `promoCode` / `promoDiscount` always
+      // overwrite whatever the client sent via ...body, so they can't be spoofed.
+      ...(promoApplied ? { total: orderTotal } : {}),
+      promoCode:         promoRecord,
+      promoDiscount:     promoApplied ? promoApplied.benefits.itemDiscount : 0,
       tillAccountNumber,
       createdAt:         new Date(),
       updatedAt:         new Date(),
@@ -271,8 +331,38 @@ export async function POST(request: NextRequest) {
       deliveryAddress,
     };
 
-    const result  = await db.collection('orders').insertOne(order);
+    // Take the promo redemption atomically right before saving the order so two
+    // concurrent checkouts can't both squeeze past the usage limit.
+    if (promoApplied) {
+      const redeemed = await redeemPromo(db, promoApplied.promo._id);
+      if (!redeemed) {
+        return NextResponse.json({ error: 'This promo code has reached its usage limit' }, { status: 400 });
+      }
+    }
+
+    const result  = await db.collection('orders').insertOne(order).catch(async (err) => {
+      if (promoApplied) await releasePromo(db, promoApplied.promo._id).catch(() => {});
+      throw err;
+    });
     const orderId = result.insertedId.toString();
+
+    if (promoApplied) {
+      await recordPromoUsage(db, {
+        promoCodeId:      promoApplied.promo._id,
+        email:            customerEmail,
+        orderId,
+        orderNumber,
+        code:             promoApplied.promo.code,
+        itemDiscount:     promoApplied.benefits.itemDiscount,
+        deliveryDiscount: promoApplied.benefits.deliveryDiscount,
+      }).catch((err) => console.error('[Orders] Failed to record promo usage:', err));
+      console.log(
+        '🏷️ Promo applied:', promoApplied.promo.code,
+        '| items -R' + promoApplied.benefits.itemDiscount.toFixed(2),
+        '| delivery -R' + promoApplied.benefits.deliveryDiscount.toFixed(2),
+        '| total R' + orderTotal.toFixed(2)
+      );
+    }
 
     // ── HOTFIX: phone now always printed on order-creation log line ─────────
     // Previously the phone was not logged at all, making it impossible to
@@ -301,7 +391,7 @@ export async function POST(request: NextRequest) {
         customerName:      customerName ?? 'Customer',
         customerEmail,
         items:             enrichedItems,
-        total:             body.total ?? 0,
+        total:             orderTotal,
         deliveryFee,
         deliveryAddress:   deliveryAddress ?? undefined,
         tillAccountNumber: tillAccountNumber ?? undefined,
@@ -315,7 +405,7 @@ export async function POST(request: NextRequest) {
       customerEmail:     customerEmail ?? '(no email provided)',
       phone:             customerPhone  ?? undefined,
       items:             enrichedItems,
-      total:             body.total ?? 0,
+      total:             orderTotal,
       deliveryFee,
       deliveryAddress:   deliveryAddress ?? undefined,
       branchName,

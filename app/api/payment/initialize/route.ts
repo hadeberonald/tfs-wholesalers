@@ -3,6 +3,7 @@ import { paystackService, generatePaymentReference, formatAmountForPayment } fro
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 import { getIO } from '@/lib/socket';
+import { FREE_ORDER_REF_PREFIX } from '@/lib/promo-engine';
 
 // ─── Helper: notify picker app that a new order is ready ─────────────────────
 function emitNewOrder(order: any) {
@@ -92,6 +93,38 @@ export async function POST(request: NextRequest) {
     const orderDoc = await db.collection('orders').findOne({ _id: new ObjectId(orderId) });
     if (!orderDoc) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    }
+
+    // ── Free orders: a promo took the total to R0.00 — no gateway involved ─────
+    // Paystack can't charge R0.00, so we hand back a FREE- reference with
+    // charged:true. The shipped mobile app then calls /api/payment/verify with it
+    // (exactly as it does for a saved-card charge), and verify marks the order paid.
+    // Only orders whose total was zeroed by a promo qualify (orders POST stores
+    // promoCode.id); a bare total of 0 with no promo is rejected.
+    const orderTotal = Number(orderDoc.total);
+    if (!Number.isFinite(orderTotal) || orderTotal < 0) {
+      return NextResponse.json({ error: 'Order total is invalid' }, { status: 400 });
+    }
+    if (orderTotal === 0) {
+      if (!orderDoc.promoCode?.id) {
+        return NextResponse.json({ error: 'Order total is invalid' }, { status: 400 });
+      }
+      const freeReference =
+        typeof orderDoc.paymentReference === 'string' && orderDoc.paymentReference.startsWith(FREE_ORDER_REF_PREFIX)
+          ? orderDoc.paymentReference
+          : `${FREE_ORDER_REF_PREFIX}${orderId}-${Date.now()}`;
+
+      await db.collection('orders').updateOne(
+        { _id: orderDoc._id },
+        { $set: { paymentReference: freeReference, updatedAt: new Date() } }
+      );
+
+      return NextResponse.json({
+        success: true,
+        charged: true,
+        reference: freeReference,
+        publicKey: paystackService.getPublicKey(),
+      });
     }
 
     // ── Resolve branch payment routing before touching Paystack at all ───────

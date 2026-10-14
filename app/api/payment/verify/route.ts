@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { paystackService } from '@/lib/payment';
+import { FREE_ORDER_REF_PREFIX } from '@/lib/promo-engine';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 import { getIO } from '@/lib/socket';
@@ -99,12 +100,73 @@ async function getBranchSlug(db: any, branchId: any): Promise<string | null> {
 }
 
 // ─── POST /api/payment/verify ─────────────────────────────────────────────────
+// ─── Free-order verification (promo took the total to R0.00) ──────────────────
+// /api/payment/initialize stamps these orders with a FREE- reference. There is no
+// Paystack transaction to look up, so instead we check the order itself: it must
+// carry that exact reference, have a stored total of 0 and a promo attached.
+async function verifyFreeOrder(reference: string) {
+  const client = await clientPromise;
+  const db = client.db('tfs-wholesalers');
+
+  const order = await db.collection('orders').findOne({ paymentReference: reference });
+  if (!order) {
+    return NextResponse.json(
+      { verified: false, retryable: false, error: 'Order not found' },
+      { status: 404 }
+    );
+  }
+  if (Number(order.total) !== 0 || !order.promoCode?.id) {
+    return NextResponse.json(
+      { verified: false, retryable: false, error: 'This order requires payment' },
+      { status: 400 }
+    );
+  }
+
+  const orderId = order._id.toString();
+
+  if (order.paymentStatus !== 'paid') {
+    // Conditional update so concurrent verify calls only fire notifications once.
+    const updated = await db.collection('orders').findOneAndUpdate(
+      { _id: order._id, paymentStatus: { $ne: 'paid' } },
+      {
+        $set: {
+          paymentStatus: 'paid',
+          status: 'confirmed',
+          paymentDetails: {
+            reference,
+            amount: 0,
+            paidAt: new Date().toISOString(),
+            channel: 'promo',
+            subaccount: null,
+          },
+          updatedAt: new Date(),
+        },
+      },
+      { returnDocument: 'after' }
+    );
+
+    if (updated) {
+      console.log(`✅ [Verify] Free order ${orderId} → paid + confirmed (promo ${order.promoCode.code})`);
+      emitOrderUpdate(updated);
+      await triggerPaymentConfirmedNotifications(updated);
+    }
+  }
+
+  const branchSlug = await getBranchSlug(db, order.branchId);
+  return NextResponse.json({ verified: true, orderId, branchSlug, amount: 0, reference });
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { reference } = await request.json();
 
     if (!reference) {
       return NextResponse.json({ error: 'Payment reference is required' }, { status: 400 });
+    }
+
+    // R0.00 promo orders never reach Paystack
+    if (typeof reference === 'string' && reference.startsWith(FREE_ORDER_REF_PREFIX)) {
+      return await verifyFreeOrder(reference);
     }
 
     // ── Step 1: Ask Paystack for the transaction status ───────────────────────

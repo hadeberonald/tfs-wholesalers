@@ -9,6 +9,7 @@ export interface PromoCode {
   code: string;
   type: 'free_delivery' | 'percentage' | 'fixed_amount';
   value: number;               // ignored for free_delivery; % for percentage; R amount for fixed_amount
+  includesFreeDelivery?: boolean; // percentage / fixed_amount only: also waive the delivery fee
   minOrderValue?: number;      // subtotal must be >= this to qualify
   maxDiscount?: number;        // cap on discount amount (percentage type only)
   usageLimit?: number;         // total redemptions allowed, undefined = unlimited
@@ -66,6 +67,7 @@ export async function POST(request: NextRequest) {
       code,
       type,
       value,
+      includesFreeDelivery,
       minOrderValue,
       maxDiscount,
       usageLimit,
@@ -89,7 +91,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid promo code type' }, { status: 400 });
     }
     if (type !== 'free_delivery') {
-      if (typeof value !== 'number' || value <= 0) {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
         return NextResponse.json({ error: 'A positive value is required for this promo type' }, { status: 400 });
       }
       if (type === 'percentage' && value > 100) {
@@ -107,27 +109,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'A promo code with this code already exists for this branch' }, { status: 409 });
     }
 
+    const pos = (n: unknown) => (typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : undefined);
+
     const now = new Date();
     const doc: PromoCode = {
       branchId: branchOid,
       code: normalizedCode,
       type,
       value: type === 'free_delivery' ? 0 : value,
-      minOrderValue: typeof minOrderValue === 'number' && minOrderValue > 0 ? minOrderValue : undefined,
-      maxDiscount: type === 'percentage' && typeof maxDiscount === 'number' && maxDiscount > 0 ? maxDiscount : undefined,
-      usageLimit: typeof usageLimit === 'number' && usageLimit > 0 ? usageLimit : undefined,
-      usageLimitPerCustomer: typeof usageLimitPerCustomer === 'number' && usageLimitPerCustomer > 0 ? usageLimitPerCustomer : undefined,
+      includesFreeDelivery: type !== 'free_delivery' && includesFreeDelivery === true ? true : undefined,
+      minOrderValue: pos(minOrderValue),
+      maxDiscount: type === 'percentage' ? pos(maxDiscount) : undefined,
+      usageLimit: pos(usageLimit),
+      usageLimitPerCustomer: pos(usageLimitPerCustomer),
       usedCount: 0,
       startDate: startDate ? new Date(startDate) : null,
       expiryDate: expiryDate ? new Date(expiryDate) : null,
       active: active !== false,
-      description: description || undefined,
+      description: typeof description === 'string' && description.trim() ? description.trim() : undefined,
       createdAt: now,
       updatedAt: now,
     };
 
     const result = await db.collection('promoCodes').insertOne(doc);
-    console.log('✅ Promo code created:', normalizedCode, '| branch:', branchId, '| type:', type);
+    console.log(
+      '✅ Promo code created:', normalizedCode,
+      '| branch:', branchId,
+      '| type:', type,
+      doc.includesFreeDelivery ? '| + free delivery' : ''
+    );
 
     return NextResponse.json(
       { success: true, promoCode: { ...doc, _id: result.insertedId.toString(), branchId } },

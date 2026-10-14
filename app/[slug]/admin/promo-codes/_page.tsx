@@ -25,6 +25,7 @@ interface PromoCode {
   expiryDate?: string | null;
   active: boolean;
   description?: string;
+  includesFreeDelivery?: boolean;
   createdAt: string;
 }
 
@@ -40,6 +41,7 @@ interface FormData {
   expiryDate: string;
   active: boolean;
   description: string;
+  includesFreeDelivery: boolean;
 }
 
 const EMPTY_FORM: FormData = {
@@ -54,6 +56,7 @@ const EMPTY_FORM: FormData = {
   expiryDate: '',
   active: true,
   description: '',
+  includesFreeDelivery: false,
 };
 
 const TYPE_META: Record<PromoType, { label: string; icon: any; color: string }> = {
@@ -129,6 +132,7 @@ export default function AdminPromoCodesPage() {
       expiryDate: promo.expiryDate ? promo.expiryDate.split('T')[0] : '',
       active: promo.active,
       description: promo.description || '',
+      includesFreeDelivery: promo.includesFreeDelivery === true,
     });
     setShowModal(true);
   }
@@ -154,19 +158,23 @@ export default function AdminPromoCodesPage() {
       return;
     }
 
+    // Optional fields are sent as `null` (not undefined) when empty: JSON.stringify
+    // drops undefined keys, and the PUT handler only clears a field it can see in
+    // the body, so `null` is what lets an admin actually remove a limit or date.
     const payload = {
       branchId: branch.id,
       code: formData.code.trim(),
       type: formData.type,
       value: formData.type === 'free_delivery' ? 0 : parseFloat(formData.value),
-      minOrderValue: formData.minOrderValue ? parseFloat(formData.minOrderValue) : undefined,
-      maxDiscount: formData.maxDiscount ? parseFloat(formData.maxDiscount) : undefined,
-      usageLimit: formData.usageLimit ? parseInt(formData.usageLimit, 10) : undefined,
-      usageLimitPerCustomer: formData.usageLimitPerCustomer ? parseInt(formData.usageLimitPerCustomer, 10) : undefined,
-      startDate: formData.startDate || undefined,
-      expiryDate: formData.expiryDate || undefined,
+      includesFreeDelivery: formData.type !== 'free_delivery' && formData.includesFreeDelivery,
+      minOrderValue: formData.minOrderValue ? parseFloat(formData.minOrderValue) : null,
+      maxDiscount: formData.type === 'percentage' && formData.maxDiscount ? parseFloat(formData.maxDiscount) : null,
+      usageLimit: formData.usageLimit ? parseInt(formData.usageLimit, 10) : null,
+      usageLimitPerCustomer: formData.usageLimitPerCustomer ? parseInt(formData.usageLimitPerCustomer, 10) : null,
+      startDate: formData.startDate || null,
+      expiryDate: formData.expiryDate || null,
       active: formData.active,
-      description: formData.description || undefined,
+      description: formData.description.trim(),
     };
 
     try {
@@ -237,10 +245,11 @@ export default function AdminPromoCodesPage() {
 
   function describeValue(promo: PromoCode): string {
     if (promo.type === 'free_delivery') return 'Free delivery';
+    const plus = promo.includesFreeDelivery ? ' + free delivery' : '';
     if (promo.type === 'percentage') {
-      return `${promo.value}% off${promo.maxDiscount ? ` (max R${promo.maxDiscount.toFixed(2)})` : ''}`;
+      return `${promo.value}% off${promo.maxDiscount ? ` (max R${promo.maxDiscount.toFixed(2)})` : ''}${plus}`;
     }
-    return `R${promo.value.toFixed(2)} off`;
+    return `R${promo.value.toFixed(2)} off${plus}`;
   }
 
   if (branchLoading) {
@@ -325,6 +334,12 @@ export default function AdminPromoCodesPage() {
                             <Icon className="w-3 h-3" />
                             {meta.label}
                           </span>
+                          {promo.includesFreeDelivery && (
+                            <span className="ml-1 inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full font-medium text-blue-600 bg-blue-100">
+                              <Truck className="w-3 h-3" />
+                              + Delivery
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-gray-700">
                           {describeValue(promo)}
@@ -410,7 +425,11 @@ export default function AdminPromoCodesPage() {
                         <button
                           key={t}
                           type="button"
-                          onClick={() => setFormData({ ...formData, type: t })}
+                          onClick={() => setFormData({
+                            ...formData,
+                            type: t,
+                            includesFreeDelivery: t === 'free_delivery' ? false : formData.includesFreeDelivery,
+                          })}
                           className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border-2 transition-colors ${
                             isSelected ? 'border-brand-orange bg-brand-orange/5' : 'border-gray-200 hover:border-gray-300'
                           }`}
@@ -455,6 +474,41 @@ export default function AdminPromoCodesPage() {
                           placeholder="Optional cap"
                         />
                       </div>
+                    )}
+                  </div>
+                )}
+
+                {formData.type !== 'free_delivery' && (
+                  <div className="space-y-2">
+                    <label className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        checked={formData.includesFreeDelivery}
+                        onChange={(e) => setFormData({ ...formData, includesFreeDelivery: e.target.checked })}
+                        className="w-4 h-4 text-brand-orange focus:ring-brand-orange border-gray-300 rounded"
+                      />
+                      <span className="text-sm font-medium text-gray-700">Also give free delivery</span>
+                    </label>
+                    {!(formData.type === 'percentage' && formData.value === '100' && formData.includesFreeDelivery) && (
+                      <button
+                        type="button"
+                        onClick={() => setFormData({
+                          ...formData,
+                          type: 'percentage',
+                          value: '100',
+                          maxDiscount: '',
+                          includesFreeDelivery: true,
+                        })}
+                        className="text-xs text-brand-orange hover:underline"
+                      >
+                        Use "Free order" preset (100% off + free delivery)
+                      </button>
+                    )}
+                    {formData.type === 'percentage' && formData.value === '100' && formData.includesFreeDelivery && !formData.maxDiscount && (
+                      <p className="flex items-center gap-1 text-xs text-amber-600">
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        <span>Customers using this code pay R0.00 — their order is confirmed without a card payment.</span>
+                      </p>
                     )}
                   </div>
                 )}
