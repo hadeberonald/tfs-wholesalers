@@ -6,6 +6,24 @@ import { useMemo } from 'react';
 import { Mail, Phone, MapPin } from 'lucide-react';
 import { BRANCH_INFO, DEFAULT_LOGO, SUPPORT_EMAIL, getBranchInfo } from '../lib/branch-info';
 
+type Socials = { facebook?: string; instagram?: string };
+
+// Social links per branch, keyed by the URL slug.
+const BRANCH_SOCIALS: Record<string, Socials> = {
+  vryheid: {
+    facebook: 'https://www.facebook.com/tfswholesalersvryheid',
+    instagram: 'https://www.instagram.com/tfsvryheid/?hl=en',
+  },
+  ladysmith: {
+    facebook: 'https://www.facebook.com/tfsladysmith/',
+    instagram: 'https://www.instagram.com/tfsladysmith/?hl=en',
+  },
+  dundee: {
+    facebook: 'https://facebook.com/tfsdiscountwarehouse/',
+    instagram: 'https://www.instagram.com/tfsdiscountwarehouse/',
+  },
+};
+
 export default function Footer() {
   const pathname = usePathname();
 
@@ -27,6 +45,9 @@ export default function Footer() {
   const branch = getBranchInfo(slugFromUrl) ?? BRANCH_INFO.vryheid;
   const logoSrc = branch?.logo ?? DEFAULT_LOGO;
 
+  // Same fallback as `branch` above: Vryheid when no branch is known yet.
+  const socials = (slugFromUrl && BRANCH_SOCIALS[slugFromUrl]) || BRANCH_SOCIALS.vryheid;
+
   return (
     <footer className="bg-brand-black text-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12">
@@ -44,24 +65,28 @@ export default function Footer() {
               Your trusted wholesale supplier for quality products at competitive prices. Serving businesses and bulk buyers across the region.
             </p>
             <div className="flex items-center space-x-3">
-              <a
-                href="https://www.facebook.com/tfswholesalersvryheid"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="opacity-80 hover:opacity-100 transition-opacity"
-                aria-label="TFS Wholesalers on Facebook"
-              >
-                <img src="/fb.png" alt="Facebook" className="w-8 h-8 object-contain" />
-              </a>
-              <a
-                href="https://www.instagram.com/tfsvryheid/?hl=en"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="opacity-80 hover:opacity-100 transition-opacity"
-                aria-label="TFS Wholesalers on Instagram"
-              >
-                <img src="/ig.png" alt="Instagram" className="w-8 h-8 object-contain" />
-              </a>
+              {socials.facebook && (
+                <a
+                  href={socials.facebook}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="opacity-80 hover:opacity-100 transition-opacity"
+                  aria-label={`${branch.name} on Facebook`}
+                >
+                  <img src="/fb.png" alt="Facebook" className="w-8 h-8 object-contain" />
+                </a>
+              )}
+              {socials.instagram && (
+                <a
+                  href={socials.instagram}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="opacity-80 hover:opacity-100 transition-opacity"
+                  aria-label={`${branch.name} on Instagram`}
+                >
+                  <img src="/ig.png" alt="Instagram" className="w-8 h-8 object-contain" />
+                </a>
+              )}
             </div>
           </div>
 
