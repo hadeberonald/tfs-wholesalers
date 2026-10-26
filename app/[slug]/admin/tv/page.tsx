@@ -19,11 +19,11 @@ import { io, Socket } from 'socket.io-client';
 import RoleGuard from '@/components/RoleGuard';
 
 // ── Tweakables ───────────────────────────────────────────────────────────────
-const POLL_MS             = 15_000;  // refetch interval
-const TICK_MS             = 20_000;  // how often the "waiting for" timers refresh
-const MAX_PER_COLUMN      = 6;       // cards shown per column before "+N more"
-const DELIVERED_WINDOW_MIN = 60;     // how long delivered orders stay on the board
-const BRAND               = '#FF6B35';
+const POLL_MS              = 15_000;  // refetch interval
+const TICK_MS              = 20_000;  // how often the "waiting for" timers refresh
+const MAX_PER_COLUMN       = 6;       // cards shown per column before "+N more"
+const DELIVERED_WINDOW_MIN = 60;      // how long delivered orders stay on the board
+const BRAND                = '#FF6B35';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface Order {
@@ -47,17 +47,20 @@ interface Column {
   key: string;
   title: string;
   statuses: string[];
+  /** Bars, badges and card edge */
   accent: string;
+  /** Darker shade of the accent for text on a light background */
+  ink: string;
   /** Turn the timer amber/red when orders sit here too long */
   escalate?: boolean;
 }
 
 const COLUMNS: Column[] = [
-  { key: 'pick',      title: 'To pick',            statuses: ['pending', 'confirmed'],               accent: '#f59e0b', escalate: true },
-  { key: 'packing',   title: 'Picking & packing',  statuses: ['picking', 'packaging'],               accent: '#38bdf8', escalate: true },
-  { key: 'collect',   title: 'Ready for driver',   statuses: ['collecting', 'ready_for_delivery'],   accent: '#a78bfa' },
-  { key: 'out',       title: 'Out for delivery',   statuses: ['out_for_delivery'],                   accent: BRAND },
-  { key: 'delivered', title: 'Delivered',          statuses: ['delivered'],                          accent: '#34d399' },
+  { key: 'pick',      title: 'To pick',           statuses: ['pending', 'confirmed'],             accent: '#f59e0b', ink: '#b45309', escalate: true },
+  { key: 'packing',   title: 'Picking & packing', statuses: ['picking', 'packaging'],             accent: '#0ea5e9', ink: '#0369a1', escalate: true },
+  { key: 'collect',   title: 'Ready for driver',  statuses: ['collecting', 'ready_for_delivery'], accent: '#8b5cf6', ink: '#6d28d9' },
+  { key: 'out',       title: 'Out for delivery',  statuses: ['out_for_delivery'],                 accent: BRAND,     ink: '#c2410c' },
+  { key: 'delivered', title: 'Delivered',         statuses: ['delivered'],                        accent: '#10b981', ink: '#047857' },
 ];
 
 const STATUS_TAG: Record<string, string> = {
@@ -100,10 +103,10 @@ function Clock() {
   if (!t) return null;
   return (
     <div className="text-right leading-tight">
-      <div className="text-3xl font-bold tabular-nums">
+      <div className="text-3xl font-bold tabular-nums text-gray-900">
         {t.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}
       </div>
-      <div className="text-sm text-slate-400">
+      <div className="text-sm text-gray-500">
         {t.toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' })}
       </div>
     </div>
@@ -115,34 +118,34 @@ function OrderCard({ order, col, now }: { order: Order; col: Column; now: number
   const age    = minutesSince(isDelivered ? doneTime(order) : order.createdAt, now);
   const urgent = !!col.escalate && age >= 30;
   const ageColor =
-    col.escalate && age >= 30 ? 'text-red-400'
-    : col.escalate && age >= 15 ? 'text-amber-300'
-    : 'text-slate-300';
+    col.escalate && age >= 30 ? 'text-red-600'
+    : col.escalate && age >= 15 ? 'text-amber-600'
+    : 'text-gray-500';
 
   const staff =
     order.status === 'picking' || order.status === 'packaging'
       ? order.assignedPickerName
       : order.assignedDriverName;
 
-  const pkgTotal = order.packages?.length ?? 0;
-  const pkgDone  = order.collectedPackages?.length ?? 0;
+  const pkgTotal  = order.packages?.length ?? 0;
+  const pkgDone   = order.collectedPackages?.length ?? 0;
   const itemCount = order.items?.length ?? 0;
 
   return (
     <div
       className={`rounded-xl border px-4 py-3 ${
-        urgent ? 'border-red-500/70 bg-red-950/40' : 'border-slate-700/80 bg-slate-800/70'
+        urgent ? 'border-red-300 bg-red-50' : 'border-gray-200 bg-gray-50'
       }`}
-      style={{ borderLeftColor: col.accent, borderLeftWidth: '0.4rem' }}
+      style={{ borderLeftColor: urgent ? '#ef4444' : col.accent, borderLeftWidth: '0.4rem' }}
     >
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-2xl font-extrabold tracking-tight text-white">{shortNumber(order.orderNumber)}</span>
+        <span className="text-2xl font-extrabold tracking-tight text-gray-900">{shortNumber(order.orderNumber)}</span>
         <span className={`text-xl font-bold tabular-nums ${ageColor}`}>
           {fmtAge(age)}{isDelivered ? ' ago' : ''}
         </span>
       </div>
 
-      <div className="mt-0.5 flex items-center justify-between gap-2 text-sm text-slate-400">
+      <div className="mt-0.5 flex items-center justify-between gap-2 text-sm text-gray-500">
         <span className="truncate">{displayName(order)}</span>
         <span className="shrink-0">{itemCount} item{itemCount === 1 ? '' : 's'}</span>
       </div>
@@ -150,13 +153,13 @@ function OrderCard({ order, col, now }: { order: Order; col: Column; now: number
       <div className="mt-1.5 flex items-center gap-2 text-sm">
         <span
           className="shrink-0 rounded-full px-2 py-0.5 text-xs font-bold"
-          style={{ backgroundColor: col.accent + '33', color: col.accent }}
+          style={{ backgroundColor: col.accent + '26', color: col.ink }}
         >
           {STATUS_TAG[order.status] ?? order.status}
         </span>
-        {staff && <span className="truncate text-slate-300">{staff}</span>}
+        {staff && <span className="truncate font-medium text-gray-700">{staff}</span>}
         {order.status === 'collecting' && pkgTotal > 0 && (
-          <span className="ml-auto shrink-0 tabular-nums text-slate-300">{pkgDone}/{pkgTotal} packages</span>
+          <span className="ml-auto shrink-0 tabular-nums text-gray-600">{pkgDone}/{pkgTotal} packages</span>
         )}
       </div>
     </div>
@@ -172,7 +175,6 @@ function TvDisplay() {
   const [branch, setBranch]             = useState<{ _id: string; name: string } | null>(null);
   const [branchLoaded, setBranchLoaded] = useState(false);
   const [now, setNow]                   = useState(() => Date.now());
-  const [socketUp, setSocketUp]         = useState(false);
   const [error, setError]               = useState<string | null>(null);
   const [synced, setSynced]             = useState(false);
 
@@ -273,11 +275,9 @@ function TvDisplay() {
     });
 
     socket.on('connect', () => {
-      setSocketUp(true);
       socket.emit('join:branch', { branchId });
       fetchOrders(); // catch anything missed while disconnected
     });
-    socket.on('disconnect', () => setSocketUp(false));
 
     socket.on('order:updated', ({ order }: { order: Order }) => {
       if (!order?._id) return;
@@ -322,29 +322,19 @@ function TvDisplay() {
 
   const ready = branchLoaded && synced;
 
-  const pill = error
-    ? { label: 'Offline', cls: 'bg-red-500/20 text-red-300', dot: 'bg-red-400' }
-    : socketUp
-      ? { label: 'Live', cls: 'bg-emerald-500/20 text-emerald-300', dot: 'bg-emerald-400' }
-      : { label: 'Refreshing every 15s', cls: 'bg-amber-500/20 text-amber-300', dot: 'bg-amber-400' };
-
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col bg-slate-950 text-white">
+    <div className="fixed inset-0 z-[100] flex flex-col bg-gray-50 text-gray-900">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-800 px-6 py-3">
+      <div className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
         <div className="flex items-baseline gap-4">
-          <h1 className="text-3xl font-extrabold">{branch?.name ?? 'All branches'}</h1>
-          <span className="text-lg text-slate-400">{activeCount} active {activeCount === 1 ? 'order' : 'orders'}</span>
+          <h1 className="text-3xl font-extrabold text-gray-900">{branch?.name ?? 'All branches'}</h1>
+          <span className="text-lg text-gray-500">{activeCount} active {activeCount === 1 ? 'order' : 'orders'}</span>
         </div>
         <div className="flex items-center gap-6">
-          <span className={`flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold ${pill.cls}`}>
-            <span className={`h-2.5 w-2.5 rounded-full ${pill.dot}`} />
-            {pill.label}
-          </span>
           <Clock />
           <button
             onClick={toggleFullscreen}
-            className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-400 opacity-40 hover:opacity-100"
+            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-500 opacity-40 hover:opacity-100"
             title="Toggle fullscreen (F)"
           >
             Fullscreen
@@ -352,13 +342,14 @@ function TvDisplay() {
         </div>
       </div>
 
+      {/* Only shown when something is wrong (signed out, connection lost) */}
       {error && (
-        <div className="bg-red-600/90 px-6 py-2 text-center text-lg font-semibold">{error}</div>
+        <div className="bg-red-600 px-6 py-2 text-center text-lg font-semibold text-white">{error}</div>
       )}
 
       {/* Board */}
       {!ready ? (
-        <div className="flex flex-1 items-center justify-center text-2xl text-slate-500">
+        <div className="flex flex-1 items-center justify-center text-2xl text-gray-400">
           {error ?? 'Loading orders…'}
         </div>
       ) : (
@@ -367,14 +358,14 @@ function TvDisplay() {
             const visible = list.slice(0, MAX_PER_COLUMN);
             const hidden  = list.length - visible.length;
             return (
-              <section key={col.key} className="flex min-h-0 flex-col rounded-2xl bg-slate-900/60 ring-1 ring-slate-800">
+              <section key={col.key} className="flex min-h-0 flex-col rounded-2xl bg-white shadow-sm">
                 <header
                   className="flex items-center justify-between px-4 py-3"
                   style={{ borderBottom: `0.2rem solid ${col.accent}` }}
                 >
-                  <h2 className="text-xl font-bold">{col.title}</h2>
+                  <h2 className="text-xl font-bold text-gray-900">{col.title}</h2>
                   <span
-                    className="rounded-full px-3 py-0.5 text-xl font-extrabold text-slate-950"
+                    className="rounded-full px-3 py-0.5 text-xl font-extrabold text-white"
                     style={{ backgroundColor: col.accent }}
                   >
                     {list.length}
@@ -383,12 +374,12 @@ function TvDisplay() {
 
                 <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden p-3">
                   {list.length === 0 ? (
-                    <p className="m-auto text-lg text-slate-600">Nothing here</p>
+                    <p className="m-auto text-lg text-gray-400">Nothing here</p>
                   ) : (
                     visible.map(o => <OrderCard key={o._id} order={o} col={col} now={now} />)
                   )}
                   {hidden > 0 && (
-                    <p className="pt-1 text-center text-base font-semibold text-slate-400">+{hidden} more</p>
+                    <p className="pt-1 text-center text-base font-semibold text-gray-500">+{hidden} more</p>
                   )}
                 </div>
               </section>
