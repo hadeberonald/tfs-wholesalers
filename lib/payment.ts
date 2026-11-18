@@ -1,3 +1,8 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// DESTINATION: lib/payment.ts        (REPLACES the existing file)
+// Only change: initializePayment() now accepts `subaccount` and `bearer`.
+// ═══════════════════════════════════════════════════════════════════════════
+
 // Payment Integration Utilities for Paystack and Ozow
 
 interface PaystackConfig {
@@ -55,6 +60,8 @@ export class PaystackService {
     callback_url?: string;
     metadata?: any;
     currency?: string;
+    subaccount?: string;                 // ← added: split payment target
+    bearer?: 'account' | 'subaccount';   // ← added: who pays the Paystack fee
   }) {
     try {
       console.log('💳 Initializing payment with Paystack API...');

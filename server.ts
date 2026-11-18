@@ -1,4 +1,10 @@
-import { createServer } from 'http';
+// ═══════════════════════════════════════════════════════════════════════════
+// DESTINATION: server.ts        (REPLACES the existing file, project root)
+// Changes: (1) `request as httpRequest` added to the http import,
+//          (2) payment reconciler timer added inside httpServer.listen().
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { createServer, request as httpRequest } from 'http';
 import { parse } from 'url';
 import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
@@ -82,6 +88,31 @@ Promise.all([app.prepare(), connectDB(), connectLadysmithDB()])
     console.log(`Dundee analytics mounted at /analytics`);
     console.log(`Ladysmith webhook mounted at /whatsapp-webhook-ladysmith`);
     console.log(`Ladysmith analytics mounted at /analytics-ladysmith`);
+
+    // ── Payment safety net ───────────────────────────────────────────────────
+    // Every 3 minutes ask Paystack about any order that is still unpaid and mark
+    // it paid if the money actually arrived (also re-sends any paid-order
+    // notifications that never went out). Calls the Next route over localhost so
+    // it runs inside the normal Next build. Needs CRON_SECRET in the env.
+    const triggerReconcile = () => {
+      const secret = process.env.CRON_SECRET;
+      if (!secret) return;
+      const req = httpRequest(
+        {
+          host: '127.0.0.1',
+          port,
+          path: '/api/cron/reconcile-payments',
+          method: 'POST',
+          headers: { Authorization: `Bearer ${secret}` },
+        },
+        (res) => { res.resume(); }
+      );
+      req.on('error', (e) => console.error('[Reconcile] trigger failed:', e.message));
+      req.end();
+    };
+    setTimeout(triggerReconcile, 60_000);
+    setInterval(triggerReconcile, 3 * 60 * 1000);
+    console.log('Payment reconciler scheduled (every 3 min)');
   });
 })
 .catch((err) => {

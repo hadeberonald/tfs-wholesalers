@@ -1,3 +1,10 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// DESTINATION: your WEB checkout page (the one with AddressMapPicker, promo
+// code and the Paystack popup). Replace that file's contents with this, keeping
+// the file's existing name/location (likely app/[branch]/checkout/page.tsx).
+// Only change: in handlePaystackPayment, `if (data.charged)` (search "ALREADY PAID").
+// ═══════════════════════════════════════════════════════════════════════════
+
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -259,8 +266,11 @@ export default function CheckoutPage() {
 
       console.log('✅ Payment initialized:', data.reference);
 
-      if (savedCardData?.authorizationCode && data.charged) {
-        console.log('✅ Charged with saved card');
+      // ALREADY PAID: the server charged a saved card, or found that an earlier
+      // attempt on this order was already paid. Either way, just verify + redirect
+      // — never open the popup again for a reference that is already paid.
+      if (data.charged) {
+        console.log('✅ Already charged / paid');
         await verifyAndRedirect(data.reference, orderId);
         return;
       }

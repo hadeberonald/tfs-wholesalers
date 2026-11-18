@@ -1,138 +1,59 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// DESTINATION: app/api/payment/webhook/route.ts    (REPLACES the existing file)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Paystack must call the CANONICAL host (https://www.tfswholesalers.com/...).
+// The bare domain answers 307, and webhook senders generally don't follow it.
+
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import clientPromise from '@/lib/mongodb';
-import { ObjectId } from 'mongodb';
-import { getIO } from '@/lib/socket';
 import {
-  notifyBranchPickers,
-  buildOrderStatusEmail,
-  sendTransactionalEmail,
-} from '@/lib/sendPushNotification';
-import { notifyBranchWeb } from '@/lib/sendWebPush';
+  DB_NAME,
+  markOrderPaid,
+  orderIdFromTransaction,
+  recordPaymentIssue,
+} from '@/lib/order-payment';
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
 
-// ─── Socket emit ──────────────────────────────────────────────────────────────
-function emitOrderUpdate(order: any) {
-  try {
-    const io = getIO();
-    if (!io) return;
-    const branchId = order.branchId?.toString();
-    const serialized = { ...order, _id: order._id?.toString(), id: order._id?.toString() };
-    const payload = { order: serialized, status: serialized.status };
-    if (branchId) io.to(`branch:${branchId}`).emit('order:updated', payload);
-    io.to(`order:${serialized._id}`).emit('order:updated', payload);
-  } catch (err) {
-    console.error('[Webhook] emit error:', err);
-  }
-}
-
-// ─── Handle charge.success ────────────────────────────────────────────────────
 async function handleChargeSuccess(data: any): Promise<void> {
-  const reference = data.reference;
+  const reference = String(data?.reference ?? '');
 
-  const orderId =
-    data.metadata?.orderId ||
-    data.metadata?.custom_fields?.find(
-      (f: any) => f.variable_name === 'order_id'
-    )?.value;
-
-  if (!orderId) {
-    console.error(
-      `[Webhook] charge.success for ${reference} has no orderId in metadata:`,
-      JSON.stringify(data.metadata ?? null)
-    );
-    return;
-  }
-
-  if (!ObjectId.isValid(orderId)) {
-    console.error(`[Webhook] Invalid orderId "${orderId}" for reference ${reference}`);
+  if (data?.status && data.status !== 'success') {
+    console.log(`[Webhook] charge.success with status "${data.status}" for ${reference} — ignoring`);
     return;
   }
 
   const client = await clientPromise;
-  const db = client.db('tfs-wholesalers');
+  const db = client.db(DB_NAME);
 
-  const existing = await db.collection('orders').findOne({ _id: new ObjectId(orderId) });
-  if (!existing) {
-    console.error(`[Webhook] Order ${orderId} not found for reference ${reference}`);
-    return;
-  }
-
-  // Idempotency: skip if already paid (verify route may have run first)
-  if (existing.paymentStatus === 'paid') {
-    console.log(`[Webhook] Order ${orderId} already paid — skipping duplicate`);
-    return;
-  }
-
-  const updated = await db.collection('orders').findOneAndUpdate(
-    { _id: new ObjectId(orderId) },
-    {
-      $set: {
-        paymentStatus: 'paid',
-        status: 'confirmed',
-        paymentDetails: {
-          reference: data.reference,
-          amount: data.amount / 100,
-          paidAt: data.paid_at,
-          channel: data.channel,
-          // NEW — audit trail for split payments. null when the order was
-          // routed to the main account on purpose (e.g. Vryheid).
-          subaccount: data.subaccount?.subaccount_code || null,
-        },
-        updatedAt: new Date(),
-      },
-    },
-    { returnDocument: 'after' }
-  );
-
-  if (!updated) {
-    console.error(`[Webhook] findOneAndUpdate returned null for order ${orderId}`);
-    return;
-  }
-
-  console.log(`✅ [Webhook] Order ${orderId} → paid + confirmed (ref: ${reference})`);
-
-  emitOrderUpdate(updated);
-
-  const branchId = updated.branchId?.toString();
-  const orderNumber = updated.orderNumber || orderId;
-  const customerEmail = updated.customerEmail || updated.customerInfo?.email || null;
-  const customerName = updated.customerName || updated.customerInfo?.name || 'Customer';
-
-  if (branchId) {
-    notifyBranchPickers(branchId, {
-      title: '🛒 New Order',
-      body: `Order ${orderNumber} is paid and ready to pick`,
-      data: { type: 'new_order', orderId, orderNumber },
-    }).catch(() => {});
-
-    notifyBranchWeb(branchId, {
-      title: '🛒 New Order',
-      body: `Order ${orderNumber} is paid and ready to pick`,
-      data: { type: 'new_order', orderId, orderNumber },
-    }).catch(() => {});
-  }
-
-  if (customerEmail) {
-    const emailPayload = buildOrderStatusEmail({
-      orderNumber,
-      customerName,
-      customerEmail,
-      status: 'confirmed',
+  const orderId = orderIdFromTransaction(data);
+  if (!orderId) {
+    console.error(`[Webhook] charge.success for ${reference} cannot be matched to an order`, JSON.stringify(data?.metadata ?? null));
+    await recordPaymentIssue(db, {
+      type: 'unmatched_payment',
+      reference,
+      details: { amount: data?.amount, email: data?.customer?.email, paidAt: data?.paid_at },
     });
-    if (emailPayload) sendTransactionalEmail(emailPayload).catch(() => {});
+    return;
+  }
+
+  const result = await markOrderPaid(db, orderId, data, 'webhook');
+  if (!result.ok) {
+    console.error(`[Webhook] Could not mark ${orderId} paid for ${reference}: ${result.reason}`);
+  } else if (result.alreadyPaid) {
+    console.log(`[Webhook] Order ${orderId} already paid — nothing to do`);
   }
 }
 
-// ─── POST /api/payment/webhook ────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
   if (!PAYSTACK_SECRET) {
     console.error('[Webhook] PAYSTACK_SECRET_KEY is not set');
     return NextResponse.json({ error: 'Server misconfiguration' }, { status: 500 });
   }
 
-  // Read raw body for signature verification — must happen before any parsing
+  // Raw body is required for the signature check.
   const rawBody = await request.text();
 
   const signature = request.headers.get('x-paystack-signature');
@@ -141,11 +62,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Missing signature' }, { status: 401 });
   }
 
-  const expectedHash = crypto
-    .createHmac('sha512', PAYSTACK_SECRET)
-    .update(rawBody)
-    .digest('hex');
-
+  const expectedHash = crypto.createHmac('sha512', PAYSTACK_SECRET).update(rawBody).digest('hex');
   if (expectedHash !== signature) {
     console.warn('[Webhook] Signature mismatch — possible spoofed request');
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
@@ -165,15 +82,16 @@ export async function POST(request: NextRequest) {
       case 'charge.success':
         await handleChargeSuccess(event.data);
         break;
-
       default:
         console.log(`[Webhook] Unhandled event type: ${event.event}`);
     }
   } catch (err) {
-    // Log but return 200 — returning 5xx causes Paystack to retry indefinitely
+    // Processing is idempotent, so a 500 here is safe: Paystack will retry,
+    // which covers transient DB/network failures. Permanent problems (unknown
+    // order, mismatch) don't throw — they're recorded and acknowledged below.
     console.error(`[Webhook] Error processing event ${event.event}:`, err);
+    return NextResponse.json({ error: 'Processing failed' }, { status: 500 });
   }
 
-  // Always return 200 to acknowledge receipt
   return NextResponse.json({ received: true });
 }

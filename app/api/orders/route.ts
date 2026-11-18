@@ -1,3 +1,11 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// DESTINATION: app/api/orders/route.ts        (REPLACES the existing file)
+// Only change: in POST, the picker push + internal receipt email + customer
+// email are skipped for card orders / unpaid orders. They are sent from
+// markOrderPaid() in lib/order-payment.ts once Paystack confirms payment.
+// Search for "sendNow" to find the change.
+// ═══════════════════════════════════════════════════════════════════════════
+
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
@@ -377,41 +385,52 @@ export async function POST(request: NextRequest) {
       '| status:', orderStatus
     );
 
-    notifyBranchPickers(body.branchId, {
-      title: '🛒 New Order',
-      body:  `Order ${orderNumber} is ready to pick — ${enrichedItems.length} item(s)`,
-      data:  { type: 'new_order', orderId, orderNumber },
-    }).catch(() => {});
+    // ── Notifications ────────────────────────────────────────────────────────
+    // Card orders are created UNPAID (status 'payment_pending'). The picker push,
+    // the internal POS receipt email (salesnv@) and the customer confirmation are
+    // sent from markOrderPaid() in lib/order-payment.ts once Paystack confirms
+    // payment — never at creation. Only orders that are not unpaid online orders
+    // (e.g. cash / staff-created) notify here, exactly as before.
+    const isOnlinePayment = ['card', 'eft'].includes(String(body.paymentMethod));
+    const sendNow = !isOnlinePayment && !['payment_pending', 'payment_failed'].includes(orderStatus);
 
-    const isPaid = !['payment_pending', 'payment_failed'].includes(orderStatus);
+    if (sendNow) {
+      notifyBranchPickers(body.branchId, {
+        title: '🛒 New Order',
+        body:  `Order ${orderNumber} is ready to pick — ${enrichedItems.length} item(s)`,
+        data:  { type: 'new_order', orderId, orderNumber },
+      }).catch(() => {});
 
-    if (customerEmail && isPaid) {
-      const customerEmailPayload = buildOrderConfirmationEmail({
+      const isPaid = !['payment_pending', 'payment_failed'].includes(orderStatus);
+
+      if (customerEmail && isPaid) {
+        const customerEmailPayload = buildOrderConfirmationEmail({
+          orderNumber,
+          customerName:      customerName ?? 'Customer',
+          customerEmail,
+          items:             enrichedItems,
+          total:             orderTotal,
+          deliveryFee,
+          deliveryAddress:   deliveryAddress ?? undefined,
+          tillAccountNumber: tillAccountNumber ?? undefined,
+        });
+        sendTransactionalEmail(customerEmailPayload).catch(() => {});
+      }
+
+      const internalReceiptPayload = buildInternalReceiptEmail({
         orderNumber,
-        customerName:      customerName ?? 'Customer',
-        customerEmail,
+        customerName:      customerName  ?? 'Unknown Customer',
+        customerEmail:     customerEmail ?? '(no email provided)',
+        phone:             customerPhone  ?? undefined,
         items:             enrichedItems,
         total:             orderTotal,
         deliveryFee,
         deliveryAddress:   deliveryAddress ?? undefined,
+        branchName,
         tillAccountNumber: tillAccountNumber ?? undefined,
       });
-      sendTransactionalEmail(customerEmailPayload).catch(() => {});
+      sendTransactionalEmail(internalReceiptPayload).catch(() => {});
     }
-
-    const internalReceiptPayload = buildInternalReceiptEmail({
-      orderNumber,
-      customerName:      customerName  ?? 'Unknown Customer',
-      customerEmail:     customerEmail ?? '(no email provided)',
-      phone:             customerPhone  ?? undefined,
-      items:             enrichedItems,
-      total:             orderTotal,
-      deliveryFee,
-      deliveryAddress:   deliveryAddress ?? undefined,
-      branchName,
-      tillAccountNumber: tillAccountNumber ?? undefined,
-    });
-    sendTransactionalEmail(internalReceiptPayload).catch(() => {});
 
     return NextResponse.json({ success: true, orderId, orderNumber }, { status: 201 });
   } catch (error) {

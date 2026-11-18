@@ -1,119 +1,96 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// DESTINATION: app/api/payment/verify/route.ts     (REPLACES the existing file)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Body: { reference }  — verify one Paystack reference (existing clients), or
+//       { orderId }    — check every reference ever started for that order
+//                        (for "Check again" buttons / lost-reference recovery).
+
 import { NextRequest, NextResponse } from 'next/server';
 import { paystackService } from '@/lib/payment';
 import { FREE_ORDER_REF_PREFIX } from '@/lib/promo-engine';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
-import { getIO } from '@/lib/socket';
 import {
-  notifyBranchPickers,
-  buildOrderStatusEmail,
-  sendTransactionalEmail,
-} from '@/lib/sendPushNotification';
-import { notifyUserWeb, notifyBranchWeb } from '@/lib/sendWebPush';
+  DB_NAME,
+  markOrderPaid,
+  orderIdFromTransaction,
+  orderReferences,
+  settleOrder,
+  type MarkPaidResult,
+} from '@/lib/order-payment';
 
-// ─── Paystack statuses that mean "not settled yet — try again" ────────────────
-// These are transient states where the transaction is in-flight.
-// "ongoing" is the most common race condition hit when Paystack fires
-// the callback before their backend fully settles.
-const RETRYABLE_STATUSES = new Set([
-  'ongoing',
-  'pending',
-  'processing',
-  'queued',
-]);
+// "abandoned" is NOT final: Paystack uses it for any transaction the customer
+// hasn't completed *yet* (popup closed early, OTP pending, app switched...).
+const RETRYABLE_STATUSES = new Set(['ongoing', 'pending', 'processing', 'queued', 'abandoned']);
+const TERMINAL_FAILURE_STATUSES = new Set(['failed', 'reversed', 'cancelled', 'timeout']);
 
-// These are terminal failures — no point retrying
-const TERMINAL_FAILURE_STATUSES = new Set([
-  'failed',
-  'reversed',
-  'abandoned',
-  'cancelled',
-  'timeout',
-]);
-
-// ─── Socket emit ──────────────────────────────────────────────────────────────
-function emitOrderUpdate(order: any) {
-  try {
-    const io = getIO();
-    if (!io) {
-      console.warn('[Socket] getIO() returned null in verify route');
-      return;
-    }
-    const branchId = order.branchId?.toString();
-    const serialized = { ...order, _id: order._id?.toString(), id: order._id?.toString() };
-    const payload = { order: serialized, status: serialized.status };
-
-    if (branchId) io.to(`branch:${branchId}`).emit('order:updated', payload);
-    io.to(`order:${serialized._id}`).emit('order:updated', payload);
-
-    console.log(`[Socket] verify → branch:${branchId} + order:${serialized._id}`);
-  } catch (err) {
-    console.error('[Socket] verify emit error:', err);
-  }
-}
-
-// ─── Picker notifications on payment confirmation ─────────────────────────────
-async function triggerPaymentConfirmedNotifications(order: any): Promise<void> {
-  const orderId = order._id?.toString();
-  const orderNumber = order.orderNumber || orderId;
-  const branchId = order.branchId?.toString();
-  const customerEmail = order.customerEmail || order.customerInfo?.email || null;
-  const customerName = order.customerName || order.customerInfo?.name || 'Customer';
-
-  if (branchId) {
-    notifyBranchPickers(branchId, {
-      title: '🛒 New Order',
-      body: `Order ${orderNumber} is paid and ready to pick`,
-      data: { type: 'new_order', orderId, orderNumber },
-    }).catch(() => {});
-
-    notifyBranchWeb(branchId, {
-      title: '🛒 New Order',
-      body: `Order ${orderNumber} is paid and ready to pick`,
-      data: { type: 'new_order', orderId, orderNumber },
-    }).catch(() => {});
-  }
-
-  if (customerEmail) {
-    const emailPayload = buildOrderStatusEmail({
-      orderNumber,
-      customerName,
-      customerEmail,
-      status: 'confirmed',
-    });
-    if (emailPayload) sendTransactionalEmail(emailPayload).catch(() => {});
-  }
-}
-
-// ─── Helper: resolve branch slug from branchId ────────────────────────────────
 async function getBranchSlug(db: any, branchId: any): Promise<string | null> {
   if (!branchId) return null;
   try {
-    const branch = await db.collection('branches').findOne(
-      { _id: new ObjectId(branchId.toString()) },
-      { projection: { slug: 1 } }
-    );
+    const branch = await db
+      .collection('branches')
+      .findOne({ _id: new ObjectId(branchId.toString()) }, { projection: { slug: 1 } });
     return branch?.slug || null;
   } catch {
     return null;
   }
 }
 
-// ─── POST /api/payment/verify ─────────────────────────────────────────────────
-// ─── Free-order verification (promo took the total to R0.00) ──────────────────
-// /api/payment/initialize stamps these orders with a FREE- reference. There is no
-// Paystack transaction to look up, so instead we check the order itself: it must
-// carry that exact reference, have a stored total of 0 and a promo attached.
-async function verifyFreeOrder(reference: string) {
-  const client = await clientPromise;
-  const db = client.db('tfs-wholesalers');
+function pendingResponse(status: string, message?: string) {
+  return NextResponse.json(
+    {
+      verified: false,
+      pending: true,
+      retryable: true,
+      status,
+      error: message || `Payment is not confirmed yet (status: "${status}")`,
+    },
+    { status: 202 }
+  );
+}
 
+async function successResponse(db: any, order: any, reference: string, amountRand: number) {
+  const branchSlug = await getBranchSlug(db, order.branchId);
+  return NextResponse.json({
+    verified: true,
+    orderId: order._id.toString(),
+    branchSlug,
+    amount: amountRand,
+    reference,
+  });
+}
+
+function failureFromResult(result: Extract<MarkPaidResult, { ok: false }>, reference: string) {
+  switch (result.reason) {
+    case 'not_found':
+      return NextResponse.json({ verified: false, retryable: false, error: 'Order not found' }, { status: 404 });
+    case 'amount_mismatch':
+      return NextResponse.json(
+        {
+          verified: false,
+          retryable: false,
+          error: `Payment amount does not match your order. Please contact support with reference: ${reference}`,
+        },
+        { status: 409 }
+      );
+    default:
+      return NextResponse.json(
+        {
+          verified: false,
+          retryable: false,
+          error: `Payment could not be matched to your order. Please contact support with reference: ${reference}`,
+        },
+        { status: 422 }
+      );
+  }
+}
+
+// ─── Free orders (promo took the total to R0.00) ──────────────────────────────
+async function verifyFreeOrder(db: any, reference: string) {
   const order = await db.collection('orders').findOne({ paymentReference: reference });
   if (!order) {
-    return NextResponse.json(
-      { verified: false, retryable: false, error: 'Order not found' },
-      { status: 404 }
-    );
+    return NextResponse.json({ verified: false, retryable: false, error: 'Order not found' }, { status: 404 });
   }
   if (Number(order.total) !== 0 || !order.promoCode?.id) {
     return NextResponse.json(
@@ -122,220 +99,151 @@ async function verifyFreeOrder(reference: string) {
     );
   }
 
-  const orderId = order._id.toString();
-
-  if (order.paymentStatus !== 'paid') {
-    // Conditional update so concurrent verify calls only fire notifications once.
-    const updated = await db.collection('orders').findOneAndUpdate(
-      { _id: order._id, paymentStatus: { $ne: 'paid' } },
-      {
-        $set: {
-          paymentStatus: 'paid',
-          status: 'confirmed',
-          paymentDetails: {
-            reference,
-            amount: 0,
-            paidAt: new Date().toISOString(),
-            channel: 'promo',
-            subaccount: null,
-          },
-          updatedAt: new Date(),
-        },
-      },
-      { returnDocument: 'after' }
-    );
-
-    if (updated) {
-      console.log(`✅ [Verify] Free order ${orderId} → paid + confirmed (promo ${order.promoCode.code})`);
-      emitOrderUpdate(updated);
-      await triggerPaymentConfirmedNotifications(updated);
-    }
-  }
-
-  const branchSlug = await getBranchSlug(db, order.branchId);
-  return NextResponse.json({ verified: true, orderId, branchSlug, amount: 0, reference });
+  const result = await markOrderPaid(
+    db,
+    order._id.toString(),
+    {
+      reference,
+      amount: 0,
+      currency: 'ZAR',
+      paid_at: new Date().toISOString(),
+      channel: 'promo',
+      subaccount: null,
+    },
+    'verify-free'
+  );
+  if (!result.ok) return failureFromResult(result, reference);
+  return successResponse(db, result.order, reference, 0);
 }
 
+// ─── Verify by orderId (all references) ───────────────────────────────────────
+async function verifyByOrderId(db: any, orderId: string) {
+  if (!ObjectId.isValid(orderId)) {
+    return NextResponse.json({ verified: false, retryable: false, error: 'Invalid order ID' }, { status: 400 });
+  }
+  const order = await db.collection('orders').findOne({ _id: new ObjectId(orderId) });
+  if (!order) {
+    return NextResponse.json({ verified: false, retryable: false, error: 'Order not found' }, { status: 404 });
+  }
+  if (order.paymentStatus === 'paid') {
+    return successResponse(
+      db,
+      order,
+      order.paymentReference,
+      Number(order.paymentDetails?.amount ?? order.total)
+    );
+  }
+  if (orderReferences(order).length === 0) {
+    return NextResponse.json(
+      { verified: false, retryable: false, error: 'No payment has been started for this order' },
+      { status: 400 }
+    );
+  }
+
+  let settled;
+  try {
+    settled = await settleOrder(db, order, 'verify-by-order');
+  } catch (err: any) {
+    console.error(`[Verify] Network error settling order ${orderId}:`, err?.message);
+    return pendingResponse('network', 'Could not reach payment provider — retrying…');
+  }
+
+  if (settled.result?.ok) {
+    return successResponse(db, settled.result.order, settled.result.order.paymentReference, Number(settled.result.order.paymentDetails?.amount ?? 0));
+  }
+  if (settled.result && !settled.result.ok) {
+    return failureFromResult(settled.result as Extract<MarkPaidResult, { ok: false }>, order.paymentReference);
+  }
+  if (TERMINAL_FAILURE_STATUSES.has(settled.lastStatus)) {
+    return NextResponse.json(
+      { verified: false, retryable: false, status: settled.lastStatus, error: `Payment ${settled.lastStatus}. Please try again or use a different card.` },
+      { status: 400 }
+    );
+  }
+  return pendingResponse(settled.lastStatus || 'unknown');
+}
+
+// ─── POST /api/payment/verify ─────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
   try {
-    const { reference } = await request.json();
+    const { reference, orderId } = await request.json();
+    const client = await clientPromise;
+    const db = client.db(DB_NAME);
+
+    if (!reference && orderId) return await verifyByOrderId(db, String(orderId));
 
     if (!reference) {
       return NextResponse.json({ error: 'Payment reference is required' }, { status: 400 });
     }
 
-    // R0.00 promo orders never reach Paystack
     if (typeof reference === 'string' && reference.startsWith(FREE_ORDER_REF_PREFIX)) {
-      return await verifyFreeOrder(reference);
+      return await verifyFreeOrder(db, reference);
     }
 
-    // ── Step 1: Ask Paystack for the transaction status ───────────────────────
+    // ── Step 1: ask Paystack ─────────────────────────────────────────────────
     let paystackResult: any;
     try {
       paystackResult = await paystackService.verifyPayment(reference);
     } catch (fetchErr: any) {
-      // Network error hitting Paystack — tell client to retry
       console.error(`[Verify] Network error calling Paystack for ${reference}:`, fetchErr.message);
-      return NextResponse.json(
-        {
-          verified: false,
-          pending: true,
-          retryable: true,
-          error: 'Could not reach payment provider — retrying…',
-        },
-        { status: 202 }
-      );
+      return pendingResponse('network', 'Could not reach payment provider — retrying…');
     }
 
     const paystackStatus: string = paystackResult?.data?.status ?? '';
-
     console.log(`[Verify] Paystack status "${paystackStatus}" for ${reference}`);
 
-    // ── Step 2: Handle transient / not-yet-settled states ────────────────────
-    // Return HTTP 202 so the client knows to keep polling.
+    // ── Step 2: not settled yet (includes "abandoned") → client keeps polling ─
     if (RETRYABLE_STATUSES.has(paystackStatus)) {
-      console.log(`[Verify] Status "${paystackStatus}" is transient — instructing client to retry`);
-      return NextResponse.json(
-        {
-          verified: false,
-          pending: true,
-          retryable: true,
-          error: `Payment status is "${paystackStatus}" — waiting for settlement`,
-        },
-        { status: 202 }
-      );
+      return pendingResponse(paystackStatus);
     }
 
-    // ── Step 3: Handle terminal Paystack failures ─────────────────────────────
+    // ── Step 3: genuine terminal failures ────────────────────────────────────
     if (TERMINAL_FAILURE_STATUSES.has(paystackStatus)) {
       console.warn(`[Verify] Terminal failure "${paystackStatus}" for ${reference}`);
       return NextResponse.json(
         {
           verified: false,
           retryable: false,
+          status: paystackStatus,
           error: `Payment ${paystackStatus}. Please try again or use a different card.`,
         },
         { status: 400 }
       );
     }
 
-    // ── Step 4: Validate Paystack reports success ─────────────────────────────
-    if (!paystackResult.status || paystackStatus !== 'success') {
-      console.warn(`[Verify] Non-success status "${paystackStatus}" for ${reference}:`, paystackResult.message);
+    // ── Step 4: anything else that isn't success ─────────────────────────────
+    if (!paystackResult?.status || paystackStatus !== 'success') {
+      console.warn(`[Verify] Non-success status "${paystackStatus}" for ${reference}:`, paystackResult?.message);
       return NextResponse.json(
         {
           verified: false,
           retryable: false,
-          error: paystackResult.message || `Payment was not successful (status: ${paystackStatus})`,
+          error: paystackResult?.message || `Payment was not successful (status: ${paystackStatus})`,
         },
         { status: 400 }
       );
     }
 
-    // ── Step 5: Payment is confirmed by Paystack — process in our DB ─────────
-    const { data } = paystackResult;
+    // ── Step 5: success → one atomic, amount-checked transition ──────────────
+    const data = paystackResult.data;
+    const resolvedOrderId = orderIdFromTransaction(data);
 
-    const orderId =
-      data.metadata?.orderId ||
-      data.metadata?.custom_fields?.find(
-        (field: any) => field.variable_name === 'order_id'
-      )?.value;
-
-    if (!orderId) {
-      console.error(
-        `[Verify] CRITICAL: Payment ${reference} verified on Paystack but no orderId in metadata.`,
-        'Metadata received:', JSON.stringify(data.metadata ?? null)
-      );
+    if (!resolvedOrderId) {
+      console.error(`[Verify] CRITICAL: ${reference} succeeded on Paystack but has no orderId.`, JSON.stringify(data.metadata ?? null));
       return NextResponse.json(
         {
           verified: false,
           retryable: false,
-          error:
-            'Payment received but could not be matched to your order. ' +
-            'Please contact support with reference: ' + reference,
+          error: `Payment received but could not be matched to your order. Please contact support with reference: ${reference}`,
         },
         { status: 422 }
       );
     }
 
-    if (!ObjectId.isValid(orderId)) {
-      console.error(`[Verify] Invalid orderId format in metadata: "${orderId}" for reference ${reference}`);
-      return NextResponse.json(
-        { verified: false, retryable: false, error: 'Invalid order reference. Please contact support.' },
-        { status: 422 }
-      );
-    }
+    const result = await markOrderPaid(db, resolvedOrderId, data, 'verify');
+    if (!result.ok) return failureFromResult(result, reference);
 
-    const client = await clientPromise;
-    const db = client.db('tfs-wholesalers');
-
-    const existing = await db.collection('orders').findOne({ _id: new ObjectId(orderId) });
-
-    if (!existing) {
-      console.error(`[Verify] Order ${orderId} not found in DB for reference ${reference}`);
-      return NextResponse.json(
-        { verified: false, retryable: false, error: 'Order not found' },
-        { status: 404 }
-      );
-    }
-
-    // ── Step 6: Idempotency — already paid, just return success ──────────────
-    if (existing.paymentStatus === 'paid') {
-      console.log(`[Verify] Order ${orderId} already marked paid — skipping duplicate update`);
-      const branchSlug = await getBranchSlug(db, existing.branchId);
-      return NextResponse.json({
-        verified: true,
-        orderId,
-        branchSlug,
-        amount: data.amount / 100,
-        reference: data.reference,
-      });
-    }
-
-    // ── Step 7: Mark order paid and confirmed ─────────────────────────────────
-    const updated = await db.collection('orders').findOneAndUpdate(
-      { _id: new ObjectId(orderId) },
-      {
-        $set: {
-          paymentStatus: 'paid',
-          status: 'confirmed',
-          paymentDetails: {
-            reference: data.reference,
-            amount: data.amount / 100,
-            paidAt: data.paid_at,
-            channel: data.channel,
-            // NEW — audit trail for split payments. null when the order was
-            // routed to the main account on purpose (e.g. Vryheid).
-            subaccount: data.subaccount?.subaccount_code || null,
-          },
-          updatedAt: new Date(),
-        },
-      },
-      { returnDocument: 'after' }
-    );
-
-    if (!updated) {
-      console.error(`[Verify] findOneAndUpdate returned null for order ${orderId}`);
-      return NextResponse.json(
-        { verified: false, retryable: false, error: 'Failed to update order — please contact support' },
-        { status: 500 }
-      );
-    }
-
-    console.log(`✅ [Verify] Order ${orderId} → paid + confirmed (ref: ${reference})`);
-
-    emitOrderUpdate(updated);
-    await triggerPaymentConfirmedNotifications(updated);
-
-    const branchSlug = await getBranchSlug(db, updated.branchId);
-
-    return NextResponse.json({
-      verified: true,
-      orderId,
-      branchSlug,
-      amount: data.amount / 100,
-      reference: data.reference,
-    });
+    return successResponse(db, result.order, data.reference, data.amount / 100);
   } catch (error: any) {
     console.error('[Verify] Unexpected error:', error);
     return NextResponse.json(
